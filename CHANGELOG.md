@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.1.0-rc.1] - 2026-09-08
+
+- Primeira candidata funcional, com pacotes Linux GNU e Windows MSVC validados
+  após extração, README de distribuição e avisos das dependências incluídos.
 - Suíte diferencial independente Sider/Redis, integração com `redis-cli`,
   testes de reutilização de conexões e gates locais em Rust com recibos verificados.
 - Alvo isolado de fuzz com AddressSanitizer, corpus versionado e execução mínima
@@ -20,5 +24,6 @@
 - Validação e publicação manuais até a 1.0 inclusive; CI e publicação automática
   adiadas para depois da 1.0.
 
-Nenhuma versão funcional foi publicada. As notas por versão serão preparadas
-quando o respectivo milestone cumprir seus critérios.
+As [notas da candidata](releases/notes/v0.1.0-rc.1.md) descrevem o subconjunto e suas
+limitações. Esta entrada prepara a versão; a publicação depende da aprovação
+dos gates no SHA exato do merge e da conferência dos artefatos.
