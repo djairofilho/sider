@@ -1,20 +1,20 @@
 # Compatibilidade com Redis
 
-Nenhum comando Redis está implementado no bootstrap do Sider. O binário valida
-configuração, mas ainda não oferece serviço TCP. O codec RESP2 isolado está
-implementado; ele não executa comandos. Esta matriz registra o alvo da
-versão 0.1 e será atualizada conforme os testes produzirem evidências.
+Os cinco comandos da 0.1 estão implementados no núcleo síncrono do Sider, com
+parser e armazenamento testados pelas fixtures da referência. O binário valida
+configuração, mas ainda não oferece serviço TCP. Esta matriz distingue testes
+do núcleo de compatibilidade demonstrada com clientes de rede.
 
 ## Matriz da versão 0.1
 
 | Forma do comando | Comportamento alvo | Implementação | Verificação contra Redis |
 | --- | --- | --- | --- |
-| `PING` | Responder com simple string `PONG` | Não implementada | Pendente |
-| `PING mensagem` | Devolver a mensagem como bulk string | Não implementada | Pendente |
-| `ECHO mensagem` | Devolver exatamente os bytes da mensagem | Não implementada | Pendente |
-| `GET chave` | Devolver bulk string ou bulk string nula se ausente | Não implementada | Pendente |
-| `SET chave valor` | Criar ou substituir; responder com simple string `OK` | Não implementada | Pendente |
-| `DEL chave [chave ...]` | Contar apenas as chaves efetivamente removidas | Não implementada | Pendente |
+| `PING` | Responder com simple string `PONG` | Núcleo síncrono | Fixtures; TCP pendente |
+| `PING mensagem` | Devolver a mensagem como bulk string | Núcleo síncrono | Fixtures; TCP pendente |
+| `ECHO mensagem` | Devolver exatamente os bytes da mensagem | Núcleo síncrono | Fixtures; TCP pendente |
+| `GET chave` | Devolver bulk string ou bulk string nula se ausente | Núcleo síncrono | Fixtures; TCP pendente |
+| `SET chave valor` | Criar ou substituir; responder com simple string `OK` | Núcleo síncrono | Fixtures; TCP pendente |
+| `DEL chave [chave ...]` | Contar apenas as chaves efetivamente removidas | Núcleo síncrono | Fixtures; TCP pendente |
 
 A referência inicial é Redis e `redis-cli` **8.10.1**, na plataforma Linux amd64.
 A tag e o digest da imagem estão fixados em [releases/plan.json](../releases/plan.json):
@@ -28,10 +28,10 @@ sequenciais, oito pipelines e os cinco comandos via `redis-cli`. O teste confere
 digest, plataforma e versões do servidor e da CLI antes da execução. Consulte
 os [comandos de reprodução](testing.md).
 
-Isso comprova as fixtures contra Redis, não o suporte dos comandos do Sider.
-O produto possui codec isolado, mas não TCP ou armazenamento. Não há comparação
-diferencial Sider versus Redis executada
-neste estágio. `R01-05` comprovará o subconjunto via suíte diferencial e CLI.
+Em `R01-03`, `tests/commands.rs` executa essas mesmas fixtures no núcleo Sider e
+confere os bytes esperados, sem sockets. As duas etapas comprovam equivalência
+nos casos literais, mas não substituem a comparação diferencial de servidores
+ou o teste do Sider via CLI. `R01-05` comprovará o subconjunto por esses caminhos.
 
 ## Subconjunto alvo
 
@@ -68,6 +68,18 @@ Os limites de entrada e os prazos propostos estão no
 próprios do Sider e não uma reprodução dos valores padrão do Redis.
 
 ## Evidência necessária
+
+Para repetir a validação do núcleo sem rede:
+
+```sh
+cargo test --locked --lib command::
+cargo test --locked --lib storage::
+cargo test --locked --test commands
+```
+
+`tests/commands.rs` também confere que opções de `SET`, comandos desconhecidos e
+formatos inválidos não chegam ao armazenamento. O parser move os `Bytes` para o
+comando; `GET` compartilha conteúdo imutável, sem uma cópia proporcional ao valor.
 
 Para declarar uma forma de comando verificada, registre o teste reproduzível e
 a versão de referência. A suíte diferencial deverá comparar respostas brutas e

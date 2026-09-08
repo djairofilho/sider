@@ -8,7 +8,8 @@ Este plano detalha a versão 0.1. O [ROADMAP](ROADMAP.md) e seu
 com tarefas, dependências e critérios. O [guia de releases](docs/releases.md)
 descreve candidatas e publicação. O bootstrap já contém pacote Rust, configuração de
 endereço e binário com testes. A referência Redis e o codec RESP2 isolado estão
-implementados; comandos e servidor TCP ainda não. O estado atual está no [README](README.md).
+implementados, assim como parser e armazenamento síncrono dos cinco comandos.
+Worker e servidor TCP ainda não. O estado atual está no [README](README.md).
 
 CI e publicação automática foram adiadas para depois da 1.0. Até a 1.0 inclusive,
 as etapas avançam com testes locais e publicação manual, mantendo os critérios
@@ -466,12 +467,12 @@ proteger também a destruição da árvore de frames.
 
 ### 3. Comandos e semântica do mapa
 
-- [ ] Implementar parsing dos cinco comandos e classificação de erros.
-- [ ] Implementar `Store`, com operação síncrona e resposta tipada.
-- [ ] Testar caixa do nome do comando, aridade e rejeição das opções de `SET`.
-- [ ] Testar sobrescrita, ausentes, chave vazia, valor vazio e bytes não UTF-8.
-- [ ] Testar `DEL a a inexistente`: contar apenas uma remoção quando `a` existir.
-- [ ] Testar que comandos rejeitados não alteram o estado.
+- [x] Implementar parsing dos cinco comandos e classificação de erros.
+- [x] Implementar `Store`, com operação síncrona e resposta tipada.
+- [x] Testar caixa do nome do comando, aridade e rejeição das opções de `SET`.
+- [x] Testar sobrescrita, ausentes, chave vazia, valor vazio e bytes não UTF-8.
+- [x] Testar `DEL a a inexistente`: contar apenas uma remoção quando `a` existir.
+- [x] Testar que comandos rejeitados não alteram o estado.
 
 Saída: semântica completa da 0.1 testada sem sockets ou tarefas assíncronas.
 
@@ -631,6 +632,7 @@ o bootstrap não será publicado como versão funcional.
 A fundação executável, os testes de configuração e as fixtures de referência
 Redis/CLI estão implementados. A execução de `R01-01` está documentada no
 [guia de testes](docs/testing.md). O codec isolado de `R01-02` também está
-implementado. O próximo trabalho é `R01-03`, parser e armazenamento síncrono.
+implementado, assim como parser e armazenamento síncrono de `R01-03`.
+O próximo trabalho é `R01-04`, worker e TCP.
 O roadmap agrupa worker e TCP em `R01-04` e diferenciais
 e fuzz em `R01-05`, preservando os checkpoints internos deste plano.

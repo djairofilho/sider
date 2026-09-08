@@ -7,6 +7,7 @@ para os comandos deste documento. A CI permanece desligada até a 1.0 inclusive.
 
 - [Ciclo local](#ciclo-local)
 - [Codec isolado](#codec-isolado)
+- [Comandos sem rede](#comandos-sem-rede)
 - [Referência Redis descartável](#referência-redis-descartável)
 - [O que as fixtures cobrem](#o-que-as-fixtures-cobrem)
 - [Execução registrada](#execução-registrada)
@@ -41,6 +42,19 @@ limites e entradas inválidas. Quatro propriedades executam 512 casos cada,
 incluindo árvores válidas e bytes arbitrários. O contador de trabalho dos testes
 unitários confere crescimento linear ao fragmentar cabeçalhos e arrays.
 Consulte os [contratos do codec](resp.md).
+
+## Comandos sem rede
+
+```sh
+cargo test --locked --lib command::
+cargo test --locked --lib storage::
+cargo test --locked --test commands
+```
+
+R01-03 reproduz no núcleo Sider os oito casos e as 48 trocas de comandos das
+fixtures Redis. Cada caso é repetido para conferir seu estado final. Os testes
+também verificam aridade, classificação de erros, opções de `SET` recusadas sem
+efeito e compartilhamento imutável dos payloads. Não há sockets ou runtime.
 
 ## Referência Redis descartável
 
@@ -119,16 +133,27 @@ Os testes locais também incluem um processo filho sem Docker no `PATH` para
 comprovar que infraestrutura ausente resulta em falha explícita. Esse ambiente
 é configurado somente no processo filho, sem alterar o ambiente global dos testes.
 
+Na validação de R01-03, na mesma data, os 89 testes locais e um doctest passaram
+em Windows x86_64 MSVC e Linux x86_64 GNU, com Rust 1.97.1 e o lockfile versionado.
+No Linux, compilação e execução ocorreram em um container Ubuntu 24.04, com os
+fontes montados somente para leitura e cache de build separado do Windows.
+`cargo fmt --check`, `cargo check --locked --all-targets`,
+`cargo clippy --locked --all-targets -- -D warnings`,
+`cargo doc --locked --no-deps` e `cargo build --locked --release` também passaram
+nos dois ambientes. O teste externo, ignorado no ciclo padrão, foi executado
+separadamente no Windows contra Redis no Docker e passou novamente.
+
 ## Limites desta evidência
 
-R01-01 comprova a referência e suas fixtures. O Sider possui um codec isolado,
-mas ainda não implementa comandos ou serviço TCP. Esses testes não são uma suíte diferencial
-Sider versus Redis. A comparação com o produto será adicionada em R01-05.
+R01-01 comprova a referência e suas fixtures. R01-03 reproduz essas fixtures no
+núcleo síncrono Sider. Ainda não há serviço TCP nem comparação diferencial entre
+servidores. Esse caminho será adicionado em R01-05, depois da rede em R01-04.
 
 Opções de `SET`, comando desconhecido, requisições fora do subconjunto e limites
 próprios do Sider não entram como igualdade implícita com Redis. As diferenças
 intencionais estão na [matriz de compatibilidade](compatibility.md).
 
 Redis rodando em Linux dentro do Docker não comprova que o binário Sider foi
-compilado e testado nativamente em Linux. Esse gate exige execução própria em
-Ubuntu 24.04 antes da publicação, além da execução Windows.
+compilado e testado nativamente em Linux. A execução nativa de R01-03 descrita
+acima é uma verificação separada. Ela ainda não valida pacotes extraídos ou TCP
+nem substitui os gates no SHA exato de uma futura release.
