@@ -22,10 +22,14 @@ A tag e o digest da imagem estão fixados em [releases/plan.json](../releases/pl
 redis:8.10.1@sha256:76961cd2a0f40ef6fdd334b6b1b3a76a2bad1848d89f3030ca30a7521d4a9493
 ```
 
-Fixar essa entrada não constitui teste de compatibilidade. Não há comparação
-diferencial executada nem suporte verificado com `redis-cli` neste estágio.
-`R01-01` prepara fixtures e infraestrutura de referência; `R01-05` comprovará
-o subconjunto via suíte diferencial e CLI.
+Em `R01-01`, a referência passou pelas fixtures literais: oito casos, 48 trocas
+sequenciais, oito pipelines e os cinco comandos via `redis-cli`. O teste confere
+digest, plataforma e versões do servidor e da CLI antes da execução. Consulte
+os [comandos de reprodução](testing.md).
+
+Isso comprova as fixtures contra Redis, não o suporte do Sider: o produto ainda
+não tem codec ou TCP. Não há comparação diferencial Sider versus Redis executada
+neste estágio. `R01-05` comprovará o subconjunto via suíte diferencial e CLI.
 
 ## Subconjunto alvo
 
