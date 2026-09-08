@@ -4,8 +4,8 @@ Sider é um projeto de servidor de banco de dados em memória, escrito em Rust.
 O objetivo da versão 0.1 é oferecer um subconjunto explícito de compatibilidade
 com Redis pelo protocolo RESP2. O nome é Redis ao contrário.
 
-O projeto está na fundação: pacote Rust com biblioteca, binário, configuração
-validada e testes locais. O binário ainda não abre uma conexão de
+O projeto tem pacote Rust com biblioteca, binário, configuração validada,
+codec RESP2 isolado e testes locais. O binário ainda não abre uma conexão de
 escuta TCP e nenhum comando Redis está implementado.
 
 As entregas até a 1.0 estão organizadas no [ROADMAP](ROADMAP.md), com 11 milestones,
@@ -76,10 +76,10 @@ build de distribuição quando suas interfaces ou configuração forem afetadas.
 O [guia de contribuição](CONTRIBUTING.md#verificações-locais) lista os comandos.
 Não é necessário aguardar CI para integrar um PR. Registre os testes locais no PR.
 
-Os testes atuais cobrem a fundação e as fixtures da referência Redis; ainda não
+Os testes atuais cobrem a fundação, o codec RESP2 e as fixtures Redis; ainda não
 demonstram compatibilidade do Sider. O [guia de testes](docs/testing.md) explica a
-verificação externa opt-in, escrita em Rust. Os testes do codec RESP2, TCP,
-comparação Sider versus Redis e fuzzing serão adicionados nas suas etapas.
+verificação externa opt-in, escrita em Rust. Testes de TCP, comparação Sider
+versus Redis e fuzzing serão adicionados nas suas etapas.
 Antes de cada release, os gates cumulativos continuam obrigatórios,
 com execução manual e evidências nas plataformas previstas.
 
@@ -90,9 +90,11 @@ com execução manual e evidências nas plataformas previstas.
 | `src/lib.rs` | Interface da biblioteca |
 | `src/main.rs` | Entrada do binário e tratamento dos argumentos iniciais |
 | `src/config.rs` | Configuração inicial e validação do endereço |
+| `src/resp/` | Frames, limites, encoder atômico e decoder incremental |
 | `src/error.rs` | Erros tipados da configuração |
 | `tests/cli.rs` | Testes de integração do binário |
 | `tests/reference.rs` e `tests/common/` | Fixtures binárias e referência Redis descartável |
+| `tests/resp_codec.rs` | Testes literais, fragmentação e propriedades do codec |
 | `Cargo.toml` e `Cargo.lock` | Pacote Rust e dependências fixadas |
 | `rust-toolchain.toml` | Toolchain e componentes de desenvolvimento |
 | `.github/workflows-disabled/` | Workflows inativos, preservados para revisão depois da 1.0 |
@@ -104,15 +106,17 @@ com execução manual e evidências nas plataformas previstas.
 | [docs/architecture.md](docs/architecture.md) | Fronteiras atuais e arquitetura planejada |
 | [docs/compatibility.md](docs/compatibility.md) | Escopo e estado da compatibilidade |
 | [docs/testing.md](docs/testing.md) | Testes locais e reprodução da referência Redis |
+| [docs/resp.md](docs/resp.md) | Contratos, limites e uso do codec RESP2 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Fluxo de trabalho e critérios de revisão |
 
 ## Próximo passo
 
 `R01-01` entrega fixtures literais verificadas com Redis e `redis-cli` 8.10.1,
 na imagem fixada no manifesto: oito casos, 48 trocas sequenciais e oito pipelines.
-A próxima tarefa é `R01-02`: implementar o codec RESP2 isolado, com tipos,
-limites, encoder e decoder incremental. Fragmentação, frames concatenados,
-conteúdo binário e entradas inválidas precisam de testes antes da integração com a rede.
+`R01-02` entrega o [codec RESP2 isolado](docs/resp.md), com tipos, limites,
+encoder atômico, decoder incremental e testes de propriedades.
+A próxima tarefa é `R01-03`: parser e armazenamento síncrono dos cinco comandos,
+sem integrar rede ou tarefas assíncronas ainda.
 
 O alvo da versão 0.1 inclui `PING`, `ECHO`, `GET`, `SET` básico e `DEL`, com um
 único worker de armazenamento. TTL, persistência e múltiplos shards pertencem às

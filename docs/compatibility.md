@@ -1,7 +1,8 @@
 # Compatibilidade com Redis
 
 Nenhum comando Redis está implementado no bootstrap do Sider. O binário valida
-configuração, mas ainda não oferece serviço TCP. Esta matriz registra o alvo da
+configuração, mas ainda não oferece serviço TCP. O codec RESP2 isolado está
+implementado; ele não executa comandos. Esta matriz registra o alvo da
 versão 0.1 e será atualizada conforme os testes produzirem evidências.
 
 ## Matriz da versão 0.1
@@ -27,8 +28,9 @@ sequenciais, oito pipelines e os cinco comandos via `redis-cli`. O teste confere
 digest, plataforma e versões do servidor e da CLI antes da execução. Consulte
 os [comandos de reprodução](testing.md).
 
-Isso comprova as fixtures contra Redis, não o suporte do Sider: o produto ainda
-não tem codec ou TCP. Não há comparação diferencial Sider versus Redis executada
+Isso comprova as fixtures contra Redis, não o suporte dos comandos do Sider.
+O produto possui codec isolado, mas não TCP ou armazenamento. Não há comparação
+diferencial Sider versus Redis executada
 neste estágio. `R01-05` comprovará o subconjunto via suíte diferencial e CLI.
 
 ## Subconjunto alvo
@@ -37,9 +39,9 @@ O Sider aceitará requisições RESP2 formadas por arrays não vazios de bulk st
 não nulas. Os nomes dos comandos serão comparados sem distinguir maiúsculas de
 minúsculas ASCII. Chaves e valores serão binários, sem exigir UTF-8.
 
-O codec representará os cinco tipos RESP2, mas isso não significará que todos os
-tipos serão aceitos como argumentos de comandos. Ausência de chave, valor vazio,
-array nulo e array vazio terão representações distintas.
+O codec representa os cinco tipos RESP2, mas isso não significa que todos os
+tipos serão aceitos como argumentos de comandos. Valor nulo, valor vazio,
+array nulo e array vazio têm representações distintas.
 
 Frames fragmentados e comandos concatenados serão tratados desde a versão 0.1.
 Cada conexão processará os comandos em sequência, com um único pedido em voo.

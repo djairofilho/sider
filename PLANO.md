@@ -7,8 +7,8 @@ Este plano detalha a versão 0.1. O [ROADMAP](ROADMAP.md) e seu
 [manifesto versionado](releases/plan.json) definem a sequência oficial até a 1.0,
 com tarefas, dependências e critérios. O [guia de releases](docs/releases.md)
 descreve candidatas e publicação. O bootstrap já contém pacote Rust, configuração de
-endereço e binário com testes. RESP2, comandos Redis e servidor TCP ainda não estão
-implementados. O estado atual está no [README](README.md).
+endereço e binário com testes. A referência Redis e o codec RESP2 isolado estão
+implementados; comandos e servidor TCP ainda não. O estado atual está no [README](README.md).
 
 CI e publicação automática foram adiadas para depois da 1.0. Até a 1.0 inclusive,
 as etapas avançam com testes locais e publicação manual, mantendo os critérios
@@ -446,20 +446,23 @@ consolidação dos fixtures de erros e dos testes diferenciais.
 
 ### 2. Codec RESP2 isolado
 
-- [ ] Implementar tipos, validação de limites e encoder.
-- [ ] Implementar decoder incremental com cursor e pilha limitados.
-- [ ] Testar tipos RESP2, nulos, vazios, inteiros nos extremos e conteúdo binário.
-- [ ] Para cada fixture curta, testar todos os pontos de fragmentação e entrega
+- [x] Implementar tipos, validação de limites e encoder.
+- [x] Implementar decoder incremental com cursor e pilha limitados.
+- [x] Testar tipos RESP2, nulos, vazios, inteiros nos extremos e conteúdo binário.
+- [x] Para cada fixture curta, testar todos os pontos de fragmentação e entrega
       byte a byte. Para payloads grandes, testar divisões representativas e aleatórias.
-- [ ] Testar frames concatenados, preservação do sufixo e CRLF dividido entre leituras.
-- [ ] Testar comprimento inválido, overflow, prefixo desconhecido, CRLF inválido,
+- [x] Testar frames concatenados, preservação do sufixo e CRLF dividido entre leituras.
+- [x] Testar comprimento inválido, overflow, prefixo desconhecido, CRLF inválido,
       limites exatos e limite excedido por um byte/nó/nível.
-- [ ] Adicionar `proptest`: round trip de frames válidos, fragmentação equivalente,
+- [x] Adicionar `proptest`: round trip de frames válidos, fragmentação equivalente,
       consumo correto e entrada arbitrária sem panic sob limites pequenos.
 
 Saída: codec testado sem rede e sem banco. Um contador de trabalho disponível apenas
-nos testes verificará crescimento aproximadamente linear ao fragmentar cabeçalhos e
+nos testes verifica crescimento aproximadamente linear ao fragmentar cabeçalhos e
 arrays, para detectar reprocessamento quadrático sem depender do relógio.
+Os contratos implementados estão no [guia do codec](docs/resp.md). Linhas incluem
+prefixo e CRLF no seu limite; a profundidade configurável tem teto de 128 para
+proteger também a destruição da árvore de frames.
 
 ### 3. Comandos e semântica do mapa
 
@@ -627,6 +630,7 @@ o bootstrap não será publicado como versão funcional.
 
 A fundação executável, os testes de configuração e as fixtures de referência
 Redis/CLI estão implementados. A execução de `R01-01` está documentada no
-[guia de testes](docs/testing.md). O próximo trabalho é `R01-02`, codec isolado.
+[guia de testes](docs/testing.md). O codec isolado de `R01-02` também está
+implementado. O próximo trabalho é `R01-03`, parser e armazenamento síncrono.
 O roadmap agrupa worker e TCP em `R01-04` e diferenciais
 e fuzz em `R01-05`, preservando os checkpoints internos deste plano.
