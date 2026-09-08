@@ -90,31 +90,46 @@ git fetch origin --tags
 ```
 
 Prepare uma branch `chore/release-v0.1.0-rc.1`. Atualize a versão no `Cargo.toml`,
-a entrada do próprio pacote no `Cargo.lock`, o `CHANGELOG.md` e
+a entrada do próprio pacote nos arquivos `Cargo.lock` e `fuzz/Cargo.lock`, o `CHANGELOG.md` e
 `releases/notes/v0.1.0-rc.1.md`. Preserve `publish = false` e as versões das
 dependências. Abra um PR com label `type:release`, referenciando o gate do milestone
-sem fechá-lo pelo merge. Esses quatro arquivos representam uma responsabilidade:
+sem fechá-lo pelo merge. Esses cinco arquivos representam uma responsabilidade:
 identificar a mesma versão em todas as superfícies.
 
-O helper `prepare` é opcional. Para usá-lo, salve as notas em
+Não mude a versão `0.0.0` do pacote `sider-fuzz`. Nos dois lockfiles, somente a
+entrada local `sider` acompanha a versão do produto. Confira o diff inteiro e
+execute `cargo metadata --locked --format-version 1` para cada manifesto,
+incluindo `--manifest-path fuzz/Cargo.toml`. Qualquer outra mudança de dependência
+é funcional e exige outra candidata.
+
+Use a preparação manual nesta fase. O helper `prepare` arquivado antecede o
+workspace de fuzz e ainda só atualiza o lockfile raiz; sua política de promoção
+também não aceita o segundo lockfile. Não use `prepare --apply` ou o publicador
+automatizado como substitutos deste procedimento. A revisão desses caminhos,
+assim como proveniência local e `CARGO_TARGET_DIR`, faz parte da retomada posterior
+da automação. O sincronizador de backlog e sua validação continuam disponíveis.
+
+Para consultar a simulação histórica do helper `prepare`, salve as notas em
 `target/notes-0.1.0-rc.1.md` e execute primeiro a simulação:
 
 ```sh
 python -m tools.release.cli prepare 0.1.0-rc.1 --notes-file target/notes-0.1.0-rc.1.md
 ```
 
-Adicionar `--apply` autoriza esse helper a criar branch, atualizar os quatro
-arquivos, criar commit, enviar push e abrir o PR. Ele exige worktree limpa,
+No fluxo histórico, `--apply` autoriza o helper a criar branch, atualizar quatro
+arquivos, criar commit, enviar push e abrir o PR. Não use essa opção com o workspace
+atual de fuzz. O helper exige worktree limpa,
 `main` igual a `origin/main` e tarefas funcionais concluídas. Não publica a release
-e não dispensa os testes. Se preparar manualmente, mantenha os mesmos contratos.
+e não dispensa os testes. O preparo manual atual mantém esses contratos e inclui
+o segundo lockfile conforme descrito acima.
 
 Se a preparação parar depois de criar a branch ou enviar o push, preserve o trabalho
 e retome a branch/PR existente. Ela não apaga, reseta nem substitui branches.
 Se o POST do PR perder a resposta, procure a branch no GitHub antes de abrir outro.
 
-Para a final, repita com `0.1.0` e notas próprias. É obrigatória uma RC publicada da
+Para a final, repita manualmente com `0.1.0` e notas próprias. É obrigatória uma RC publicada da
 mesma versão-base, ancestral do commit final. O diff só aceita versão do pacote,
-versão do próprio pacote no lockfile, changelog e notas da final. Mudança de código,
+versão do próprio pacote nos dois lockfiles, changelog e notas da final. Mudança de código,
 dependência, workflow ou gate exige uma nova RC. A final compila e testa novamente.
 
 Valide e revise o PR localmente. A conta do usuário pode integrá-lo em `main` com:
@@ -175,12 +190,15 @@ sem registry público. Build, smoke, `docker save` e restauração da imagem per
 
 ### Contrato de prontidão do binário extraído
 
-A tarefa `R01-04` implementará `SIDER_READY_FILE`. O smoke inicia o binário extraído
+A tarefa `R01-04` implementa `SIDER_READY_FILE`. O smoke inicia o binário extraído
 com `SIDER_ADDR=127.0.0.1:0`. Depois de abrir o listener, o próprio processo grava
 atomicamente no caminho indicado um JSON com `pid`, `host: "127.0.0.1"` e `port`
 efetiva. O smoke confere o PID, conecta nessa porta e exige `+PONG\r\n` para um PING
 RESP2. Isso evita reservar e liberar uma porta antes de iniciar o servidor.
 O bootstrap não oferece prontidão nem TCP e deve falhar nesse gate.
+
+Os gates Rust de compatibilidade e fuzz, seus recibos e o ambiente Linux estão
+descritos no [guia de diferenciais](differential.md) e no [guia de fuzz](../fuzz/README.md).
 
 ## Publicação manual
 

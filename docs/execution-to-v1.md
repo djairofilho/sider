@@ -1,6 +1,6 @@
 # Execução até a v1.0
 
-Este plano resume a ordem de trabalho após a implementação do worker e TCP R01-04.
+Este plano resume a ordem de trabalho após a integração do worker e TCP R01-04.
 Os IDs, dependências e critérios completos continuam em
 [releases/plan.json](../releases/plan.json). O [ROADMAP](../ROADMAP.md) apresenta
 as tarefas; as issues do GitHub registram seu estado operacional.
@@ -8,18 +8,20 @@ as tarefas; as issues do GitHub registram seu estado operacional.
 ## Ponto de partida
 
 - Fundação Rust, licença MIT e backlog versionado estão implementados.
-- R01-01 a R01-03 foram integradas: fixtures Redis, codec, parser e armazenamento.
-- R01-04 conecta o núcleo ao worker e TCP, com limites, prazos e prontidão.
-  A integração desta entrega passa pelo PR da branch `feat/server-worker-tcp`.
+- R01-01 a R01-04 foram integradas: fixtures Redis, codec, parser, armazenamento,
+  worker e TCP, com limites, prazos e prontidão.
+- R01-05 implementa os diferenciais, CLI e fuzz na branch `test/resp-differential-fuzz`.
+  A validação local passou nos dois sistemas; o fuzz inicial executou 452.886 casos
+  em mais de 15 minutos sem falhas. A integração dessa entrega ainda está pendente.
 - Ainda não há persistência, quota ou release funcional publicada.
 - CI e publicação automática ficam desligadas até a 1.0 inclusive. Reativá-las
   depois disso será uma entrega própria, não um efeito automático da versão.
 
 ## Próxima entrega: fechar a 0.1
 
-1. Validar e integrar R01-04 após revisão, registrando testes e limitações reais.
-2. Implementar R01-05: comparação Sider versus Redis 8.10.1, uso de `redis-cli`,
-   corpus de fuzz e runners dos gates da capacidade, todos em Rust.
+1. Revisar e integrar R01-05, com resultados e limitações no [guia de testes](testing.md).
+2. Conferir os gates Rust: comparação Sider versus Redis 8.10.1, uso de `redis-cli`
+   e fuzz real; uma execução ignorada ou curta não libera a publicação.
 3. Executar R01-GATE: validar o SHA da candidata, testar pacotes extraídos nos dois
    sistemas e publicar `v0.1.0-rc.1` como prerelease privada.
 4. Corrigir falhas com outra RC quando houver mudança funcional. Depois da
@@ -34,17 +36,17 @@ candidata, validação cumulativa e publicação final.
 
 | Versão | Ordem de implementação | Critério central |
 | --- | --- | --- |
-| `0.1.0` | Finalizar worker/TCP; diferenciais e fuzz | Cinco comandos via TCP e CLI, com limites e ordenação testados |
+| `0.1.0` | Integrar diferenciais/fuzz; validar candidata e pacotes | Cinco comandos via TCP e CLI, com limites e ordenação testados |
 | `0.2.0` | Strings adicionais; opções de `SET`; TTL passivo/ativo; quota | Overflow e expiração corretos; rejeições preservam estado; sem eviction |
 | `0.3.0` | AOF versionado/checksum; append/fsync; recuperação; compactação; crashes | Nenhum registro parcial aplicado; durabilidade e substituição de arquivos testadas nos dois sistemas |
 | `0.4.0` | Hash estável/hash tags; workers; multichave; AOF; medições | Rejeitar operações entre shards antes de qualquer alteração |
 | `0.5.0` | Valores tipados; hashes; listas; sets; integração | `WRONGTYPE`, TTL, quota e recuperação verificados para cada tipo |
 | `0.6.0` | Sorted sets; comandos; persistência e limites | Scores, desempate binário, índices negativos e ordenação corretos |
-| `0.7.0` | Estado transacional; lotes; `WATCH`; AOF atômico | Um shard por transação; conflitos/expiração invalidam `WATCH`; replay sem meio lote |
+| `0.7.0` | Estado transacional; lotes; `WATCH`; AOF atômico | Um shard; conflitos/expiração invalidam `WATCH`; replay sem meio lote; erros individuais sem rollback |
 | `0.8.0` | Assinaturas; publicação; modo assinante; clientes lentos | Filas limitadas, inscrições liberadas e assinantes sem bloquear o banco |
-| `0.9.0` | Protocolo Sider→Sider; sincronização completa; incremental; reconexão; promoção | Réplicas somente leitura, sincronização consistente, TTL e transações preservados |
+| `0.9.0` | Protocolo Sider→Sider; sincronização completa; incremental; reconexão; promoção | Réplicas somente leitura; TTL/transações preservados; histórico insuficiente exige sincronização completa |
 | `0.10.0` | Métricas; diagnóstico; backup/restauração; Docker; ensaios | Restauração reproduzível e imagem privada executada, testada e exportada |
-| `1.0.0` | Congelar escopo; auditoria diferencial; carga; migração; benchmarks/documentação | Matriz completa, uma hora de carga e nenhuma falha conhecida de corrupção ou perda além das garantias declaradas |
+| `1.0.0` | Congelar escopo; auditoria diferencial; carga; migração da 0.10; benchmarks/documentação | Matriz completa, uma hora de carga e nenhuma falha conhecida de corrupção ou perda além das garantias declaradas |
 
 ## Ciclo de execução
 

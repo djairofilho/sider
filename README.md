@@ -7,7 +7,9 @@ com Redis pelo protocolo RESP2. O nome é Redis ao contrário.
 O binário atende `PING`, `ECHO`, `GET`, `SET` básico e `DEL` por RESP2/TCP.
 Um worker proprietário serializa o armazenamento, com filas, conexões e buffers
 limitados. É um protótipo local, sem persistência, autenticação ou quota do dataset.
-A comparação diferencial com Redis e o fuzz da primeira release ainda estão pendentes.
+A suíte diferencial compara o binário com Redis 8.10.1 e verifica os cinco comandos
+com `redis-cli`. O fuzz tem alvo isolado e gate próprio. A primeira release ainda
+depende da validação completa no seu SHA e dos pacotes extraídos.
 
 As entregas até a 1.0 estão organizadas no [ROADMAP](ROADMAP.md), com 11 milestones,
 50 tarefas de implementação e um gate de publicação por versão. O
@@ -83,9 +85,11 @@ O [guia de contribuição](CONTRIBUTING.md#verificações-locais) lista os coman
 Não é necessário aguardar CI para integrar um PR. Registre os testes locais no PR.
 
 Os testes cobrem a fundação, o codec, comandos, worker, TCP e o binário real.
-As fixtures Redis são reproduzidas por TCP, mas a suíte diferencial de servidores
-e o fuzz ainda pertencem a R01-05. O [guia de testes](docs/testing.md) explica
-os comandos locais e a verificação externa opt-in, todos escritos em Rust.
+As fixtures Redis são reproduzidas por TCP e pela suíte diferencial de servidores.
+O [guia de testes](docs/testing.md) explica os comandos locais; o
+[guia de diferenciais](docs/differential.md) cobre Redis/CLI e os recibos de gates,
+e o [guia de fuzz](fuzz/README.md) descreve o alvo instrumentado. Todos os testes
+novos usam Rust e os testes externos são opt-in.
 Antes de cada release, os gates cumulativos continuam obrigatórios,
 com execução manual e evidências nas plataformas previstas.
 
@@ -107,6 +111,10 @@ com execução manual e evidências nas plataformas previstas.
 | `tests/resp_codec.rs` | Testes literais, fragmentação e propriedades do codec |
 | `tests/commands.rs` | Semântica dos cinco comandos e rejeições sem mutação |
 | `tests/tcp.rs` | Fixtures por TCP, pipelines, fragmentação e ciclo das conexões |
+| `tests/compatibility.rs` | Comparação independente Sider/Redis e integração com redis-cli |
+| `tests/gate_contract.rs` e `tests/harness.rs` | Evidências, isolamento e falhas da infraestrutura de testes |
+| `tests/fuzz_gate.rs` e `fuzz/` | Alvo instrumentado, corpus e gate com duração mínima |
+| `dev/test.Dockerfile` | Ambiente local Ubuntu para testes, distinto da imagem de distribuição |
 | `Cargo.toml` e `Cargo.lock` | Pacote Rust e dependências fixadas |
 | `rust-toolchain.toml` | Toolchain e componentes de desenvolvimento |
 | `.github/workflows-disabled/` | Workflows inativos, preservados para revisão depois da 1.0 |
@@ -131,8 +139,10 @@ encoder atômico, decoder incremental e testes de propriedades.
 `R01-03` entrega parsing e armazenamento síncrono dos cinco comandos, com
 validação das fixtures e das divergências de `SET`/comando desconhecido.
 `R01-04` conecta o núcleo ao worker e ao TCP, com configuração, timeouts,
-prontidão e encerramento supervisionado. A próxima tarefa é `R01-05`:
-comparação diferencial Sider/Redis, integração com `redis-cli` e fuzz.
+prontidão e encerramento supervisionado. `R01-05` acrescenta a comparação
+diferencial Sider/Redis, integração com `redis-cli` e fuzz, com execução registrada
+no guia de testes. Essa entrega precisa ser integrada antes de `R01-GATE`, que prepara,
+valida e publica a primeira candidata e depois a final.
 
 O alvo da versão 0.1 inclui `PING`, `ECHO`, `GET`, `SET` básico e `DEL`, com um
 único worker de armazenamento. TTL, persistência e múltiplos shards pertencem às

@@ -4,7 +4,8 @@
 
 - Leia `PLANO.md`, `README.md`, `ROADMAP.md` e `docs/compatibility.md` antes de implementar.
 - Avance pela próxima tarefa desbloqueada do milestone atual, em etapas compiláveis
-  e testáveis. Após worker e TCP de `R01-04`, o próximo item é `R01-05`.
+  e testáveis. Após validar e integrar diferenciais/fuzz de `R01-05`, o próximo
+  item é `R01-GATE`, com candidata e final verificadas antes de avançar à 0.2.
 - Crie módulos quando houver implementação real; evite stubs e diretórios vazios.
 - Preserve as fronteiras entre RESP, comandos, armazenamento e rede.
 - Use dados binários para chaves e valores. Não limite o protocolo a UTF-8.
