@@ -4,4 +4,6 @@
 
 ## Validação
 
-<!-- Liste os comandos executados, os resultados e qualquer limitação que afete a revisão. -->
+<!-- CI adiada até depois da 1.0. Liste os comandos locais executados, os resultados
+e qualquer limitação que afete a revisão. Use fmt/check/test no ciclo curto;
+execute testes adicionais proporcionais ao comportamento alterado. -->

@@ -15,9 +15,17 @@ versão 0.1 e será atualizada conforme os testes produzirem evidências.
 | `SET chave valor` | Criar ou substituir; responder com simple string `OK` | Não implementada | Pendente |
 | `DEL chave [chave ...]` | Contar apenas as chaves efetivamente removidas | Não implementada | Pendente |
 
-A versão exata do Redis de referência, a versão do `redis-cli` e o digest da
-imagem de teste ainda precisam ser selecionados e registrados. Não há comparação
+A referência inicial é Redis e `redis-cli` **8.10.1**, na plataforma Linux amd64.
+A tag e o digest da imagem estão fixados em [releases/plan.json](../releases/plan.json):
+
+```text
+redis:8.10.1@sha256:76961cd2a0f40ef6fdd334b6b1b3a76a2bad1848d89f3030ca30a7521d4a9493
+```
+
+Fixar essa entrada não constitui teste de compatibilidade. Não há comparação
 diferencial executada nem suporte verificado com `redis-cli` neste estágio.
+`R01-01` prepara fixtures e infraestrutura de referência; `R01-05` comprovará
+o subconjunto via suíte diferencial e CLI.
 
 ## Subconjunto alvo
 
@@ -67,3 +75,24 @@ aridade, rejeição sem mutação e continuidade após erros recuperáveis.
 O teste com `redis-cli` será uma evidência de integração separada: sua saída
 textual não substitui a comparação dos bytes no protocolo. Uma ferramenta ausente
 ou um teste ignorado deve permanecer registrado como pendente.
+
+## Evolução planejada
+
+O [ROADMAP](../ROADMAP.md) é a sequência oficial. Strings, opções de `SET`, TTL e
+quota entram na 0.2; AOF na 0.3; shards fixos na 0.4; hashes, listas e sets na 0.5;
+sorted sets na 0.6; transações de um shard na 0.7; Pub/Sub na 0.8; replicação
+Sider→Sider na 0.9; operação e imagem Docker na 0.10. A 1.0 estabiliza esse subconjunto.
+
+A partir da 0.4, operações multichave serão restritas ao mesmo shard, com rejeição
+antes de qualquer efeito. Isso altera uma forma aceita no worker único e deverá
+aparecer nas notas de incompatibilidade. Replicação será assíncrona entre instâncias
+Sider da mesma versão/configuração, sem compatibilidade com replicação Redis.
+
+Para coleções sem ordem garantida, como `SMEMBERS`, a suíte compara conteúdo
+normalizado. Respostas ordenadas, como `LRANGE` e `ZRANGE`, preservam a ordem na
+comparação. Cada nova forma de comando só muda de planejada para verificada quando
+seu teste e sua referência estiverem registrados.
+
+Os gates cumulativos e o fluxo de candidatas estão no
+[guia de releases](releases.md). O bootstrap não atende esses gates e não será
+publicado como versão funcional.

@@ -7,3 +7,6 @@
 !.env.example
 *.swp
 *.swo
+
+__pycache__/
+*.pyc

@@ -5,8 +5,16 @@ O objetivo da versão 0.1 é oferecer um subconjunto explícito de compatibilida
 com Redis pelo protocolo RESP2. O nome é Redis ao contrário.
 
 O projeto está na fundação: pacote Rust com biblioteca, binário, configuração
-validada e verificações automatizadas. O binário ainda não abre uma conexão de
+validada e testes locais. O binário ainda não abre uma conexão de
 escuta TCP e nenhum comando Redis está implementado.
+
+As entregas até a 1.0 estão organizadas no [ROADMAP](ROADMAP.md), com 11 milestones,
+50 tarefas de implementação e um gate de publicação por versão. O
+[guia de releases](docs/releases.md) descreve como sincronizar o backlog e preparar
+candidatas e versões finais. O bootstrap não será publicado como banco funcional.
+
+CI e publicação automática estão adiadas para depois da 1.0. Até a 1.0 inclusive,
+o desenvolvimento usa validação local e as releases são publicadas manualmente.
 
 ## Executar o bootstrap
 
@@ -55,20 +63,23 @@ SIDER_ADDR=127.0.0.1:6380 cargo run --locked
 
 ## Verificar as alterações
 
-Execute na raiz do projeto:
+Para o ciclo rápido, execute na raiz do projeto:
 
 ```sh
 cargo fmt --all --check
 cargo check --locked --all-targets
-cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
-cargo doc --locked --no-deps
-cargo build --locked --release
 ```
 
-A CI executa as verificações em Linux e Windows. Os testes atuais cobrem a
-fundação do projeto; ainda não demonstram compatibilidade com Redis. Os testes de
-RESP2, TCP, comparação com Redis e fuzzing serão adicionados nas suas etapas.
+Amplie a validação conforme a mudança: Clippy para código Rust; documentação e
+build de distribuição quando suas interfaces ou configuração forem afetadas.
+O [guia de contribuição](CONTRIBUTING.md#verificações-locais) lista os comandos.
+Não é necessário aguardar CI para integrar um PR. Registre os testes locais no PR.
+
+Os testes atuais cobrem a fundação do projeto; ainda não demonstram compatibilidade
+com Redis. Os testes de RESP2, TCP, comparação com Redis e fuzzing serão adicionados
+nas suas etapas. Antes de cada release, os gates cumulativos continuam obrigatórios,
+com execução manual e evidências nas plataformas previstas.
 
 ## Estrutura
 
@@ -81,20 +92,46 @@ RESP2, TCP, comparação com Redis e fuzzing serão adicionados nas suas etapas.
 | `tests/cli.rs` | Testes de integração do binário |
 | `Cargo.toml` e `Cargo.lock` | Pacote Rust e dependências fixadas |
 | `rust-toolchain.toml` | Toolchain e componentes de desenvolvimento |
-| `.github/workflows/` | Verificações automatizadas |
+| `.github/workflows-disabled/` | Workflows inativos, preservados para revisão depois da 1.0 |
 | `AGENTS.md` | Instruções locais para agentes de programação |
 | [PLANO.md](PLANO.md) | Etapas, contratos e critérios de conclusão da versão 0.1 |
+| [ROADMAP.md](ROADMAP.md) | Sequência de releases e dependências até a 1.0 |
+| [releases/plan.json](releases/plan.json) | Fonte versionada dos milestones, tarefas e critérios |
+| [docs/releases.md](docs/releases.md) | Execução do backlog, candidatas, publicação e recuperação |
 | [docs/architecture.md](docs/architecture.md) | Fronteiras atuais e arquitetura planejada |
 | [docs/compatibility.md](docs/compatibility.md) | Escopo e estado da compatibilidade |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Fluxo de trabalho e critérios de revisão |
 
 ## Próximo passo
 
-Concluir os itens pendentes da fundação e implementar o codec RESP2 isolado:
-tipos de frame, limites, encoder e decoder incremental. Os testes precisam cobrir
-fragmentação, frames concatenados, conteúdo binário e entradas inválidas antes da
-integração com a rede.
+A próxima tarefa é `R01-01`: registrar fixtures literais e uma infraestrutura
+descartável com Redis e `redis-cli` 8.10.1, usando a imagem fixada no manifesto.
+Depois, `R01-02` implementa o codec RESP2 isolado, com tipos, limites, encoder e
+decoder incremental. Fragmentação, frames concatenados, conteúdo binário e
+entradas inválidas precisam de testes antes da integração com a rede.
 
 O alvo da versão 0.1 inclui `PING`, `ECHO`, `GET`, `SET` básico e `DEL`, com um
 único worker de armazenamento. TTL, persistência e múltiplos shards pertencem às
-versões seguintes. O [plano completo](PLANO.md) detalha essa sequência.
+versões seguintes. O [plano da 0.1](PLANO.md) detalha os contratos técnicos e o
+[ROADMAP](ROADMAP.md) organiza as versões posteriores.
+
+O desenvolvimento e os testes do banco usam Cargo, sem exigir Python. Apenas quem
+alterar ou executar os helpers opcionais de backlog e releases precisa de Python
+3.11 ou posterior, sem dependências adicionais:
+
+```sh
+python -m tools.release.cli validate
+python -m unittest discover -s tools/release -t . -p "test_*.py"
+```
+
+Releases exigem candidata e evidências dos testes específicos da capacidade.
+Gates pendentes bloqueiam a publicação, mesmo quando os testes do bootstrap passam.
+
+## Licença
+
+O código próprio do Sider está sob a [licença MIT](LICENSE), com o texto padrão
+da [Open Source Initiative](https://opensource.org/license/mit).
+As dependências preservam suas próprias licenças.
+
+Os pacotes distribuídos incluem o arquivo `LICENSE`. A adoção da licença não altera
+a visibilidade privada do repositório nem habilita publicação no crates.io.

@@ -3,10 +3,16 @@
 Sider será um servidor de banco de dados em memória, escrito em Rust, com um
 subconjunto explícito de compatibilidade com Redis. O nome é Redis ao contrário.
 
-Este plano detalha a versão 0.1. As versões seguintes aparecem apenas para orientar
-as fronteiras da arquitetura. O bootstrap já contém pacote Rust, configuração de
+Este plano detalha a versão 0.1. O [ROADMAP](ROADMAP.md) e seu
+[manifesto versionado](releases/plan.json) definem a sequência oficial até a 1.0,
+com tarefas, dependências e critérios. O [guia de releases](docs/releases.md)
+descreve candidatas e publicação. O bootstrap já contém pacote Rust, configuração de
 endereço e binário com testes. RESP2, comandos Redis e servidor TCP ainda não estão
 implementados. O estado atual está no [README](README.md).
+
+CI e publicação automática foram adiadas para depois da 1.0. Até a 1.0 inclusive,
+as etapas avançam com testes locais e publicação manual, mantendo os critérios
+funcionais e as evidências exigidas por release.
 
 ## Índice
 
@@ -373,7 +379,8 @@ documenta capacidade e backpressure, mas não estabelece quota de memória do pr
 
 O tamanho do dataset continuará sem quota na 0.1. Vários `SET` válidos ainda poderão
 esgotar a memória disponível. Limites de rede não resolvem esse problema; contabilidade
-do armazenamento e política de rejeição/eviction serão decisões da 0.2.
+do armazenamento e política de rejeição serão implementadas na 0.2, sem eviction
+automática.
 
 O bind padrão em loopback acompanha o escopo sem autenticação. A 0.1 será apresentada
 como protótipo para uso local e testes, sem promessa de serviço pronto para produção.
@@ -429,8 +436,9 @@ O avanço depende desses critérios, não de uma estimativa fixa de dias.
 - [x] Escrever os primeiros testes de configuração e integração do binário.
 - [ ] Adicionar fixtures literais das futuras respostas RESP2.
 - [x] Criar matriz de compatibilidade com todos os itens como pendentes.
-- [ ] Selecionar e registrar a versão exata do Redis de referência e de `redis-cli`.
-      Para Docker, registrar também o digest da imagem, sem depender de `latest`.
+- [x] Fixar Redis e `redis-cli` 8.10.1 e o digest Linux amd64 no manifesto de releases.
+- [ ] Preparar a infraestrutura de referência e conferir sua execução em `R01-01`.
+      A imagem fixada não constitui evidência de compatibilidade sem executar os testes.
 
 Saída: `cargo check --locked` e `cargo test --locked` passam. O binário é executável,
 mas ainda não oferece serviço TCP. A escolha da versão de referência precede a
@@ -522,20 +530,26 @@ Clientes que exigem handshake automático terão sua limitação documentada.
 - [ ] Documentar arquitetura, comandos suportados, limites e como reproduzir os testes.
 - [ ] Executar a bateria final e registrar resultados reais, incluindo testes ignorados.
 
-Verificação comum das etapas, conforme os alvos forem surgindo:
+Verificação rápida local das etapas, conforme os alvos forem surgindo:
 
 ```powershell
 cargo fmt --check
 cargo check --locked
-cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 ```
 
+Ao alterar código Rust, execute também
+`cargo clippy --locked --all-targets -- -D warnings`. Mudanças de interfaces,
+documentação de API ou build exigem `cargo doc --locked --no-deps` e
+`cargo build --locked --release`. Registre os resultados locais no PR e integre
+por merge commit, sem aguardar CI.
+
 Os testes externos terão comandos próprios documentados. O alvo de fuzz terá seu
 próprio manifest e verificação. Não será incluído implicitamente em `cargo test`.
-O build e os testes comuns serão verificados em Windows e Linux; o fuzz poderá rodar
-somente em Linux inicialmente. O bootstrap inclui CI no GitHub Actions para as duas
-plataformas, com as mesmas verificações reproduzíveis localmente.
+Antes de publicar, o build e os testes comuns serão verificados manualmente em
+Windows e Linux; o fuzz poderá rodar somente em Linux inicialmente. A CI
+multiplataforma foi verificada no bootstrap, mas está desativada nesta fase.
+Os workflows arquivados serão revisados para retomada somente depois da 1.0.
 
 ## Critérios de conclusão
 
@@ -566,15 +580,21 @@ será registrado como hipótese para medição futura, sem alegação de desempe
 | Diferenças de versão serem confundidas com bugs | Fixar Redis, CLI, toolchain e dependências; versionar a matriz |
 | Interface crescer cedo demais | Manter módulos concretos; introduzir abstrações quando surgir o segundo caso |
 
-As decisões seguintes serão tratadas antes de implementar a versão correspondente:
+As decisões de evolução estão fechadas no manifesto; detalhes de implementação e
+evidências serão produzidos na tarefa correspondente, sem antecipar suporte:
 
-| Versão | Decisões pendentes |
+| Versão | Contrato e entrega |
 | --- | --- |
-| 0.2 | Semântica completa de TTL, relógio monotônico em execução, gerações de expiração, quota de memória e rejeição/eviction; incluir `EXISTS` |
-| 0.3 | Fronteira entre aceite e durabilidade, formato versionado do AOF, checksum, política para cauda truncada versus corrupção e compactação |
-| 0.4 | Hash estável de roteamento, hash tags, número fixo ou migração de shards, comandos multichave e ordenação dos logs |
-| 0.5 | Tipos adicionais, limites de assinantes Pub/Sub, métricas e refinamento operacional |
-| 1.0 | Subconjunto formal, fuzz contínuo, distribuição, benchmarks reproduzíveis e evidência de robustez |
+| 0.2 | Strings adicionais, opções de `SET`, TTL passivo/ativo e quota com rejeição de crescimento, sem eviction automática |
+| 0.3 | AOF versionado e checksum, escritor global, mutações resolvidas, políticas de fsync, recuperação e compactação |
+| 0.4 | Roteamento estável, hash tags, shards fixos e rejeição de operações multichave entre shards antes de efeitos |
+| 0.5 | Hashes, listas e sets com TTL, quota, `WRONGTYPE` e persistência |
+| 0.6 | Sorted sets com `ZADD` básico, `ZREM`, `ZCARD`, `ZSCORE` e `ZRANGE start stop [WITHSCORES]` |
+| 0.7 | `MULTI`, `EXEC`, `DISCARD`, `WATCH` e `UNWATCH` no mesmo shard; replay atômico do lote |
+| 0.8 | `SUBSCRIBE`, `UNSUBSCRIBE`, `PUBLISH` e `PING` no modo assinante; filas limitadas |
+| 0.9 | Replicação assíncrona Sider→Sider da mesma versão/configuração, réplica somente leitura e promoção manual |
+| 0.10 | Métricas, diagnóstico, backup/restauração e imagem Docker Linux amd64 distribuída privadamente |
+| 1.0 | Subconjunto congelado, auditoria diferencial, carga contínua de uma hora, migração e benchmarks reproduzíveis |
 
 O AOF exigirá validar também condições dependentes do estado antes de registrar uma
 mutação e preservar a ordem entre log, aplicação e resposta. Com fsync periódico,
@@ -588,12 +608,24 @@ distintas: duas chaves independentes ainda podem cair no mesmo shard. Usar hash 
 não implica compatibilidade com Redis Cluster. Isso exigiria contratos adicionais
 de slots, descoberta e redirecionamentos.
 
-Antes da 0.4, decidir se `DEL` multichave ficará restrito ao mesmo shard, com erro antes
-de qualquer efeito, ou se haverá coordenação entre shards. A restrição mudaria o
-conjunto de operações hoje aceitas no worker único e precisará aparecer como mudança
-de compatibilidade. Também será necessário decidir se o AOF terá ordem global ou
-logs por shard, pois um único escritor pode limitar o paralelismo desejado.
+Na 0.4, `DEL`, `MGET`, `MSET` e demais operações multichave ficarão restritos ao
+mesmo shard, com erro antes de qualquer efeito. Essa restrição altera o conjunto
+de operações aceitas no worker único e deverá aparecer nas notas e na matriz de
+compatibilidade. O AOF manterá inicialmente um escritor global; as medições da
+0.4 avaliarão seu custo sem alterar a garantia de recuperação.
+
+Na 0.7, erros de enfileiramento abortam a transação conforme o subconjunto Redis;
+erros individuais durante `EXEC` não desfazem as outras operações. AOF registra
+o lote de mutações resolvidas de modo que replay não aplique meia transação.
+Replicação na 0.9 preserva esse lote e TTL, mas permanece assíncrona, sem failover
+automático e sem suporte entre versões/configurações distintas.
+
+Redis Cluster, Sentinel, resharding online, RESP3, Lua, operações bloqueantes,
+transações entre shards, TLS e ACL ficam após a 1.0. O ambiente suportado até lá
+é controlado. Toda publicação requer candidata e gates cumulativos aprovados;
+o bootstrap não será publicado como versão funcional.
 
 A fundação executável e os testes de configuração já fazem parte do bootstrap.
-O próximo trabalho é resolver os itens pendentes da etapa 1 e concluir o codec
-isolado antes de conectar o armazenamento à rede.
+O próximo trabalho é `R01-01`, fixtures e infraestrutura Redis/CLI, seguido de
+`R01-02`, codec isolado. O roadmap agrupa worker e TCP em `R01-04` e diferenciais
+e fuzz em `R01-05`, preservando os checkpoints internos deste plano.
