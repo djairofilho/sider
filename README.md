@@ -13,6 +13,8 @@ As entregas até a 1.0 estão organizadas no [ROADMAP](ROADMAP.md), com 11 miles
 50 tarefas de implementação e um gate de publicação por versão. O
 [guia de releases](docs/releases.md) descreve como sincronizar o backlog e preparar
 candidatas e versões finais. O bootstrap não será publicado como banco funcional.
+O [plano de execução até a v1](docs/execution-to-v1.md) resume o ponto atual,
+a próxima entrega e os critérios de cada versão.
 
 CI e publicação automática estão adiadas para depois da 1.0. Até a 1.0 inclusive,
 o desenvolvimento usa validação local e as releases são publicadas manualmente.
