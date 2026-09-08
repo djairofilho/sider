@@ -141,8 +141,9 @@ validação das fixtures e das divergências de `SET`/comando desconhecido.
 `R01-04` conecta o núcleo ao worker e ao TCP, com configuração, timeouts,
 prontidão e encerramento supervisionado. `R01-05` acrescenta a comparação
 diferencial Sider/Redis, integração com `redis-cli` e fuzz, com execução registrada
-no guia de testes. Essa entrega precisa ser integrada antes de `R01-GATE`, que prepara,
-valida e publica a primeira candidata e depois a final.
+no guia de testes. Essas entregas estão integradas. `R01-GATE` prepara os
+[pacotes e seus smokes](docs/packages.md), valida e publica a primeira candidata
+e depois a final.
 
 O alvo da versão 0.1 inclui `PING`, `ECHO`, `GET`, `SET` básico e `DEL`, com um
 único worker de armazenamento. TTL, persistência e múltiplos shards pertencem às

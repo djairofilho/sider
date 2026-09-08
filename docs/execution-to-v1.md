@@ -10,16 +10,16 @@ as tarefas; as issues do GitHub registram seu estado operacional.
 - Fundação Rust, licença MIT e backlog versionado estão implementados.
 - R01-01 a R01-04 foram integradas: fixtures Redis, codec, parser, armazenamento,
   worker e TCP, com limites, prazos e prontidão.
-- R01-05 implementa os diferenciais, CLI e fuzz na branch `test/resp-differential-fuzz`.
+- R01-05 integrou os diferenciais, CLI e fuzz pelo PR #68.
   A validação local passou nos dois sistemas; o fuzz inicial executou 452.886 casos
-  em mais de 15 minutos sem falhas. A integração dessa entrega ainda está pendente.
+  em mais de 15 minutos sem falhas. O trabalho atual é R01-GATE, antes da publicação.
 - Ainda não há persistência, quota ou release funcional publicada.
 - CI e publicação automática ficam desligadas até a 1.0 inclusive. Reativá-las
   depois disso será uma entrega própria, não um efeito automático da versão.
 
 ## Próxima entrega: fechar a 0.1
 
-1. Revisar e integrar R01-05, com resultados e limitações no [guia de testes](testing.md).
+1. Preparar e testar os pacotes extraídos conforme o [guia de pacotes](packages.md).
 2. Conferir os gates Rust: comparação Sider versus Redis 8.10.1, uso de `redis-cli`
    e fuzz real; uma execução ignorada ou curta não libera a publicação.
 3. Executar R01-GATE: validar o SHA da candidata, testar pacotes extraídos nos dois

@@ -213,7 +213,9 @@ estas verificações antes de usar a interface ou a CLI do GitHub:
 3. Compile e teste esse mesmo SHA em Linux GNU x86_64 no Ubuntu 24.04 e em Windows
    MSVC x86_64. Execute os gates nas plataformas da tabela, com logs e resultados.
 4. Empacote binário, README e LICENSE em `.tar.gz` no Linux e `.zip` no Windows.
-   Extraia cada pacote e teste `--version` e TCP. Desde a 0.10, teste e exporte
+   Use o README de distribuição em `releases/README.md` e inclua `releases/licenses/`
+   como `licenses/`, com todos os avisos e hashes conferidos. Extraia cada pacote e
+   execute o [smoke Rust](packages.md) de `--version` e TCP. Desde a 0.10, teste e exporte
    também a imagem Docker Linux amd64 em arquivo compactado.
 5. Prepare `release-manifest.json`, `release-notes.md` e `SHA256SUMS`. Registre
    versão, SHA, toolchain, targets, comandos, ambientes e resultados reais. O
@@ -239,7 +241,10 @@ o comando de publicação da automação não é um atalho para dispensar seus g
 
 O Sider adota a [MIT](../LICENSE). Cada pacote Linux e Windows inclui uma cópia
 integral do `LICENSE`, junto do binário e do README. O empacotamento falha se o
-arquivo estiver ausente ou vazio. A imagem Docker da 0.10 também deverá carregar
+arquivo estiver ausente ou vazio. A coleção `releases/licenses/` preserva os avisos
+das dependências e da biblioteca padrão da toolchain fixada; ela também acompanha
+os dois pacotes e deve ser revisada quando essas entradas mudarem.
+A imagem Docker da 0.10 também deverá carregar
 essa licença e os avisos exigidos pelas dependências que distribuir.
 
 Licenciamento e visibilidade são decisões separadas: o repositório e os assets
