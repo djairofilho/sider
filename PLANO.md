@@ -434,10 +434,10 @@ O avanço depende desses critérios, não de uma estimativa fixa de dias.
       `Cargo.lock`. Definir MSRV apenas se ele também for testado.
 - [x] Adicionar `forbid(unsafe_code)`, formatação e lint.
 - [x] Escrever os primeiros testes de configuração e integração do binário.
-- [ ] Adicionar fixtures literais das futuras respostas RESP2.
+- [x] Adicionar fixtures literais das futuras respostas RESP2.
 - [x] Criar matriz de compatibilidade com todos os itens como pendentes.
 - [x] Fixar Redis e `redis-cli` 8.10.1 e o digest Linux amd64 no manifesto de releases.
-- [ ] Preparar a infraestrutura de referência e conferir sua execução em `R01-01`.
+- [x] Preparar a infraestrutura de referência e conferir sua execução em `R01-01`.
       A imagem fixada não constitui evidência de compatibilidade sem executar os testes.
 
 Saída: `cargo check --locked` e `cargo test --locked` passam. O binário é executável,
@@ -625,7 +625,8 @@ transações entre shards, TLS e ACL ficam após a 1.0. O ambiente suportado at�
 é controlado. Toda publicação requer candidata e gates cumulativos aprovados;
 o bootstrap não será publicado como versão funcional.
 
-A fundação executável e os testes de configuração já fazem parte do bootstrap.
-O próximo trabalho é `R01-01`, fixtures e infraestrutura Redis/CLI, seguido de
-`R01-02`, codec isolado. O roadmap agrupa worker e TCP em `R01-04` e diferenciais
+A fundação executável, os testes de configuração e as fixtures de referência
+Redis/CLI estão implementados. A execução de `R01-01` está documentada no
+[guia de testes](docs/testing.md). O próximo trabalho é `R01-02`, codec isolado.
+O roadmap agrupa worker e TCP em `R01-04` e diferenciais
 e fuzz em `R01-05`, preservando os checkpoints internos deste plano.

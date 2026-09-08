@@ -76,9 +76,11 @@ build de distribuição quando suas interfaces ou configuração forem afetadas.
 O [guia de contribuição](CONTRIBUTING.md#verificações-locais) lista os comandos.
 Não é necessário aguardar CI para integrar um PR. Registre os testes locais no PR.
 
-Os testes atuais cobrem a fundação do projeto; ainda não demonstram compatibilidade
-com Redis. Os testes de RESP2, TCP, comparação com Redis e fuzzing serão adicionados
-nas suas etapas. Antes de cada release, os gates cumulativos continuam obrigatórios,
+Os testes atuais cobrem a fundação e as fixtures da referência Redis; ainda não
+demonstram compatibilidade do Sider. O [guia de testes](docs/testing.md) explica a
+verificação externa opt-in, escrita em Rust. Os testes do codec RESP2, TCP,
+comparação Sider versus Redis e fuzzing serão adicionados nas suas etapas.
+Antes de cada release, os gates cumulativos continuam obrigatórios,
 com execução manual e evidências nas plataformas previstas.
 
 ## Estrutura
@@ -90,6 +92,7 @@ com execução manual e evidências nas plataformas previstas.
 | `src/config.rs` | Configuração inicial e validação do endereço |
 | `src/error.rs` | Erros tipados da configuração |
 | `tests/cli.rs` | Testes de integração do binário |
+| `tests/reference.rs` e `tests/common/` | Fixtures binárias e referência Redis descartável |
 | `Cargo.toml` e `Cargo.lock` | Pacote Rust e dependências fixadas |
 | `rust-toolchain.toml` | Toolchain e componentes de desenvolvimento |
 | `.github/workflows-disabled/` | Workflows inativos, preservados para revisão depois da 1.0 |
@@ -100,15 +103,16 @@ com execução manual e evidências nas plataformas previstas.
 | [docs/releases.md](docs/releases.md) | Execução do backlog, candidatas, publicação e recuperação |
 | [docs/architecture.md](docs/architecture.md) | Fronteiras atuais e arquitetura planejada |
 | [docs/compatibility.md](docs/compatibility.md) | Escopo e estado da compatibilidade |
+| [docs/testing.md](docs/testing.md) | Testes locais e reprodução da referência Redis |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Fluxo de trabalho e critérios de revisão |
 
 ## Próximo passo
 
-A próxima tarefa é `R01-01`: registrar fixtures literais e uma infraestrutura
-descartável com Redis e `redis-cli` 8.10.1, usando a imagem fixada no manifesto.
-Depois, `R01-02` implementa o codec RESP2 isolado, com tipos, limites, encoder e
-decoder incremental. Fragmentação, frames concatenados, conteúdo binário e
-entradas inválidas precisam de testes antes da integração com a rede.
+`R01-01` entrega fixtures literais verificadas com Redis e `redis-cli` 8.10.1,
+na imagem fixada no manifesto: oito casos, 48 trocas sequenciais e oito pipelines.
+A próxima tarefa é `R01-02`: implementar o codec RESP2 isolado, com tipos,
+limites, encoder e decoder incremental. Fragmentação, frames concatenados,
+conteúdo binário e entradas inválidas precisam de testes antes da integração com a rede.
 
 O alvo da versão 0.1 inclui `PING`, `ECHO`, `GET`, `SET` básico e `DEL`, com um
 único worker de armazenamento. TTL, persistência e múltiplos shards pertencem às
