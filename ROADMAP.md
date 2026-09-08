@@ -1,6 +1,6 @@
 # Roadmap de releases do Sider
 
-<!-- Gerado por python -m tools.release.plan --write; editar releases/plan.json. -->
+<!-- Gerado por cargo xtask roadmap --write; editar releases/plan.json. -->
 
 Este roteiro organiza as entregas até a 1.0. O bootstrap é a única capacidade
 concluída nesta linha de base; as funcionalidades do banco permanecem planejadas.
@@ -10,7 +10,7 @@ São 11 milestones e 62 issues: um bootstrap, tarefas funcionais e um gate de pu
 O repositório e os artefatos permanecem privados; a crate usa `publish = false`.
 
 CI e publicação automática estão desativadas até e incluindo a 1.0.
-Sua retomada fica para depois da 1.0, mediante alteração explícita da política e dos workflows.
+Uma retomada posterior exige implementação e alteração explícitas da política.
 Até lá, execute e registre manualmente as verificações e a publicação; os critérios de qualidade permanecem.
 
 ## Índice
@@ -72,7 +72,7 @@ A imagem fixada é uma entrada da suíte; só uma execução registrada constitu
 Objetivos, entregáveis, testes e critérios completos de cada issue estão no
 [manifesto versionado](releases/plan.json). As dependências indicam a ordem de execução.
 
-### 0.1.0 — Núcleo RESP2
+### 0.1.0: Núcleo RESP2
 
 - Implementar PING, ECHO, GET, SET básico e DEL via RESP2/TCP, com worker único.
 - Preservar dados binários, fragmentação, ordenação por conexão, limites e encerramento definidos em PLANO.md.
@@ -94,7 +94,7 @@ Critérios para publicação:
 - Gates native, compatibility, fuzz e tcp_smoke aprovados no SHA exato; fragmentação, binários, limites e ordenação cobertos.
 - Publicar v0.1.0-rc.1 antes da final; conferir pacotes Linux/Windows extraídos, checksums e manifesto; fechar o milestone apenas após a final confirmada.
 
-### 0.2.0 — Strings, TTL e memória
+### 0.2.0: Strings, TTL e memória
 
 - Adicionar EXISTS, INCR, DECR, MGET, MSET, EXPIRE, PEXPIRE, TTL, PTTL e PERSIST.
 - SET aceita NX, XX, EX, PX, GET e KEEPTTL; expiração passiva/ativa e quota com rejeição de crescimento.
@@ -115,7 +115,7 @@ Critérios para publicação:
 - Gates cumulativos aprovados; quota recusa crescimento e opções de SET/TTL têm evidência diferencial.
 - Publicar candidata com 900 segundos de fuzz e depois final com pacotes verificados; encerrar milestone após conferência da final.
 
-### 0.3.0 — Persistência AOF
+### 0.3.0: Persistência AOF
 
 - AOF com formato versionado, checksum e escritor global de mutações resolvidas.
 - Políticas de durabilidade explícitas, replay seguro, compactação e testes de crash em Linux e Windows.
@@ -137,7 +137,7 @@ Critérios para publicação:
 - Gates cumulativos incluem crash, recovery e migration; na primeira AOF, migration usa fixtures do formato inicial.
 - Compactação e substituição de arquivos testadas; candidata e final publicadas com evidências e pacotes conferidos antes de fechar milestone.
 
-### 0.4.0 — Shards
+### 0.4.0: Shards
 
 - Roteamento determinístico com hash tags e número fixo de workers proprietários.
 - Operações multichave exigem mesmo shard; AOF inicialmente mantém escritor global e ordem recuperável.
@@ -159,7 +159,7 @@ Critérios para publicação:
 - AOF e migração preservam recuperação; gate sharding passa e medições iniciais estão publicadas como evidência.
 - Notas registram restrição multichave; candidata aprovada precede final e encerramento do milestone.
 
-### 0.5.0 — Coleções básicas
+### 0.5.0: Coleções básicas
 
 - Adicionar hashes, listas e sets tipados com o subconjunto de comandos registrado em contracts.commands_added.
 - LPOP e RPOP inicialmente sem count; preservar TTL, quota, AOF e roteamento.
@@ -181,7 +181,7 @@ Critérios para publicação:
 - Gate types e todos os anteriores aprovados, incluindo migração AOF e contabilidade de memória.
 - Candidata e pacotes finais conferidos; milestone encerra somente após publicação final.
 
-### 0.6.0 — Sorted sets
+### 0.6.0: Sorted sets
 
 - Adicionar ZADD básico, ZREM, ZCARD, ZSCORE e ZRANGE start stop [WITHSCORES].
 - Ordenar por score e desempatar por bytes do membro; manter persistência e limites.
@@ -201,7 +201,7 @@ Critérios para publicação:
 - Gate sorted_sets e cumulativos aprovados; recovery preserva scores e ordenação.
 - Candidata aprovada antecede a final com pacotes e evidências conferidos.
 
-### 0.7.0 — Transações
+### 0.7.0: Transações
 
 - Adicionar MULTI, EXEC, DISCARD, WATCH e UNWATCH limitados a um shard.
 - Separar erros de enfileiramento de erros individuais de execução sem rollback; persistir o lote atomicamente.
@@ -222,7 +222,7 @@ Critérios para publicação:
 - Gate transactions e cumulativos aprovados; replay não aplica meia transação.
 - Candidata e final passam por todos os gates e conferência de pacotes antes do encerramento do milestone.
 
-### 0.8.0 — Pub/Sub
+### 0.8.0: Pub/Sub
 
 - Adicionar SUBSCRIBE, UNSUBSCRIBE, PUBLISH e PING no modo assinante RESP2.
 - Inscrições e mensagens são efêmeras; filas limitadas e clientes lentos não bloqueiam o banco.
@@ -243,7 +243,7 @@ Critérios para publicação:
 - Gate pubsub e cumulativos aprovados, incluindo comportamento de PING no modo assinante.
 - Candidata e final publicadas com evidências; milestone permanece aberto até conferir a final.
 
-### 0.9.0 — Replicação
+### 0.9.0: Replicação
 
 - Replicação assíncrona Sider→Sider da mesma versão e configuração de shards.
 - Sincronização completa e incremental, reconexão, réplicas somente leitura e promoção manual; sem failover automático.
@@ -265,7 +265,7 @@ Critérios para publicação:
 - Gate replication e cumulativos aprovados; backlog insuficiente força sincronização completa e promoção é manual.
 - Candidata e final verificadas; procedimentos não prometem failover automático nem ausência de perda assíncrona.
 
-### 0.10.0 — Operação e distribuição
+### 0.10.0: Operação e distribuição
 
 - Métricas, diagnóstico e procedimentos reproduzíveis de backup e restauração.
 - Distribuir imagem Docker Linux amd64 como arquivo anexado à release privada; comprovar operação e encerramento.
@@ -287,7 +287,7 @@ Critérios para publicação:
 - Gate docker e cumulativos aprovados; imagem executável exportada acompanha os pacotes e checksums privados.
 - Candidata e final conferidas antes do encerramento; não há publicação em crates.io ou registry público.
 
-### 1.0.0 — Estabilização
+### 1.0.0: Estabilização
 
 - Congelar o subconjunto compatível, comprovar recuperação e migração, executar carga prolongada e benchmarks reproduzíveis.
 - Incluir sorted sets, transações e replicação Sider→Sider; documentar garantias sem prometer capacidades fora do escopo.
@@ -320,7 +320,7 @@ Critérios para publicação:
 7. Encerre o milestone somente após conferir a publicação final e seus artefatos.
 
 O fluxo completo e os comandos de preparação estão no [guia de releases](docs/releases.md).
-Os workflows ficam arquivados em `.github/workflows-disabled/`, fora do diretório executado pelo GitHub.
+Não há workflows de CI nem publicador automático neste repositório.
 Cada candidata exige pelo menos 15 minutos de fuzz; a 1.0 acrescenta uma hora de carga contínua.
 As evidências são cumulativas. Teste ausente, ignorado, cancelado ou sem relatório bloqueia a publicação.
 Na primeira versão AOF, migração valida fixtures do formato inicial; nas seguintes, testa a versão anterior suportada.
@@ -333,11 +333,17 @@ Patches, como `0.3.1`, precisam de registro próprio no manifesto e de milestone
 Patches também têm candidata. Novas capacidades entram em minor; incompatibilidades antes da 1.0
 são restritas às minors e descritas nas notas. Não há datas artificiais.
 
-Reexecuções retomam drafts e uploads incompletos. Tag com SHA divergente ou artefato publicado diferente
+Na retomada manual, confira drafts e uploads existentes. Tag com SHA divergente ou artefato publicado diferente
 interrompe o fluxo. Uma release publicada não é sobrescrita.
 
 Para validar a fonte e a projeção sem alterar arquivos:
 
 ```sh
-python -m tools.release.plan --check
+cargo xtask validate
+```
+
+Para regenerar a projeção a partir do manifesto:
+
+```sh
+cargo xtask roadmap --write
 ```
