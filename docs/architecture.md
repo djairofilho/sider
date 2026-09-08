@@ -4,20 +4,21 @@ O Sider começa como uma única crate Rust, com biblioteca testável e um binár
 pequeno. O [plano de implementação](../PLANO.md) define os contratos completos da
 versão 0.1; este documento resume as fronteiras e identifica o que já existe.
 
-## Implementado na fundação
+## Implementado
 
 | Parte | Responsabilidade atual |
 | --- | --- |
 | Biblioteca | Expor a configuração reutilizável pelo binário e pelos testes |
+| Codec RESP2 | Representar, validar, codificar e decodificar frames com limites |
 | Configuração | Ler e validar `SIDER_ADDR`, com padrão `127.0.0.1:6379` |
 | Erros de configuração | Representar falhas de validação com tipos explícitos |
 | Binário | Processar ajuda e versão; validar a configuração na execução normal |
 | Ferramentas de desenvolvimento | Fixar toolchain e dependências; verificar formatação, lint, testes e build |
 
 A execução normal informa que o servidor TCP ainda não foi implementado. Não há
-listener, codec, parser de comandos, mapa de dados ou tarefas assíncronas neste
-estágio. A única dependência de produção inicial é `thiserror`, usada nos erros
-tipados. O código próprio usa `#![forbid(unsafe_code)]`.
+listener, parser de comandos, mapa de dados ou tarefas assíncronas neste estágio.
+As dependências de produção são `thiserror`, para erros tipados, e `bytes`, para
+buffers e payloads binários. O código próprio usa `#![forbid(unsafe_code)]`.
 
 `ServerConfig` contém `bind_addr: SocketAddr`. `from_env` lê o ambiente do
 processo; `from_lookup` permite fornecer valores explícitos nos testes, sem alterar
@@ -35,15 +36,15 @@ inválida como falhas, com código de saída diferente de zero.
 | Conexão | Buffer, codec, parser, handle do worker e socket | Acesso direto ao mapa |
 | Servidor | Listener, configuração, tarefas e encerramento | Detalhes de cada comando |
 
-Esses componentes serão criados nas respectivas etapas. A estrutura inicial não
+Além do codec, esses componentes serão criados nas respectivas etapas. A estrutura não
 antecipa módulos vazios nem várias crates sem consumidores independentes.
 
 ### Propriedade do armazenamento
 
 Um único worker possuirá o `HashMap` e executará cada comando de forma síncrona.
 Conexões enviarão pedidos por um canal `mpsc` limitado e receberão a resposta por
-um canal `oneshot`. Tokio e as dependências de bytes e observabilidade serão
-adicionados quando esses componentes forem implementados.
+um canal `oneshot`. Tokio e as dependências de observabilidade serão adicionados
+quando esses componentes forem implementados. `bytes` já é usado pelo codec.
 
 A fila define a ordem de execução entre conexões. Cada conexão aguardará sua
 resposta antes de despachar o próximo comando. Assim, a versão 0.1 manterá um
@@ -52,17 +53,17 @@ cliente, sem prometer justiça estrita entre clientes.
 
 ### Protocolo e dados binários
 
-O decoder será incremental: uma leitura TCP poderá conter um fragmento, um frame
-completo ou vários frames. Ele deverá consumir exatamente um frame completo,
-preservar o sufixo do buffer e manter estado limitado enquanto aguarda mais bytes.
+O decoder é incremental: sua entrada pode conter um fragmento, um frame completo
+ou vários frames. Ele consome exatamente um frame completo, preserva o sufixo do
+buffer e mantém estado limitado enquanto aguarda mais bytes.
 
-O codec representará os cinco tipos RESP2. O parser aceitará como requisição apenas
+O codec representa os cinco tipos RESP2. O parser aceitará como requisição apenas
 arrays não vazios de bulk strings não nulas. Chaves e valores preservarão os bytes,
 inclusive conteúdo vazio e sequências que não sejam UTF-8.
 
-Inicialmente, payloads de entrada serão copiados para alocações independentes.
+Payloads de entrada são copiados para alocações independentes após validação completa.
 Isso evita que uma chave pequena retenha um buffer grande de rede. A decisão poderá
-ser revista com medições após a implementação correta e testada.
+ser revista com medições. O [guia do codec](resp.md) detalha contratos e limites.
 
 ### Limites e ciclo de vida
 

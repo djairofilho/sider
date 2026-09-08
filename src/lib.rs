@@ -1,11 +1,12 @@
-//! Base do Sider: configuração e erros independentes da camada de rede.
+//! Configuração e codec RESP2 do Sider, independentes da camada de rede.
 //!
-//! RESP2, comandos e armazenamento serão adicionados conforme o `PLANO.md`.
+//! Comandos e armazenamento serão adicionados conforme o `PLANO.md`.
 
 #![forbid(unsafe_code)]
 
 pub mod config;
 pub mod error;
+pub mod resp;
 
 pub use config::ServerConfig;
 pub use error::ConfigError;

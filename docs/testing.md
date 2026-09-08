@@ -6,6 +6,7 @@ para os comandos deste documento. A CI permanece desligada até a 1.0 inclusive.
 ## Índice
 
 - [Ciclo local](#ciclo-local)
+- [Codec isolado](#codec-isolado)
 - [Referência Redis descartável](#referência-redis-descartável)
 - [O que as fixtures cobrem](#o-que-as-fixtures-cobrem)
 - [Execução registrada](#execução-registrada)
@@ -25,6 +26,21 @@ cargo clippy --locked --all-targets -- -D warnings
 O teste externo aparece explicitamente como `ignored` no ciclo normal. Isso não
 significa aprovação da referência. Para concluir R01-01, execute o teste externo
 abaixo e confira seu resultado, além dos testes locais.
+
+## Codec isolado
+
+O codec de R01-02 tem testes unitários e integração sem Docker:
+
+```sh
+cargo test --locked --lib resp::
+cargo test --locked --test resp_codec
+```
+
+A suíte cobre os cinco tipos, fixtures literais, fragmentação, concatenação,
+limites e entradas inválidas. Quatro propriedades executam 512 casos cada,
+incluindo árvores válidas e bytes arbitrários. O contador de trabalho dos testes
+unitários confere crescimento linear ao fragmentar cabeçalhos e arrays.
+Consulte os [contratos do codec](resp.md).
 
 ## Referência Redis descartável
 
@@ -105,8 +121,8 @@ comprovar que infraestrutura ausente resulta em falha explícita. Esse ambiente
 
 ## Limites desta evidência
 
-R01-01 comprova a referência e suas fixtures. O Sider ainda não implementa o codec,
-comandos ou serviço TCP, portanto esses testes não são uma suíte diferencial
+R01-01 comprova a referência e suas fixtures. O Sider possui um codec isolado,
+mas ainda não implementa comandos ou serviço TCP. Esses testes não são uma suíte diferencial
 Sider versus Redis. A comparação com o produto será adicionada em R01-05.
 
 Opções de `SET`, comando desconhecido, requisições fora do subconjunto e limites
