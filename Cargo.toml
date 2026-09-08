@@ -1,0 +1,15 @@
+[package]
+name = "sider"
+version = "0.1.0"
+edition = "2024"
+description = "In-memory database server with an incremental Redis-compatible core"
+repository = "https://github.com/djairofilho/sider"
+publish = false
+
+[dependencies]
+thiserror = "2"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
