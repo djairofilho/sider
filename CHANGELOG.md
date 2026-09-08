@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Suíte diferencial independente Sider/Redis, integração com `redis-cli`,
+  testes de reutilização de conexões e gates locais em Rust com recibos verificados.
+- Alvo isolado de fuzz com AddressSanitizer, corpus versionado e execução mínima
+  de 900 segundos; ambiente local Ubuntu reproduzível para testes.
 - Worker proprietário e servidor RESP2/TCP, com filas e conexões limitadas,
   timeouts, prontidão atômica e encerramento supervisionado.
 - Bootstrap Rust com configuração validada e testes.

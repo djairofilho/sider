@@ -102,11 +102,41 @@ impl ReferenceConfig {
 pub struct RedisReference {
     container: ContainerGuard,
     address: SocketAddr,
+    shared_runner: Option<String>,
 }
 
 impl RedisReference {
     /// Falha explicitamente se Docker, imagem, digest ou versões não corresponderem.
     pub fn start() -> Self {
+        Self::start_mode(None)
+    }
+
+    /// Usa o namespace de rede de um runner Linux isolado, sem publicar portas.
+    /// O chamador deve executar nesse runner e serializar uma referência por vez.
+    #[allow(dead_code)] // A referência host também inclui este módulo comum.
+    pub fn start_shared(runner_id: &str) -> Self {
+        assert!(
+            valid_hex_id(runner_id),
+            "runner exige ID Docker completo, não nome ou prefixo"
+        );
+        let runner = checked(
+            docker(&["container", "inspect", runner_id]),
+            "inspecionar runner compartilhado",
+        );
+        inspect_runner(&runner.stdout, runner_id)
+            .expect("runner Linux deve ter rede privada sem portas publicadas");
+        let address = SocketAddr::from(([127, 0, 0, 1], 6379));
+        match TcpStream::connect_timeout(&address, Duration::from_millis(200)) {
+            Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {}
+            Ok(_) => {
+                panic!("loopback 6379 do runner já está ocupado; não reutilizar outra referência")
+            }
+            Err(error) => panic!("não foi possível confirmar loopback livre no runner: {error}"),
+        }
+        Self::start_mode(Some(runner_id))
+    }
+
+    fn start_mode(runner_id: Option<&str>) -> Self {
         let config = ReferenceConfig::parse(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/releases/plan.json"
@@ -132,7 +162,8 @@ impl RedisReference {
             .cidfile
             .to_str()
             .expect("caminho UTF-8 do cidfile");
-        let started = docker(&[
+        let network = runner_id.map(|id| format!("container:{id}"));
+        let mut arguments = vec![
             "run",
             "--pull",
             "never",
@@ -142,8 +173,6 @@ impl RedisReference {
             "--rm",
             "--cidfile",
             cidfile,
-            "--publish",
-            "127.0.0.1::6379",
             "--user",
             "999:999",
             "--read-only",
@@ -155,6 +184,13 @@ impl RedisReference {
             "ALL",
             "--security-opt",
             "no-new-privileges",
+        ];
+        if let Some(network) = &network {
+            arguments.extend_from_slice(&["--network", network]);
+        } else {
+            arguments.extend_from_slice(&["--publish", "127.0.0.1::6379"]);
+        }
+        arguments.extend_from_slice(&[
             &config.image,
             "redis-server",
             "--save",
@@ -164,6 +200,10 @@ impl RedisReference {
             "--protected-mode",
             "no",
         ]);
+        if runner_id.is_some() {
+            arguments.extend_from_slice(&["--bind", "127.0.0.1"]);
+        }
+        let started = docker(&arguments);
         // O cidfile exclusivo permite recuperar o ID até após timeout do cliente Docker.
         container.capture_id();
         let started = checked(started, "iniciar Redis descartável");
@@ -177,8 +217,11 @@ impl RedisReference {
             "ID retornado pelo Docker difere do cidfile exclusivo"
         );
         let inspected = checked(docker(&["container", "inspect", id]), "inspecionar Redis");
-        let address = inspect_container(&inspected.stdout, id, &image_id)
-            .expect("container deve usar a imagem verificada e uma porta efêmera em loopback");
+        let address = match runner_id {
+            Some(runner) => inspect_shared_container(&inspected.stdout, id, &image_id, runner),
+            None => inspect_container(&inspected.stdout, id, &image_id),
+        }
+        .expect("container deve usar a imagem verificada e uma porta efêmera em loopback");
 
         let server = checked(
             docker(&["exec", id, "redis-server", "--version"]),
@@ -218,7 +261,27 @@ impl RedisReference {
             id,
             address
         );
-        Self { container, address }
+        let result = Self {
+            container,
+            address,
+            shared_runner: runner_id.map(str::to_owned),
+        };
+        assert_eq!(
+            result.cli(&["PING"]),
+            b"PONG\n",
+            "Redis deve responder pelo protocolo"
+        );
+        let id = result.container.id.as_deref().expect("container ativo");
+        let inspected = checked(
+            docker(&["container", "inspect", id]),
+            "confirmar Redis após prontidão",
+        );
+        match runner_id {
+            Some(runner) => inspect_shared_container(&inspected.stdout, id, &image_id, runner),
+            None => inspect_container(&inspected.stdout, id, &image_id),
+        }
+        .expect("referência ainda deve estar ativa e isolada após PING");
+        result
     }
 
     pub fn address(&self) -> SocketAddr {
@@ -233,6 +296,37 @@ impl RedisReference {
         checked(docker(&command), "executar redis-cli").stdout
     }
 
+    /// Consulta um Sider no mesmo namespace de rede, apenas em loopback.
+    #[allow(dead_code)] // Utilizado pela suíte diferencial, não pela referência host.
+    pub fn cli_at(&self, address: SocketAddr, args: &[&str]) -> Vec<u8> {
+        validate_cli_address(self.shared_runner.as_deref(), address)
+            .expect("redis-cli externo ao Redis exige modo compartilhado e loopback");
+        assert!(
+            args.first().is_some_and(|arg| !arg.starts_with('-')),
+            "primeiro argumento deve ser um comando, não opção da CLI"
+        );
+        let id = self.container.id.as_deref().expect("container ativo");
+        let host = address.ip().to_string();
+        let port = address.port().to_string();
+        let mut command = vec![
+            "exec",
+            id,
+            "redis-cli",
+            "-2",
+            "--raw",
+            "-h",
+            &host,
+            "-p",
+            &port,
+        ];
+        command.extend_from_slice(args);
+        checked(
+            docker(&command),
+            "executar redis-cli contra Sider compartilhado",
+        )
+        .stdout
+    }
+
     /// Confirma a remoção no caminho de sucesso; Drop também limpa em falhas de teste.
     pub fn finish(mut self) {
         let id = self.container.id.as_deref().expect("container ativo");
@@ -240,8 +334,29 @@ impl RedisReference {
             docker(&["rm", "--force", "--volumes", id]),
             "remover Redis descartável",
         );
+        let remaining = checked(
+            docker(&[
+                "container",
+                "ls",
+                "--all",
+                "--quiet",
+                "--no-trunc",
+                "--filter",
+                &format!("id={id}"),
+            ]),
+            "confirmar remoção do Redis",
+        );
+        assert!(
+            remaining.stdout.iter().all(u8::is_ascii_whitespace),
+            "container Redis ainda aparece após remoção"
+        );
         self.container.removed = true;
         eprintln!("container Redis removido: {id}");
+        let cidfile = self.container.cidfile.clone();
+        let directory = self.container.directory.clone();
+        drop(self);
+        assert!(!cidfile.exists(), "cidfile próprio deve ser removido");
+        assert!(!directory.exists(), "diretório próprio deve ser removido");
     }
 }
 
@@ -337,6 +452,73 @@ fn inspect_container(output: &[u8], id: &str, image_id: &str) -> Result<SocketAd
         return Err("porta publicada não pode ser zero".into());
     }
     Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+}
+
+fn no_published_ports(value: &Value) -> bool {
+    value.is_null()
+        || value.as_object().is_some_and(|ports| {
+            ports.values().all(|bindings| {
+                bindings.is_null() || bindings.as_array().is_some_and(Vec::is_empty)
+            })
+        })
+}
+
+fn inspect_runner(output: &[u8], id: &str) -> Result<(), String> {
+    let value: Value = serde_json::from_slice(output).map_err(|e| e.to_string())?;
+    let runner = single_inspection(&value)?;
+    if !valid_hex_id(id)
+        || runner["Id"] != id
+        || runner["State"]["Running"] != true
+        || runner["Platform"] != "linux"
+    {
+        return Err("runner deve ser container Linux ativo com ID completo correspondente".into());
+    }
+    let network = runner["HostConfig"]["NetworkMode"]
+        .as_str()
+        .ok_or("runner sem modo de rede")?;
+    if network.is_empty()
+        || matches!(network, "host" | "none")
+        || network.starts_with("container:")
+        || !no_published_ports(&runner["HostConfig"]["PortBindings"])
+        || !no_published_ports(&runner["NetworkSettings"]["Ports"])
+    {
+        return Err("runner exige namespace de rede privado sem portas publicadas".into());
+    }
+    Ok(())
+}
+
+fn inspect_shared_container(
+    output: &[u8],
+    id: &str,
+    image_id: &str,
+    runner_id: &str,
+) -> Result<SocketAddr, String> {
+    let value: Value = serde_json::from_slice(output).map_err(|e| e.to_string())?;
+    let container = single_inspection(&value)?;
+    if !valid_hex_id(id)
+        || !valid_hex_id(runner_id)
+        || container["Id"] != id
+        || container["Image"] != image_id
+        || container["State"]["Running"] != true
+    {
+        return Err("identidade/estado do Redis compartilhado divergente".into());
+    }
+    if container["HostConfig"]["NetworkMode"] != format!("container:{runner_id}")
+        || !no_published_ports(&container["HostConfig"]["PortBindings"])
+        || !no_published_ports(&container["NetworkSettings"]["Ports"])
+    {
+        return Err(
+            "Redis deve compartilhar somente a rede do runner indicado, sem publicar portas".into(),
+        );
+    }
+    Ok(SocketAddr::from(([127, 0, 0, 1], 6379)))
+}
+
+fn validate_cli_address(runner: Option<&str>, address: SocketAddr) -> Result<(), String> {
+    if !runner.is_some_and(valid_hex_id) || !address.ip().is_loopback() || address.port() == 0 {
+        return Err("redis-cli só acessa loopback no runner compartilhado verificado".into());
+    }
+    Ok(())
 }
 
 fn server_version_matches(output: &[u8], expected: &str) -> bool {
@@ -578,6 +760,100 @@ mod tests {
         assert!(valid_hex_id(&"f".repeat(64)));
         for invalid in ["redis", "--all", "abc123", &"f".repeat(65), &"G".repeat(64)] {
             assert!(!valid_hex_id(invalid));
+        }
+    }
+
+    #[test]
+    fn shared_runner_requires_full_identity_linux_private_network_and_no_ports() {
+        let id = "a".repeat(64);
+        let inspection = json!([{
+            "Id": id, "Platform": "linux", "State": {"Running": true},
+            "HostConfig": {"NetworkMode":"bridge", "PortBindings":{}},
+            "NetworkSettings": {"Ports":{}}
+        }]);
+        let parse = |value: &Value| inspect_runner(&serde_json::to_vec(value).unwrap(), &id);
+        parse(&inspection).unwrap();
+        for (pointer, invalid) in [
+            ("/0/Id", json!("b".repeat(64))),
+            ("/0/Platform", json!("windows")),
+            ("/0/State/Running", json!(false)),
+            ("/0/HostConfig/NetworkMode", json!("host")),
+            ("/0/HostConfig/NetworkMode", json!("none")),
+            (
+                "/0/HostConfig/NetworkMode",
+                json!(format!("container:{id}")),
+            ),
+            (
+                "/0/HostConfig/PortBindings",
+                json!({"6379/tcp":[{"HostIp":"127.0.0.1","HostPort":"6379"}]}),
+            ),
+            (
+                "/0/NetworkSettings/Ports",
+                json!({"6379/tcp":[{"HostIp":"0.0.0.0","HostPort":"6379"}]}),
+            ),
+        ] {
+            let mut value = inspection.clone();
+            *value.pointer_mut(pointer).unwrap() = invalid;
+            assert!(parse(&value).is_err(), "{pointer}");
+        }
+        assert!(inspect_runner(&serde_json::to_vec(&inspection).unwrap(), "short").is_err());
+    }
+
+    #[test]
+    fn shared_redis_requires_exact_runner_and_never_published_ports() {
+        let id = "a".repeat(64);
+        let runner = "b".repeat(64);
+        let image = format!("sha256:{}", "c".repeat(64));
+        let inspection = json!([{
+            "Id":id,"Image":image,"State":{"Running":true},
+            "HostConfig":{"NetworkMode":format!("container:{runner}"),"PortBindings":{}},
+            "NetworkSettings":{"Ports":{}}
+        }]);
+        let parse = |value: &Value| {
+            inspect_shared_container(&serde_json::to_vec(value).unwrap(), &id, &image, &runner)
+        };
+        assert_eq!(
+            parse(&inspection).unwrap(),
+            "127.0.0.1:6379".parse().unwrap()
+        );
+        for (pointer, invalid) in [
+            ("/0/Id", json!("d".repeat(64))),
+            ("/0/Image", json!("other")),
+            ("/0/State/Running", json!(false)),
+            ("/0/HostConfig/NetworkMode", json!("host")),
+            (
+                "/0/HostConfig/NetworkMode",
+                json!(format!("container:{}", "e".repeat(64))),
+            ),
+            (
+                "/0/HostConfig/PortBindings",
+                json!({"6379/tcp":[{"HostIp":"127.0.0.1","HostPort":"12345"}]}),
+            ),
+            (
+                "/0/NetworkSettings/Ports",
+                json!({"6379/tcp":[{"HostIp":"127.0.0.1","HostPort":"12345"}]}),
+            ),
+        ] {
+            let mut value = inspection.clone();
+            *value.pointer_mut(pointer).unwrap() = invalid;
+            assert!(parse(&value).is_err(), "{pointer}");
+        }
+    }
+
+    #[test]
+    fn external_cli_requires_shared_mode_loopback_and_nonzero_port() {
+        let id = "a".repeat(64);
+        for address in ["127.0.0.1:12345", "[::1]:12345"] {
+            validate_cli_address(Some(&id), address.parse().unwrap()).unwrap();
+        }
+        for (runner, address) in [
+            (None, "127.0.0.1:12345"),
+            (Some("short"), "127.0.0.1:12345"),
+            (Some(id.as_str()), "0.0.0.0:12345"),
+            (Some(id.as_str()), "192.0.2.1:12345"),
+            (Some(id.as_str()), "127.0.0.1:0"),
+        ] {
+            assert!(validate_cli_address(runner, address.parse().unwrap()).is_err());
         }
     }
 

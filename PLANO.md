@@ -9,8 +9,9 @@ com tarefas, dependências e critérios. O [guia de releases](docs/releases.md)
 descreve candidatas e publicação. O bootstrap já contém pacote Rust, configuração de
 endereço e binário com testes. A referência Redis e o codec RESP2 isolado estão
 implementados, assim como parser e armazenamento síncrono dos cinco comandos.
-Worker e servidor TCP também estão implementados em R01-04. Diferenciais e fuzz
-ainda estão pendentes. O estado atual está no [README](README.md).
+Worker e servidor TCP também estão implementados em R01-04. A suíte diferencial,
+a integração com CLI e o alvo de fuzz de R01-05 estão implementados. As execuções
+e seus limites estão no [guia de testes](docs/testing.md).
 
 CI e publicação automática foram adiadas para depois da 1.0. Até a 1.0 inclusive,
 as etapas avançam com testes locais e publicação manual, mantendo os critérios
@@ -504,16 +505,16 @@ inicialização, erros e encerramento, sem registrar chaves ou valores por padr�
 
 ### 6. Compatibilidade com Redis e redis-cli
 
-- [ ] Criar suíte diferencial que envia os mesmos bytes a instâncias isoladas de
+- [x] Criar suíte diferencial que envia os mesmos bytes a instâncias isoladas de
       Redis e Sider. O oráculo de teste não dependerá apenas do codec sob teste.
-- [ ] Comparar respostas brutas, tipos, códigos e mensagens de erro declaradas
+- [x] Comparar respostas brutas, tipos, códigos e mensagens de erro declaradas
       compatíveis, além do estado observado pelos comandos suportados.
-- [ ] Executar sequências determinísticas e geradas de `SET`, `GET` e `DEL`, com
+- [x] Executar sequências determinísticas e geradas de `SET`, `GET` e `DEL`, com
       prefixos de chaves exclusivos por caso e instâncias descartáveis.
-- [ ] Executar os cinco comandos usando `redis-cli` em modo RESP2 e não interativo.
-- [ ] Separar testes nativos obrigatórios da suíte externa, marcada explicitamente
+- [x] Executar os cinco comandos usando `redis-cli` em modo RESP2 e não interativo.
+- [x] Separar testes nativos obrigatórios da suíte externa, marcada explicitamente
       como dependente de Redis/CLI. Ausência da ferramenta não conta como aprovação.
-- [ ] Atualizar a matriz por comando, forma suportada, limitação, teste e versão usada.
+- [x] Atualizar a matriz por comando, forma suportada, limitação, teste e versão usada.
 
 Saída: os testes externos passam antes de declarar a 0.1 concluída. Não usaremos a
 saída textual de `redis-cli` como comparação binária: ele apresenta valores ao usuário,
@@ -526,14 +527,15 @@ Clientes que exigem handshake automático terão sua limitação documentada.
 
 ### 7. Robustez e entrega da 0.1
 
-- [ ] Adicionar alvo de fuzz do decoder com limites pequenos, múltiplas chamadas e
+- [x] Adicionar alvo de fuzz do decoder com limites pequenos, múltiplas chamadas e
       corpus de frames válidos, truncados, concatenados e malformados.
-- [ ] Fazer uma execução inicial de fuzz com duração registrada, por exemplo 15 minutos,
+- [x] Fazer uma execução inicial de fuzz com duração registrada, por exemplo 15 minutos,
       em Linux com a toolchain exigida pela ferramenta, isolada do build estável.
-- [ ] Transformar falhas encontradas em regressões determinísticas.
-- [ ] Validar liberação de recursos após clientes lentos e múltiplas desconexões.
-- [ ] Documentar arquitetura, comandos suportados, limites e como reproduzir os testes.
-- [ ] Executar a bateria final e registrar resultados reais, incluindo testes ignorados.
+- [x] Revisar o resultado e transformar falhas encontradas em regressões determinísticas.
+      A execução inicial de 452.886 casos não encontrou falhas novas para converter.
+- [x] Validar liberação de recursos após clientes lentos e múltiplas desconexões.
+- [x] Documentar arquitetura, comandos suportados, limites e como reproduzir os testes.
+- [x] Executar a bateria final e registrar resultados reais, incluindo testes ignorados.
 
 Verificação rápida local das etapas, conforme os alvos forem surgindo:
 
@@ -634,6 +636,6 @@ A fundação executável, os testes de configuração e as fixtures de referênc
 Redis/CLI estão implementados. A execução de `R01-01` está documentada no
 [guia de testes](docs/testing.md). O codec isolado de `R01-02` também está
 implementado, assim como parser e armazenamento síncrono de `R01-03`, worker e
-TCP de `R01-04`. O próximo trabalho é `R01-05`, diferenciais e fuzz.
-O roadmap agrupa worker e TCP em `R01-04` e diferenciais
-e fuzz em `R01-05`, preservando os checkpoints internos deste plano.
+TCP de `R01-04`. `R01-05` implementa diferenciais e fuzz; sua execução e integração
+precedem `R01-GATE`, a candidata e a publicação final. O roadmap preserva os
+checkpoints internos deste plano.

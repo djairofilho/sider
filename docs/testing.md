@@ -9,6 +9,7 @@ para os comandos deste documento. A CI permanece desligada até a 1.0 inclusive.
 - [Codec isolado](#codec-isolado)
 - [Comandos sem rede](#comandos-sem-rede)
 - [Worker, TCP e binário](#worker-tcp-e-binário)
+- [Diferenciais, robustez e fuzz](#diferenciais-robustez-e-fuzz)
 - [Referência Redis descartável](#referência-redis-descartável)
 - [O que as fixtures cobrem](#o-que-as-fixtures-cobrem)
 - [Execução registrada](#execução-registrada)
@@ -80,6 +81,28 @@ pausado para comprovar backpressure, fronteira de aceitação e prazos totais.
 A espera pelo arquivo de prontidão consulta um processo filho vivo com deadline;
 não usa uma pausa arbitrária para decidir a ordem de comandos.
 O [guia de rede](network.md) detalha os contratos verificados.
+
+## Diferenciais, robustez e fuzz
+
+```sh
+cargo test --locked --test compatibility --test harness --test gate_contract
+cargo test --locked --test robustness --test fuzz_gate
+```
+
+Esses comandos cobrem o leitor independente de respostas, geração de sequências,
+processos descartáveis, recibos de gates, seeds do fuzz e reocupação de todas as
+vagas após ondas de desconexões ou frames lentos. Não medem quota do dataset nem
+provam ausência geral de leaks.
+
+Os [diferenciais externos](differential.md) enviam os mesmos bytes a Redis e Sider,
+comparam tipos e respostas completas e observam o estado final das chaves. O caminho
+Linux compartilhado também executa `redis-cli` contra o Sider. Docker ou imagem
+ausentes causam falha; esses entrypoints não rodam implicitamente na suíte comum.
+
+O [workspace de fuzz](../fuzz/README.md) usa nightly isolada e AddressSanitizer.
+Seus 27 seeds também rodam como regressões nativas com Rust estável. Preparar o
+corpus ou executar uma amostra curta não satisfaz os 900 segundos obrigatórios.
+Os gates escrevem recibos apenas após sucesso e validação do checkout limpo.
 
 ## Referência Redis descartável
 
@@ -176,18 +199,51 @@ testes TCP incluem cancelamento, backpressure, prazos e encerramento. A referên
 Redis continua opt-in e não foi contabilizada como aprovação pelo teste ignorado.
 Esses resultados não são gates de uma release nem testes de pacotes extraídos.
 
+R01-05 passou em Windows x86_64 MSVC e Linux x86_64 GNU (Ubuntu 24.04), com Rust
+1.97.1: 230 testes comuns e 231, respectivamente, mais um doctest em cada sistema.
+Formatação, check de todos os alvos, Clippy sem warnings, documentação e build de
+release também passaram. Seis entrypoints opt-in ficaram ignorados nesse ciclo:
+referência externa, três entradas de compatibilidade, preparação de corpus e gate
+de fuzz. Eles não foram contados como aprovação de gates.
+
+Separadamente, `sider_matches_redis` passou no Windows com 3.588 comparações
+binárias. No Linux, `sider_matches_redis_and_cli` passou com as mesmas 3.588
+comparações e nove cenários CLI adicionais. Servidor e CLI reportaram 8.10.1,
+com digest e plataforma conferidos; a limpeza foi confirmada em ambos os caminhos.
+O build da receita local `dev/test.Dockerfile` também foi executado e suas versões
+de Rust, cargo-fuzz, Docker CLI e Clang foram conferidas.
+
+O fuzz inicial do decoder terminou com exit code 0, após 903,636 segundos reais
+de execução, sem contar a compilação. O libFuzzer reportou 452.886 execuções em
+902 segundos, cobertura 539 e pico RSS de 596 MiB. Não houve panic, diagnóstico
+de sanitizer ou arquivo de falha. A execução usou AddressSanitizer,
+`nightly-2026-09-07`, cargo-fuzz 0.13.2, seed `1397310533` e limite de entrada
+de 4.096 bytes. O corpus inicial tinha 155 arquivos: 27 seeds versionados e
+128 entradas preservadas de uma amostra curta anterior.
+
+Os logs e o corpus foram preservados localmente em `target/fuzz-initial-r01/`.
+O SHA-256 de `initial.stderr.log` é
+`85583e8d6e323f83078828c25880ac6b82d043d5819280f6cfb843c3f0c7d671`.
+O alvo compilado corresponde a `fuzz/fuzz_targets/resp_decoder.rs` com SHA-256
+`18ac54c4679546482512e4c6794a1699ee8077d168b8b7d38a73c00de59bfaaa`;
+o lockfile isolado tem SHA-256
+`f6433cd44db1590a09afa270cba31822ff8a59b314204b1cec3ad3efeed56ee2`.
+Esta foi a execução inicial de R01-05, com documentação ainda em edição.
+Não criou recibo de release e não substitui o fuzz no SHA exato de cada RC/final.
+
 ## Limites desta evidência
 
 R01-01 comprova a referência e suas fixtures. R01-03 reproduz essas fixtures no
-núcleo síncrono Sider e R01-04 pelo TCP. Ainda não há suíte diferencial simultânea
-entre servidores ou teste do Sider com `redis-cli`. Esses caminhos e o fuzz serão
-adicionados em R01-05.
+núcleo síncrono Sider e R01-04 pelo TCP. R01-05 acrescenta comparação simultânea
+dos servidores, CLI e o alvo de fuzz. Cada forma de comando é verificada somente
+nos cenários descritos; não há promessa de compatibilidade com clientes que exigem
+outros comandos ou handshake automático.
 
 Opções de `SET`, comando desconhecido, requisições fora do subconjunto e limites
 próprios do Sider não entram como igualdade implícita com Redis. As diferenças
 intencionais estão na [matriz de compatibilidade](compatibility.md).
 
 Redis rodando em Linux dentro do Docker não comprova que o binário Sider foi
-compilado e testado nativamente em Linux. A execução nativa de R01-03 descrita
-acima é uma verificação separada. Ela ainda não valida pacotes extraídos ou TCP
-nem substitui os gates no SHA exato de uma futura release.
+compilado e testado nativamente em Linux. As execuções nativas de R01-03 a R01-05
+descritas acima são verificações separadas da referência Redis. Elas não validam
+pacotes extraídos nem substituem os gates no SHA exato de uma futura release.
