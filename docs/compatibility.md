@@ -1,20 +1,20 @@
 # Compatibilidade com Redis
 
-Os cinco comandos da 0.1 estão implementados no núcleo síncrono do Sider, com
-parser e armazenamento testados pelas fixtures da referência. O binário valida
-configuração, mas ainda não oferece serviço TCP. Esta matriz distingue testes
-do núcleo de compatibilidade demonstrada com clientes de rede.
+Os cinco comandos da 0.1 estão implementados e suas fixtures passam pelo
+servidor TCP do Sider. A referência foi verificada separadamente em R01-01.
+A comparação diferencial simultânea Sider/Redis e o teste do Sider com
+`redis-cli` continuam pendentes de R01-05.
 
 ## Matriz da versão 0.1
 
 | Forma do comando | Comportamento alvo | Implementação | Verificação contra Redis |
 | --- | --- | --- | --- |
-| `PING` | Responder com simple string `PONG` | Núcleo síncrono | Fixtures; TCP pendente |
-| `PING mensagem` | Devolver a mensagem como bulk string | Núcleo síncrono | Fixtures; TCP pendente |
-| `ECHO mensagem` | Devolver exatamente os bytes da mensagem | Núcleo síncrono | Fixtures; TCP pendente |
-| `GET chave` | Devolver bulk string ou bulk string nula se ausente | Núcleo síncrono | Fixtures; TCP pendente |
-| `SET chave valor` | Criar ou substituir; responder com simple string `OK` | Núcleo síncrono | Fixtures; TCP pendente |
-| `DEL chave [chave ...]` | Contar apenas as chaves efetivamente removidas | Núcleo síncrono | Fixtures; TCP pendente |
+| `PING` | Responder com simple string `PONG` | TCP | Fixtures por TCP; diferencial pendente |
+| `PING mensagem` | Devolver a mensagem como bulk string | TCP | Fixtures por TCP; diferencial pendente |
+| `ECHO mensagem` | Devolver exatamente os bytes da mensagem | TCP | Fixtures por TCP; diferencial pendente |
+| `GET chave` | Devolver bulk string ou bulk string nula se ausente | TCP | Fixtures por TCP; diferencial pendente |
+| `SET chave valor` | Criar ou substituir; responder com simple string `OK` | TCP | Fixtures por TCP; diferencial pendente |
+| `DEL chave [chave ...]` | Contar apenas as chaves efetivamente removidas | TCP | Fixtures por TCP; diferencial pendente |
 
 A referência inicial é Redis e `redis-cli` **8.10.1**, na plataforma Linux amd64.
 A tag e o digest da imagem estão fixados em [releases/plan.json](../releases/plan.json):
@@ -29,8 +29,9 @@ digest, plataforma e versões do servidor e da CLI antes da execução. Consulte
 os [comandos de reprodução](testing.md).
 
 Em `R01-03`, `tests/commands.rs` executa essas mesmas fixtures no núcleo Sider e
-confere os bytes esperados, sem sockets. As duas etapas comprovam equivalência
-nos casos literais, mas não substituem a comparação diferencial de servidores
+confere os bytes esperados, sem sockets. R01-04 repete as fixtures pelo TCP do
+Sider, incluindo pipelines. Essas etapas comprovam equivalência nos casos
+literais, mas não substituem a comparação diferencial de servidores
 ou o teste do Sider via CLI. `R01-05` comprovará o subconjunto por esses caminhos.
 
 ## Subconjunto alvo
@@ -43,8 +44,8 @@ O codec representa os cinco tipos RESP2, mas isso não significa que todos os
 tipos serão aceitos como argumentos de comandos. Valor nulo, valor vazio,
 array nulo e array vazio têm representações distintas.
 
-Frames fragmentados e comandos concatenados serão tratados desde a versão 0.1.
-Cada conexão processará os comandos em sequência, com um único pedido em voo.
+Frames fragmentados e comandos concatenados são tratados desde R01-04.
+Cada conexão processa os comandos em sequência, com um único pedido em voo.
 
 ## Limitações e divergências planejadas
 
@@ -63,8 +64,7 @@ Cada conexão processará os comandos em sequência, com um único pedido em voo
 | Memória do dataset | Sem quota ou eviction; limites de rede não limitam o tamanho do banco |
 | Uso operacional | Protótipo para desenvolvimento local e testes, com endereço padrão em loopback |
 
-Os limites de entrada e os prazos propostos estão no
-[plano de implementação](../PLANO.md#limites-e-ciclo-de-vida). Eles serão limites
+Os limites de entrada e os prazos estão no [guia de rede](network.md). São limites
 próprios do Sider e não uma reprodução dos valores padrão do Redis.
 
 ## Evidência necessária
@@ -75,6 +75,8 @@ Para repetir a validação do núcleo sem rede:
 cargo test --locked --lib command::
 cargo test --locked --lib storage::
 cargo test --locked --test commands
+cargo test --locked --test tcp
+cargo test --locked --test cli
 ```
 
 `tests/commands.rs` também confere que opções de `SET`, comandos desconhecidos e

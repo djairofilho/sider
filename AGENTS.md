@@ -4,7 +4,7 @@
 
 - Leia `PLANO.md`, `README.md`, `ROADMAP.md` e `docs/compatibility.md` antes de implementar.
 - Avance pela próxima tarefa desbloqueada do milestone atual, em etapas compiláveis
-  e testáveis. Após os comandos síncronos de `R01-03`, o próximo item é `R01-04`.
+  e testáveis. Após worker e TCP de `R01-04`, o próximo item é `R01-05`.
 - Crie módulos quando houver implementação real; evite stubs e diretórios vazios.
 - Preserve as fronteiras entre RESP, comandos, armazenamento e rede.
 - Use dados binários para chaves e valores. Não limite o protocolo a UTF-8.
@@ -37,7 +37,7 @@
 - Adicione dependências quando houver um consumidor real.
 - Teste comportamento e limites relevantes junto da implementação.
 - Injete a leitura de configuração nos testes. Não altere o ambiente global.
-- Use portas efêmeras e sincronização explícita nos futuros testes de rede.
+- Use portas efêmeras e sincronização explícita nos testes de rede.
 - Use `cargo fmt --check`, `cargo check --locked` e `cargo test --locked`
   no ciclo rápido local. Não espere CI para integrar PRs.
 - Execute `cargo clippy --locked --all-targets -- -D warnings` quando alterar
