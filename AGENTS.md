@@ -34,6 +34,8 @@
 ## Rust e testes
 
 - Respeite `rust-toolchain.toml` e mantenha `Cargo.lock` versionado.
+- Ao mudar dependências de produção ou toolchain, revise os avisos de distribuição
+  em `releases/licenses/` e seu inventário antes da próxima publicação.
 - Mantenha `#![forbid(unsafe_code)]` no código próprio.
 - Adicione dependências quando houver um consumidor real.
 - Teste comportamento e limites relevantes junto da implementação.
