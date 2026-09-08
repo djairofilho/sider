@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Worker proprietário e servidor RESP2/TCP, com filas e conexões limitadas,
+  timeouts, prontidão atômica e encerramento supervisionado.
 - Bootstrap Rust com configuração validada e testes.
 - Parsing e armazenamento síncrono de `PING`, `ECHO`, `GET`, `SET` básico e
   `DEL`, com rejeição sem mutação, dados binários e respostas verificadas nas fixtures.

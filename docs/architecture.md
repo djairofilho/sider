@@ -12,23 +12,24 @@ versão 0.1; este documento resume as fronteiras e identifica o que já existe.
 | Codec RESP2 | Representar, validar, codificar e decodificar frames com limites |
 | Parser de comandos | Validar formato/aridade e mover argumentos para comandos tipados |
 | Armazenamento síncrono | Executar os cinco comandos sobre um `HashMap<Bytes, Bytes>` privado |
-| Configuração | Ler e validar `SIDER_ADDR`, com padrão `127.0.0.1:6379` |
+| Worker | Possuir o mapa, receber comandos na fila limitada e responder por oneshot |
+| Conexão e servidor | Coordenar RESP2/TCP, limites, timeouts, ordenação e supervisão |
+| Configuração | Validar endereço, limites, prazos e arquivo opcional de prontidão |
 | Erros de configuração | Representar falhas de validação com tipos explícitos |
-| Binário | Processar ajuda e versão; validar a configuração na execução normal |
+| Binário | Processar ajuda/versão; abrir listener, registrar sinais e publicar prontidão |
 | Ferramentas de desenvolvimento | Fixar toolchain e dependências; verificar formatação, lint, testes e build |
 
-A execução normal informa que o servidor TCP ainda não foi implementado. Não há
-listener ou tarefas assíncronas neste estágio. Parser e mapa já podem ser usados
-e testados pela biblioteca, sem runtime.
-As dependências de produção são `thiserror`, para erros tipados, e `bytes`, para
-buffers e payloads binários. O código próprio usa `#![forbid(unsafe_code)]`.
+A execução normal atende TCP com Tokio. Parser e mapa continuam testáveis sem
+runtime. As dependências de produção são `thiserror`, `bytes`, `tokio`, `tracing`
+e `tracing-subscriber`, com funcionalidades selecionadas. O código próprio usa
+`#![forbid(unsafe_code)]`.
 
-`ServerConfig` contém `bind_addr: SocketAddr`. `from_env` lê o ambiente do
+`ServerConfig` agrupa endereço, limites e prazos. `from_env` lê o ambiente do
 processo; `from_lookup` permite fornecer valores explícitos nos testes, sem alterar
 o ambiente global. O binário trata argumentos desconhecidos e configuração
 inválida como falhas, com código de saída diferente de zero.
 
-## Fronteiras planejadas para a versão 0.1
+## Fronteiras implementadas na versão 0.1
 
 | Componente | Conhece | Não precisa conhecer |
 | --- | --- | --- |
@@ -39,20 +40,19 @@ inválida como falhas, com código de saída diferente de zero.
 | Conexão | Buffer, codec, parser, handle do worker e socket | Acesso direto ao mapa |
 | Servidor | Listener, configuração, tarefas e encerramento | Detalhes de cada comando |
 
-Worker, conexão e servidor serão criados em R01-04. A estrutura não
+Worker, conexão e servidor foram adicionados em R01-04. A estrutura não
 antecipa módulos vazios nem várias crates sem consumidores independentes.
 
 ### Propriedade do armazenamento
 
 `Store` já possui o `HashMap` e executa cada comando de forma síncrona. Um único
-worker será seu proprietário na próxima etapa.
-Conexões enviarão pedidos por um canal `mpsc` limitado e receberão a resposta por
-um canal `oneshot`. Tokio e as dependências de observabilidade serão adicionados
-quando esses componentes forem implementados. `bytes` já é usado pelo codec.
+worker é seu proprietário durante o atendimento TCP. Conexões enviam pedidos por
+um canal `mpsc` limitado e recebem a resposta por um canal `oneshot`. Todos os
+comandos válidos, inclusive `PING` e `ECHO`, passam por esse worker.
 
-A fila define a ordem de execução entre conexões. Cada conexão aguardará sua
-resposta antes de despachar o próximo comando. Assim, a versão 0.1 manterá um
-pedido em voo por cliente e preservará a ordem dos comandos concatenados daquele
+A fila define a ordem de execução entre conexões. Cada conexão aguarda sua
+resposta antes de despachar o próximo comando. Assim, a versão 0.1 mantém um
+pedido em voo por cliente e preserva a ordem dos comandos concatenados daquele
 cliente, sem prometer justiça estrita entre clientes.
 
 ### Protocolo e dados binários
@@ -74,25 +74,25 @@ O parser move os payloads para `Command`, sem copiar novamente seu conteúdo.
 de comandos; o mapa não importa RESP. `GET` clona o handle imutável `Bytes`, de
 modo que uma resposta já obtida continua válida após sobrescrita ou remoção.
 
-Erro de formato é fatal para a futura conexão. Aridade, comando desconhecido e
+Erro de formato é fatal para a conexão. Aridade, comando desconhecido e
 opções não suportadas são recuperáveis e nunca chegam ao mapa. O texto do erro
 desconhecido não reproduz os argumentos enviados pelo cliente.
 
 ### Limites e ciclo de vida
 
-Os limites planejados abrangem conexões, fila, tamanho dos frames, buffers,
-profundidade, número de elementos e prazos de operação. A configuração deve ser
-validada antes de abrir o listener. Os valores propostos estão no
-[plano](../PLANO.md#limites-e-ciclo-de-vida); somente o endereço pertence à
-configuração implementada no bootstrap.
+Os limites abrangem conexões, fila, tamanho dos frames, buffers, profundidade,
+número de elementos e prazos. O binário valida tudo antes de abrir o listener;
+`serve` também valida configurações recebidas diretamente pela API.
+O [guia de rede](network.md) documenta padrões e variáveis.
 
-O envio concluído à fila será a fronteira de aceitação. Depois dele, o worker
-executará o comando mesmo se o cliente desconectar. Perder a resposta poderá
-deixar o resultado desconhecido para o cliente; não haverá repetição automática.
+O envio concluído à fila é a fronteira de aceitação. Depois dele, o worker
+executa o comando mesmo se o cliente desconectar. Perder a resposta pode
+deixar o resultado desconhecido para o cliente; não há repetição automática.
 
-O encerramento deverá parar novas conexões e pedidos, aguardar o trabalho aceito
-por um prazo limitado e supervisionar as tarefas. Esses contratos ainda precisam
-de implementação e testes.
+O encerramento para novas conexões e pedidos e drena o trabalho aceito até o
+prazo configurado. Depois solicita aborto cooperativo às tarefas restantes.
+Término inesperado do worker encerra o listener. `JoinSet` também aborta as
+tarefas pertencentes ao servidor se a future de supervisão for cancelada.
 
 ## Evolução
 

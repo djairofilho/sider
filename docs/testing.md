@@ -8,6 +8,7 @@ para os comandos deste documento. A CI permanece desligada até a 1.0 inclusive.
 - [Ciclo local](#ciclo-local)
 - [Codec isolado](#codec-isolado)
 - [Comandos sem rede](#comandos-sem-rede)
+- [Worker, TCP e binário](#worker-tcp-e-binário)
 - [Referência Redis descartável](#referência-redis-descartável)
 - [O que as fixtures cobrem](#o-que-as-fixtures-cobrem)
 - [Execução registrada](#execução-registrada)
@@ -55,6 +56,30 @@ R01-03 reproduz no núcleo Sider os oito casos e as 48 trocas de comandos das
 fixtures Redis. Cada caso é repetido para conferir seu estado final. Os testes
 também verificam aridade, classificação de erros, opções de `SET` recusadas sem
 efeito e compartilhamento imutável dos payloads. Não há sockets ou runtime.
+
+## Worker, TCP e binário
+
+```sh
+cargo test --locked --lib storage::worker::
+cargo test --locked --lib connection::
+cargo test --locked --lib server::
+cargo test --locked --lib readiness::
+cargo test --locked --test tcp
+cargo test --locked --test cli
+```
+
+R01-04 reproduz as fixtures pela rede com portas efêmeras, respostas literais,
+pipelines, fragmentação, clientes concorrentes, half-close e truncamento.
+O binário real publica prontidão depois do bind e atende comandos binários.
+Os testes Unix também enviam `SIGTERM` apenas ao processo filho criado pelo teste.
+No Windows, a drenagem é testada pela API de servidor, sem enviar sinais ao console
+compartilhado do executor.
+
+Testes de worker e conexão usam canais, I/O controlada, polling explícito e relógio
+pausado para comprovar backpressure, fronteira de aceitação e prazos totais.
+A espera pelo arquivo de prontidão consulta um processo filho vivo com deadline;
+não usa uma pausa arbitrária para decidir a ordem de comandos.
+O [guia de rede](network.md) detalha os contratos verificados.
 
 ## Referência Redis descartável
 
@@ -143,11 +168,20 @@ fontes montados somente para leitura e cache de build separado do Windows.
 nos dois ambientes. O teste externo, ignorado no ciclo padrão, foi executado
 separadamente no Windows contra Redis no Docker e passou novamente.
 
+R01-04 passou pela mesma bateria em 8 de setembro de 2026, incluindo build de
+release: 150 testes locais no Windows e 151 no Ubuntu 24.04, mais um doctest
+em cada sistema. A diferença é o teste Unix de `SIGTERM`, que confirmou saída
+bem-sucedida e remoção da prontidão. Os 16 testes do worker, 14 da conexão e 11
+testes TCP incluem cancelamento, backpressure, prazos e encerramento. A referência
+Redis continua opt-in e não foi contabilizada como aprovação pelo teste ignorado.
+Esses resultados não são gates de uma release nem testes de pacotes extraídos.
+
 ## Limites desta evidência
 
 R01-01 comprova a referência e suas fixtures. R01-03 reproduz essas fixtures no
-núcleo síncrono Sider. Ainda não há serviço TCP nem comparação diferencial entre
-servidores. Esse caminho será adicionado em R01-05, depois da rede em R01-04.
+núcleo síncrono Sider e R01-04 pelo TCP. Ainda não há suíte diferencial simultânea
+entre servidores ou teste do Sider com `redis-cli`. Esses caminhos e o fuzz serão
+adicionados em R01-05.
 
 Opções de `SET`, comando desconhecido, requisições fora do subconjunto e limites
 próprios do Sider não entram como igualdade implícita com Redis. As diferenças

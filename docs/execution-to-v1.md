@@ -1,6 +1,6 @@
 # Execução até a v1.0
 
-Este plano resume a ordem de trabalho após a entrega do núcleo síncrono R01-03.
+Este plano resume a ordem de trabalho após a implementação do worker e TCP R01-04.
 Os IDs, dependências e critérios completos continuam em
 [releases/plan.json](../releases/plan.json). O [ROADMAP](../ROADMAP.md) apresenta
 as tarefas; as issues do GitHub registram seu estado operacional.
@@ -8,25 +8,21 @@ as tarefas; as issues do GitHub registram seu estado operacional.
 ## Ponto de partida
 
 - Fundação Rust, licença MIT e backlog versionado estão implementados.
-- R01-01 e R01-02 foram integradas: fixtures Redis e codec RESP2 incremental.
-- R01-03 implementa parser e armazenamento dos cinco comandos, com testes locais
-  em Windows e Linux. A integração desta entrega passa pelo PR da branch
-  `feat/commands-basic-store`.
-- Ainda não há servidor TCP, persistência, quota ou release funcional publicada.
+- R01-01 a R01-03 foram integradas: fixtures Redis, codec, parser e armazenamento.
+- R01-04 conecta o núcleo ao worker e TCP, com limites, prazos e prontidão.
+  A integração desta entrega passa pelo PR da branch `feat/server-worker-tcp`.
+- Ainda não há persistência, quota ou release funcional publicada.
 - CI e publicação automática ficam desligadas até a 1.0 inclusive. Reativá-las
   depois disso será uma entrega própria, não um efeito automático da versão.
 
 ## Próxima entrega: fechar a 0.1
 
-1. Integrar R01-03 após revisão e registrar a evidência na issue correspondente.
-2. Implementar R01-04: worker proprietário do mapa, canais limitados, listener TCP,
-   limites de conexão e buffers, timeouts, prontidão do binário e encerramento
-   supervisionado. Testar fragmentação, pipelines, desconexões e saturação.
-3. Implementar R01-05: comparação Sider versus Redis 8.10.1, uso de `redis-cli`,
+1. Validar e integrar R01-04 após revisão, registrando testes e limitações reais.
+2. Implementar R01-05: comparação Sider versus Redis 8.10.1, uso de `redis-cli`,
    corpus de fuzz e runners dos gates da capacidade, todos em Rust.
-4. Executar R01-GATE: validar o SHA da candidata, testar pacotes extraídos nos dois
+3. Executar R01-GATE: validar o SHA da candidata, testar pacotes extraídos nos dois
    sistemas e publicar `v0.1.0-rc.1` como prerelease privada.
-5. Corrigir falhas com outra RC quando houver mudança funcional. Depois da
+4. Corrigir falhas com outra RC quando houver mudança funcional. Depois da
    candidata aprovada, recompilar e revalidar a final `v0.1.0`.
 
 O [plano técnico da 0.1](../PLANO.md) detalha os contratos de rede e ciclo de vida.

@@ -9,7 +9,8 @@ com tarefas, dependências e critérios. O [guia de releases](docs/releases.md)
 descreve candidatas e publicação. O bootstrap já contém pacote Rust, configuração de
 endereço e binário com testes. A referência Redis e o codec RESP2 isolado estão
 implementados, assim como parser e armazenamento síncrono dos cinco comandos.
-Worker e servidor TCP ainda não. O estado atual está no [README](README.md).
+Worker e servidor TCP também estão implementados em R01-04. Diferenciais e fuzz
+ainda estão pendentes. O estado atual está no [README](README.md).
 
 CI e publicação automática foram adiadas para depois da 1.0. Até a 1.0 inclusive,
 as etapas avançam com testes locais e publicação manual, mantendo os critérios
@@ -421,7 +422,7 @@ o listener, evitando continuar aceitando clientes sem armazenamento funcional.
 
 Essa organização segue as fases de detectar, comunicar e aguardar a parada descritas
 em [Graceful Shutdown no Tokio](https://tokio.rs/tokio/topics/shutdown).
-Será um encerramento básico testável, sem durabilidade, que ainda não existe na 0.1.
+É um encerramento básico testável, sem durabilidade: o dataset continua apenas em memória.
 
 ## Checklist incremental
 
@@ -478,25 +479,25 @@ Saída: semântica completa da 0.1 testada sem sockets ou tarefas assíncronas.
 
 ### 4. Worker proprietário e canais
 
-- [ ] Implementar `Request`, `DbHandle` e worker com fila limitada.
-- [ ] Testar ordem, compartilhamento do estado entre handles e encerramento do canal.
-- [ ] Testar backpressure com fila pequena e sincronização explícita.
-- [ ] Descartar o receptor de resposta após aceitar `SET` e verificar o efeito por `GET`.
-- [ ] Testar indisponibilidade do worker sem panic e sem espera infinita.
+- [x] Implementar `Request`, `DbHandle` e worker com fila limitada.
+- [x] Testar ordem, compartilhamento do estado entre handles e encerramento do canal.
+- [x] Testar backpressure com fila pequena e sincronização explícita.
+- [x] Descartar o receptor de resposta após aceitar `SET` e verificar o efeito por `GET`.
+- [x] Testar indisponibilidade do worker sem panic e sem espera infinita.
 
 Saída: nenhum acesso concorrente direto ao mapa; concorrência testada com canais e
 barreiras, sem usar sleeps arbitrários para determinar a ordem das operações.
 
 ### 5. TCP e ciclo completo
 
-- [ ] Implementar `serve`, tarefa por conexão, buffer limitado e encoder de respostas.
-- [ ] Integrar configuração, logs, supervisão e sinal de parada no binário.
-- [ ] Testar o ciclo `SET -> GET -> DEL -> GET` por TCP em porta efêmera.
-- [ ] Testar dois clientes compartilhando estado e isolamento dos buffers.
-- [ ] Testar vários comandos enviados em uma escrita, com respostas na ordem.
-- [ ] Testar erro recuperável seguido de comando válido na mesma conexão.
-- [ ] Testar EOF limpo, half-close, frame truncado, conexão excedente e cliente lento.
-- [ ] Testar timeout e shutdown em leitura, fila cheia e escrita de resposta.
+- [x] Implementar `serve`, tarefa por conexão, buffer limitado e encoder de respostas.
+- [x] Integrar configuração, logs, supervisão e sinal de parada no binário.
+- [x] Testar o ciclo `SET -> GET -> DEL -> GET` por TCP em porta efêmera.
+- [x] Testar dois clientes compartilhando estado e isolamento dos buffers.
+- [x] Testar vários comandos enviados em uma escrita, com respostas na ordem.
+- [x] Testar erro recuperável seguido de comando válido na mesma conexão.
+- [x] Testar EOF limpo, half-close, frame truncado, conexão excedente e cliente lento.
+- [x] Testar timeout e shutdown em leitura, fila cheia e escrita de resposta.
 
 Saída: `cargo run --locked --bin sider` inicia o servidor em loopback. Logs indicam
 inicialização, erros e encerramento, sem registrar chaves ou valores por padrão.
@@ -632,7 +633,7 @@ o bootstrap não será publicado como versão funcional.
 A fundação executável, os testes de configuração e as fixtures de referência
 Redis/CLI estão implementados. A execução de `R01-01` está documentada no
 [guia de testes](docs/testing.md). O codec isolado de `R01-02` também está
-implementado, assim como parser e armazenamento síncrono de `R01-03`.
-O próximo trabalho é `R01-04`, worker e TCP.
+implementado, assim como parser e armazenamento síncrono de `R01-03`, worker e
+TCP de `R01-04`. O próximo trabalho é `R01-05`, diferenciais e fuzz.
 O roadmap agrupa worker e TCP em `R01-04` e diferenciais
 e fuzz em `R01-05`, preservando os checkpoints internos deste plano.

@@ -1,5 +1,7 @@
 //! Armazenamento síncrono de chaves e valores binários, sem acesso ao protocolo.
 
+pub mod worker;
+
 use std::collections::HashMap;
 
 use bytes::Bytes;
