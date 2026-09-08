@@ -1,0 +1,993 @@
+{
+  "schema_version": 1,
+  "description": "Avisos upstream preservados, sem seleção entre licenças alternativas ou interpretação jurídica.",
+  "targets": [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu"
+  ],
+  "scope": {
+    "cargo_edges": "normal",
+    "includes_proc_macro_dependency_graph": true,
+    "excludes": [
+      "dev-dependencies",
+      "build-dependency edges",
+      "Redis",
+      "libFuzzer",
+      "cargo-fuzz",
+      "Rust compiler-only copyright inventory"
+    ],
+    "crate_packages": 27,
+    "runtime_crate_packages_without_proc_macro_edges": 19,
+    "rust_version": "1.97.1",
+    "additional_nested_notice": "crates/tracing-core-0.1.36/src/spin/LICENSE",
+    "note": "A seleção é conservadora por pacote/grafo, não uma atribuição de símbolos presentes no binário; o inventário Rust inclui plataformas adicionais."
+  },
+  "collection_commands": [
+    "cargo metadata --locked --offline --format-version 1",
+    "cargo tree --locked --offline --edges normal --target x86_64-pc-windows-msvc --prefix none --format {p}",
+    "cargo tree --locked --offline --edges normal --target x86_64-unknown-linux-gnu --prefix none --format {p}",
+    "cargo tree --locked --offline --edges normal,no-proc-macro --target x86_64-pc-windows-msvc --prefix none --format {p}",
+    "cargo tree --locked --offline --edges normal,no-proc-macro --target x86_64-unknown-linux-gnu --prefix none --format {p}",
+    "rustc --print sysroot"
+  ],
+  "verification": {
+    "upstream_files": 53,
+    "source_bytes": 513057,
+    "copied_bytes": 513058,
+    "byte_identical_files": 52,
+    "append_final_lf_files": 1,
+    "rust_source_files_identical_between_hosts": true,
+    "rust_source_hosts": [
+      "1.97.1-x86_64-pc-windows-msvc",
+      "1.97.1-x86_64-unknown-linux-gnu"
+    ],
+    "method": "SHA-256 e tamanho da origem e da cópia; COPYRIGHT-library.html foi comparado byte a byte com a origem seguida de um único LF."
+  },
+  "components": [
+    {
+      "name": "bytes",
+      "version": "1.12.1",
+      "license_expression": "MIT",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/bytes-1.12.1/LICENSE"
+      ]
+    },
+    {
+      "name": "cfg-if",
+      "version": "1.0.4",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/cfg-if-1.0.4/LICENSE-APACHE",
+        "crates/cfg-if-1.0.4/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "errno",
+      "version": "0.3.14",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/errno-0.3.14/LICENSE-APACHE",
+        "crates/errno-0.3.14/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "lazy_static",
+      "version": "1.5.0",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/lazy_static-1.5.0/LICENSE-APACHE",
+        "crates/lazy_static-1.5.0/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "libc",
+      "version": "0.2.189",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/libc-0.2.189/LICENSE-APACHE",
+        "crates/libc-0.2.189/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "mio",
+      "version": "1.2.3",
+      "license_expression": "MIT",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/mio-1.2.3/LICENSE"
+      ]
+    },
+    {
+      "name": "once_cell",
+      "version": "1.21.4",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/once_cell-1.21.4/LICENSE-APACHE",
+        "crates/once_cell-1.21.4/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "pin-project-lite",
+      "version": "0.2.17",
+      "license_expression": "Apache-2.0 OR MIT",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/pin-project-lite-0.2.17/LICENSE-APACHE",
+        "crates/pin-project-lite-0.2.17/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "proc-macro2",
+      "version": "1.0.107",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency in proc-macro build graph",
+      "runtime_targets": [],
+      "files": [
+        "crates/proc-macro2-1.0.107/LICENSE-APACHE",
+        "crates/proc-macro2-1.0.107/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "quote",
+      "version": "1.0.47",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency in proc-macro build graph",
+      "runtime_targets": [],
+      "files": [
+        "crates/quote-1.0.47/LICENSE-APACHE",
+        "crates/quote-1.0.47/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "sharded-slab",
+      "version": "0.1.7",
+      "license_expression": "MIT",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/sharded-slab-0.1.7/LICENSE"
+      ]
+    },
+    {
+      "name": "signal-hook-registry",
+      "version": "1.4.8",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/signal-hook-registry-1.4.8/LICENSE-APACHE",
+        "crates/signal-hook-registry-1.4.8/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "socket2",
+      "version": "0.6.5",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/socket2-0.6.5/LICENSE-APACHE",
+        "crates/socket2-0.6.5/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "syn",
+      "version": "2.0.119",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency in proc-macro build graph",
+      "runtime_targets": [],
+      "files": [
+        "crates/syn-2.0.119/LICENSE-APACHE",
+        "crates/syn-2.0.119/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "syn",
+      "version": "3.0.5",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency in proc-macro build graph",
+      "runtime_targets": [],
+      "files": [
+        "crates/syn-3.0.5/LICENSE-APACHE",
+        "crates/syn-3.0.5/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "thiserror",
+      "version": "2.0.20",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/thiserror-2.0.20/LICENSE-APACHE",
+        "crates/thiserror-2.0.20/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "thiserror-impl",
+      "version": "2.0.20",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency in proc-macro build graph",
+      "runtime_targets": [],
+      "files": [
+        "crates/thiserror-impl-2.0.20/LICENSE-APACHE",
+        "crates/thiserror-impl-2.0.20/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "thread_local",
+      "version": "1.1.10",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/thread_local-1.1.10/LICENSE-APACHE",
+        "crates/thread_local-1.1.10/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "tokio",
+      "version": "1.53.1",
+      "license_expression": "MIT",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/tokio-1.53.1/LICENSE"
+      ]
+    },
+    {
+      "name": "tokio-macros",
+      "version": "2.7.2",
+      "license_expression": "MIT",
+      "scope": "normal dependency in proc-macro build graph",
+      "runtime_targets": [],
+      "files": [
+        "crates/tokio-macros-2.7.2/LICENSE"
+      ]
+    },
+    {
+      "name": "tracing",
+      "version": "0.1.44",
+      "license_expression": "MIT",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/tracing-0.1.44/LICENSE"
+      ]
+    },
+    {
+      "name": "tracing-attributes",
+      "version": "0.1.31",
+      "license_expression": "MIT",
+      "scope": "normal dependency in proc-macro build graph",
+      "runtime_targets": [],
+      "files": [
+        "crates/tracing-attributes-0.1.31/LICENSE"
+      ]
+    },
+    {
+      "name": "tracing-core",
+      "version": "0.1.36",
+      "license_expression": "MIT",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/tracing-core-0.1.36/LICENSE",
+        "crates/tracing-core-0.1.36/src/spin/LICENSE"
+      ]
+    },
+    {
+      "name": "tracing-subscriber",
+      "version": "0.3.23",
+      "license_expression": "MIT",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "crates/tracing-subscriber-0.3.23/LICENSE"
+      ]
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.24",
+      "license_expression": "(MIT OR Apache-2.0) AND Unicode-3.0",
+      "scope": "normal dependency in proc-macro build graph",
+      "runtime_targets": [],
+      "files": [
+        "crates/unicode-ident-1.0.24/LICENSE-APACHE",
+        "crates/unicode-ident-1.0.24/LICENSE-MIT",
+        "crates/unicode-ident-1.0.24/LICENSE-UNICODE"
+      ]
+    },
+    {
+      "name": "windows-link",
+      "version": "0.2.1",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc"
+      ],
+      "files": [
+        "crates/windows-link-0.2.1/license-apache-2.0",
+        "crates/windows-link-0.2.1/license-mit"
+      ]
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.61.2",
+      "license_expression": "MIT OR Apache-2.0",
+      "scope": "normal dependency without proc-macro edges",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc"
+      ],
+      "files": [
+        "crates/windows-sys-0.61.2/license-apache-2.0",
+        "crates/windows-sys-0.61.2/license-mit"
+      ]
+    },
+    {
+      "name": "rust-standard-library",
+      "version": "1.97.1",
+      "license_expression": null,
+      "scope": "standard-library upstream inventory",
+      "runtime_targets": [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "files": [
+        "rust-1.97.1/COPYRIGHT-library.html",
+        "rust-1.97.1/licenses/MIT.txt",
+        "rust-1.97.1/licenses/Apache-2.0.txt",
+        "rust-1.97.1/licenses/BSD-2-Clause.txt",
+        "rust-1.97.1/licenses/Unicode-3.0.txt",
+        "rust-1.97.1/licenses/LLVM-exception.txt"
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "crates/bytes-1.12.1/LICENSE",
+      "component": "bytes",
+      "version": "1.12.1",
+      "source": "cargo-registry:crates.io/bytes@1.12.1/LICENSE",
+      "sha256": "45f522cacecb1023856e46df79ca625dfc550c94910078bd8aec6e02880b3d42",
+      "bytes": 1055,
+      "source_sha256": "45f522cacecb1023856e46df79ca625dfc550c94910078bd8aec6e02880b3d42",
+      "source_bytes": 1055,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/cfg-if-1.0.4/LICENSE-APACHE",
+      "component": "cfg-if",
+      "version": "1.0.4",
+      "source": "cargo-registry:crates.io/cfg-if@1.0.4/LICENSE-APACHE",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "bytes": 10847,
+      "source_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "source_bytes": 10847,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/cfg-if-1.0.4/LICENSE-MIT",
+      "component": "cfg-if",
+      "version": "1.0.4",
+      "source": "cargo-registry:crates.io/cfg-if@1.0.4/LICENSE-MIT",
+      "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+      "bytes": 1057,
+      "source_sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+      "source_bytes": 1057,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/errno-0.3.14/LICENSE-APACHE",
+      "component": "errno",
+      "version": "0.3.14",
+      "source": "cargo-registry:crates.io/errno@0.3.14/LICENSE-APACHE",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "bytes": 10847,
+      "source_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "source_bytes": 10847,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/errno-0.3.14/LICENSE-MIT",
+      "component": "errno",
+      "version": "0.3.14",
+      "source": "cargo-registry:crates.io/errno@0.3.14/LICENSE-MIT",
+      "sha256": "8764a597675778ddfd4e25f81b08a05dbcf089ac05662df7613fe67f150e3aa2",
+      "bytes": 1054,
+      "source_sha256": "8764a597675778ddfd4e25f81b08a05dbcf089ac05662df7613fe67f150e3aa2",
+      "source_bytes": 1054,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/lazy_static-1.5.0/LICENSE-APACHE",
+      "component": "lazy_static",
+      "version": "1.5.0",
+      "source": "cargo-registry:crates.io/lazy_static@1.5.0/LICENSE-APACHE",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "bytes": 10847,
+      "source_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "source_bytes": 10847,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/lazy_static-1.5.0/LICENSE-MIT",
+      "component": "lazy_static",
+      "version": "1.5.0",
+      "source": "cargo-registry:crates.io/lazy_static@1.5.0/LICENSE-MIT",
+      "sha256": "0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720",
+      "bytes": 1071,
+      "source_sha256": "0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720",
+      "source_bytes": 1071,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/libc-0.2.189/LICENSE-APACHE",
+      "component": "libc",
+      "version": "0.2.189",
+      "source": "cargo-registry:crates.io/libc@0.2.189/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "bytes": 9723,
+      "source_sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "source_bytes": 9723,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/libc-0.2.189/LICENSE-MIT",
+      "component": "libc",
+      "version": "0.2.189",
+      "source": "cargo-registry:crates.io/libc@0.2.189/LICENSE-MIT",
+      "sha256": "123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e",
+      "bytes": 1066,
+      "source_sha256": "123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e",
+      "source_bytes": 1066,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/mio-1.2.3/LICENSE",
+      "component": "mio",
+      "version": "1.2.3",
+      "source": "cargo-registry:crates.io/mio@1.2.3/LICENSE",
+      "sha256": "07919255c7e04793d8ea760d6c2ce32d19f9ff02bdbdde3ce90b1e1880929a9b",
+      "bytes": 1082,
+      "source_sha256": "07919255c7e04793d8ea760d6c2ce32d19f9ff02bdbdde3ce90b1e1880929a9b",
+      "source_bytes": 1082,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/once_cell-1.21.4/LICENSE-APACHE",
+      "component": "once_cell",
+      "version": "1.21.4",
+      "source": "cargo-registry:crates.io/once_cell@1.21.4/LICENSE-APACHE",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "bytes": 10847,
+      "source_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "source_bytes": 10847,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/once_cell-1.21.4/LICENSE-MIT",
+      "component": "once_cell",
+      "version": "1.21.4",
+      "source": "cargo-registry:crates.io/once_cell@1.21.4/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "bytes": 1023,
+      "source_sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "source_bytes": 1023,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/pin-project-lite-0.2.17/LICENSE-APACHE",
+      "component": "pin-project-lite",
+      "version": "0.2.17",
+      "source": "cargo-registry:crates.io/pin-project-lite@0.2.17/LICENSE-APACHE",
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "bytes": 10174,
+      "source_sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "source_bytes": 10174,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/pin-project-lite-0.2.17/LICENSE-MIT",
+      "component": "pin-project-lite",
+      "version": "0.2.17",
+      "source": "cargo-registry:crates.io/pin-project-lite@0.2.17/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "bytes": 1023,
+      "source_sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "source_bytes": 1023,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/proc-macro2-1.0.107/LICENSE-APACHE",
+      "component": "proc-macro2",
+      "version": "1.0.107",
+      "source": "cargo-registry:crates.io/proc-macro2@1.0.107/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "bytes": 9723,
+      "source_sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "source_bytes": 9723,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/proc-macro2-1.0.107/LICENSE-MIT",
+      "component": "proc-macro2",
+      "version": "1.0.107",
+      "source": "cargo-registry:crates.io/proc-macro2@1.0.107/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "bytes": 1023,
+      "source_sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "source_bytes": 1023,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/quote-1.0.47/LICENSE-APACHE",
+      "component": "quote",
+      "version": "1.0.47",
+      "source": "cargo-registry:crates.io/quote@1.0.47/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "bytes": 9723,
+      "source_sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "source_bytes": 9723,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/quote-1.0.47/LICENSE-MIT",
+      "component": "quote",
+      "version": "1.0.47",
+      "source": "cargo-registry:crates.io/quote@1.0.47/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "bytes": 1023,
+      "source_sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "source_bytes": 1023,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/sharded-slab-0.1.7/LICENSE",
+      "component": "sharded-slab",
+      "version": "0.1.7",
+      "source": "cargo-registry:crates.io/sharded-slab@0.1.7/LICENSE",
+      "sha256": "eafbfa606bc005ed7fd2f623d65af17ffe4ef7c017221ac14405bf4140771ea9",
+      "bytes": 1057,
+      "source_sha256": "eafbfa606bc005ed7fd2f623d65af17ffe4ef7c017221ac14405bf4140771ea9",
+      "source_bytes": 1057,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/signal-hook-registry-1.4.8/LICENSE-APACHE",
+      "component": "signal-hook-registry",
+      "version": "1.4.8",
+      "source": "cargo-registry:crates.io/signal-hook-registry@1.4.8/LICENSE-APACHE",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "bytes": 10847,
+      "source_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "source_bytes": 10847,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/signal-hook-registry-1.4.8/LICENSE-MIT",
+      "component": "signal-hook-registry",
+      "version": "1.4.8",
+      "source": "cargo-registry:crates.io/signal-hook-registry@1.4.8/LICENSE-MIT",
+      "sha256": "503558bfefe66ca15e4e3f7955b3cb0ec87fd52f29bf24b336af7bd00e946d5c",
+      "bytes": 1068,
+      "source_sha256": "503558bfefe66ca15e4e3f7955b3cb0ec87fd52f29bf24b336af7bd00e946d5c",
+      "source_bytes": 1068,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/socket2-0.6.5/LICENSE-APACHE",
+      "component": "socket2",
+      "version": "0.6.5",
+      "source": "cargo-registry:crates.io/socket2@0.6.5/LICENSE-APACHE",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "bytes": 10847,
+      "source_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "source_bytes": 10847,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/socket2-0.6.5/LICENSE-MIT",
+      "component": "socket2",
+      "version": "0.6.5",
+      "source": "cargo-registry:crates.io/socket2@0.6.5/LICENSE-MIT",
+      "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+      "bytes": 1057,
+      "source_sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+      "source_bytes": 1057,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/syn-2.0.119/LICENSE-APACHE",
+      "component": "syn",
+      "version": "2.0.119",
+      "source": "cargo-registry:crates.io/syn@2.0.119/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "bytes": 9723,
+      "source_sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "source_bytes": 9723,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/syn-2.0.119/LICENSE-MIT",
+      "component": "syn",
+      "version": "2.0.119",
+      "source": "cargo-registry:crates.io/syn@2.0.119/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "bytes": 1023,
+      "source_sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "source_bytes": 1023,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/syn-3.0.5/LICENSE-APACHE",
+      "component": "syn",
+      "version": "3.0.5",
+      "source": "cargo-registry:crates.io/syn@3.0.5/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "bytes": 9723,
+      "source_sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "source_bytes": 9723,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/syn-3.0.5/LICENSE-MIT",
+      "component": "syn",
+      "version": "3.0.5",
+      "source": "cargo-registry:crates.io/syn@3.0.5/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "bytes": 1023,
+      "source_sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "source_bytes": 1023,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/thiserror-2.0.20/LICENSE-APACHE",
+      "component": "thiserror",
+      "version": "2.0.20",
+      "source": "cargo-registry:crates.io/thiserror@2.0.20/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "bytes": 9723,
+      "source_sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "source_bytes": 9723,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/thiserror-2.0.20/LICENSE-MIT",
+      "component": "thiserror",
+      "version": "2.0.20",
+      "source": "cargo-registry:crates.io/thiserror@2.0.20/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "bytes": 1023,
+      "source_sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "source_bytes": 1023,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/thiserror-impl-2.0.20/LICENSE-APACHE",
+      "component": "thiserror-impl",
+      "version": "2.0.20",
+      "source": "cargo-registry:crates.io/thiserror-impl@2.0.20/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "bytes": 9723,
+      "source_sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "source_bytes": 9723,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/thiserror-impl-2.0.20/LICENSE-MIT",
+      "component": "thiserror-impl",
+      "version": "2.0.20",
+      "source": "cargo-registry:crates.io/thiserror-impl@2.0.20/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "bytes": 1023,
+      "source_sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "source_bytes": 1023,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/thread_local-1.1.10/LICENSE-APACHE",
+      "component": "thread_local",
+      "version": "1.1.10",
+      "source": "cargo-registry:crates.io/thread_local@1.1.10/LICENSE-APACHE",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "bytes": 10847,
+      "source_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "source_bytes": 10847,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/thread_local-1.1.10/LICENSE-MIT",
+      "component": "thread_local",
+      "version": "1.1.10",
+      "source": "cargo-registry:crates.io/thread_local@1.1.10/LICENSE-MIT",
+      "sha256": "c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5",
+      "bytes": 1071,
+      "source_sha256": "c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5",
+      "source_bytes": 1071,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/tokio-1.53.1/LICENSE",
+      "component": "tokio",
+      "version": "1.53.1",
+      "source": "cargo-registry:crates.io/tokio@1.53.1/LICENSE",
+      "sha256": "253cd04c6714889df2d32f3f64d669179a1c95c76ac43c40882c52eb06bc3552",
+      "bytes": 1070,
+      "source_sha256": "253cd04c6714889df2d32f3f64d669179a1c95c76ac43c40882c52eb06bc3552",
+      "source_bytes": 1070,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/tokio-macros-2.7.2/LICENSE",
+      "component": "tokio-macros",
+      "version": "2.7.2",
+      "source": "cargo-registry:crates.io/tokio-macros@2.7.2/LICENSE",
+      "sha256": "0b83dc40cba89b9922bb84b0a9c7d2768ce37c1d7e138b7424fd4549915778c9",
+      "bytes": 1102,
+      "source_sha256": "0b83dc40cba89b9922bb84b0a9c7d2768ce37c1d7e138b7424fd4549915778c9",
+      "source_bytes": 1102,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/tracing-0.1.44/LICENSE",
+      "component": "tracing",
+      "version": "0.1.44",
+      "source": "cargo-registry:crates.io/tracing@0.1.44/LICENSE",
+      "sha256": "898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1",
+      "bytes": 1062,
+      "source_sha256": "898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1",
+      "source_bytes": 1062,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/tracing-attributes-0.1.31/LICENSE",
+      "component": "tracing-attributes",
+      "version": "0.1.31",
+      "source": "cargo-registry:crates.io/tracing-attributes@0.1.31/LICENSE",
+      "sha256": "898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1",
+      "bytes": 1062,
+      "source_sha256": "898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1",
+      "source_bytes": 1062,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/tracing-core-0.1.36/LICENSE",
+      "component": "tracing-core",
+      "version": "0.1.36",
+      "source": "cargo-registry:crates.io/tracing-core@0.1.36/LICENSE",
+      "sha256": "898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1",
+      "bytes": 1062,
+      "source_sha256": "898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1",
+      "source_bytes": 1062,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/tracing-core-0.1.36/src/spin/LICENSE",
+      "component": "tracing-core",
+      "version": "0.1.36",
+      "source": "cargo-registry:crates.io/tracing-core@0.1.36/src/spin/LICENSE",
+      "sha256": "58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79",
+      "bytes": 1085,
+      "source_sha256": "58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79",
+      "source_bytes": 1085,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/tracing-subscriber-0.3.23/LICENSE",
+      "component": "tracing-subscriber",
+      "version": "0.3.23",
+      "source": "cargo-registry:crates.io/tracing-subscriber@0.3.23/LICENSE",
+      "sha256": "898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1",
+      "bytes": 1062,
+      "source_sha256": "898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1",
+      "source_bytes": 1062,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/unicode-ident-1.0.24/LICENSE-APACHE",
+      "component": "unicode-ident",
+      "version": "1.0.24",
+      "source": "cargo-registry:crates.io/unicode-ident@1.0.24/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "bytes": 9723,
+      "source_sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "source_bytes": 9723,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/unicode-ident-1.0.24/LICENSE-MIT",
+      "component": "unicode-ident",
+      "version": "1.0.24",
+      "source": "cargo-registry:crates.io/unicode-ident@1.0.24/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "bytes": 1023,
+      "source_sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "source_bytes": 1023,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/unicode-ident-1.0.24/LICENSE-UNICODE",
+      "component": "unicode-ident",
+      "version": "1.0.24",
+      "source": "cargo-registry:crates.io/unicode-ident@1.0.24/LICENSE-UNICODE",
+      "sha256": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1",
+      "bytes": 1995,
+      "source_sha256": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1",
+      "source_bytes": 1995,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/windows-link-0.2.1/license-apache-2.0",
+      "component": "windows-link",
+      "version": "0.2.1",
+      "source": "cargo-registry:crates.io/windows-link@0.2.1/license-apache-2.0",
+      "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b",
+      "bytes": 11351,
+      "source_sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b",
+      "source_bytes": 11351,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/windows-link-0.2.1/license-mit",
+      "component": "windows-link",
+      "version": "0.2.1",
+      "source": "cargo-registry:crates.io/windows-link@0.2.1/license-mit",
+      "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+      "bytes": 1141,
+      "source_sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+      "source_bytes": 1141,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/windows-sys-0.61.2/license-apache-2.0",
+      "component": "windows-sys",
+      "version": "0.61.2",
+      "source": "cargo-registry:crates.io/windows-sys@0.61.2/license-apache-2.0",
+      "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b",
+      "bytes": 11351,
+      "source_sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b",
+      "source_bytes": 11351,
+      "normalization": "none"
+    },
+    {
+      "path": "crates/windows-sys-0.61.2/license-mit",
+      "component": "windows-sys",
+      "version": "0.61.2",
+      "source": "cargo-registry:crates.io/windows-sys@0.61.2/license-mit",
+      "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+      "bytes": 1141,
+      "source_sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+      "source_bytes": 1141,
+      "normalization": "none"
+    },
+    {
+      "path": "rust-1.97.1/COPYRIGHT-library.html",
+      "component": "rust-standard-library",
+      "version": "1.97.1",
+      "source": "rust-toolchain:1.97.1/share/doc/rust/COPYRIGHT-library.html",
+      "sha256": "968db7452f5df771f045063a28073bf1b93b3f51d8a792e2c2af7e9eecf11205",
+      "bytes": 279303,
+      "source_sha256": "0a65bb747c49c7bb816cbc7188319bd6e4e8d08091c1190b8a3c0971c47968ed",
+      "source_bytes": 279302,
+      "normalization": "append_final_lf"
+    },
+    {
+      "path": "rust-1.97.1/licenses/MIT.txt",
+      "component": "rust-standard-library",
+      "version": "1.97.1",
+      "source": "rust-toolchain:1.97.1/share/doc/rust/licenses/MIT.txt",
+      "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+      "bytes": 1078,
+      "source_sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+      "source_bytes": 1078,
+      "normalization": "none"
+    },
+    {
+      "path": "rust-1.97.1/licenses/Apache-2.0.txt",
+      "component": "rust-standard-library",
+      "version": "1.97.1",
+      "source": "rust-toolchain:1.97.1/share/doc/rust/licenses/Apache-2.0.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+      "bytes": 10280,
+      "source_sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+      "source_bytes": 10280,
+      "normalization": "none"
+    },
+    {
+      "path": "rust-1.97.1/licenses/BSD-2-Clause.txt",
+      "component": "rust-standard-library",
+      "version": "1.97.1",
+      "source": "rust-toolchain:1.97.1/share/doc/rust/licenses/BSD-2-Clause.txt",
+      "sha256": "f32fb3b417a194167cfad068223fc975ba96c5960513a10f66a3c28720aec1df",
+      "bytes": 1267,
+      "source_sha256": "f32fb3b417a194167cfad068223fc975ba96c5960513a10f66a3c28720aec1df",
+      "source_bytes": 1267,
+      "normalization": "none"
+    },
+    {
+      "path": "rust-1.97.1/licenses/Unicode-3.0.txt",
+      "component": "rust-standard-library",
+      "version": "1.97.1",
+      "source": "rust-toolchain:1.97.1/share/doc/rust/licenses/Unicode-3.0.txt",
+      "sha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443",
+      "bytes": 1995,
+      "source_sha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443",
+      "source_bytes": 1995,
+      "normalization": "none"
+    },
+    {
+      "path": "rust-1.97.1/licenses/LLVM-exception.txt",
+      "component": "rust-standard-library",
+      "version": "1.97.1",
+      "source": "rust-toolchain:1.97.1/share/doc/rust/licenses/LLVM-exception.txt",
+      "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e",
+      "bytes": 919,
+      "source_sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e",
+      "source_bytes": 919,
+      "normalization": "none"
+    }
+  ]
+}

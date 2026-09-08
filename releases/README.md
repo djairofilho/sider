@@ -1,6 +1,7 @@
 # Executar o Sider
 
-Este pacote contém o servidor Sider, este README e a licença MIT do código próprio.
+Este pacote contém o servidor Sider, este README, a licença MIT do código próprio
+e os avisos de terceiros no diretório `licenses/`, com seu inventário de hashes.
 Confira a versão com `--version`. A release também fornece `SHA256SUMS`,
 `release-manifest.json`, notas e evidências de validação.
 
