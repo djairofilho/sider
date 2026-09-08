@@ -4,7 +4,7 @@
 
 - Leia `PLANO.md`, `README.md`, `ROADMAP.md` e `docs/compatibility.md` antes de implementar.
 - Avance pela próxima tarefa desbloqueada do milestone atual, em etapas compiláveis
-  e testáveis. Após o codec RESP2 de `R01-02`, o próximo item é `R01-03`.
+  e testáveis. Após os comandos síncronos de `R01-03`, o próximo item é `R01-04`.
 - Crie módulos quando houver implementação real; evite stubs e diretórios vazios.
 - Preserve as fronteiras entre RESP, comandos, armazenamento e rede.
 - Use dados binários para chaves e valores. Não limite o protocolo a UTF-8.

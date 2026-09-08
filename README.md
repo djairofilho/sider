@@ -5,13 +5,16 @@ O objetivo da versão 0.1 é oferecer um subconjunto explícito de compatibilida
 com Redis pelo protocolo RESP2. O nome é Redis ao contrário.
 
 O projeto tem pacote Rust com biblioteca, binário, configuração validada,
-codec RESP2 isolado e testes locais. O binário ainda não abre uma conexão de
-escuta TCP e nenhum comando Redis está implementado.
+codec RESP2, parser e armazenamento síncrono dos cinco comandos da 0.1.
+O binário ainda não abre uma conexão de escuta TCP. Os comandos são testados
+pela biblioteca, não estão disponíveis para clientes de rede neste estágio.
 
 As entregas até a 1.0 estão organizadas no [ROADMAP](ROADMAP.md), com 11 milestones,
 50 tarefas de implementação e um gate de publicação por versão. O
 [guia de releases](docs/releases.md) descreve como sincronizar o backlog e preparar
 candidatas e versões finais. O bootstrap não será publicado como banco funcional.
+O [plano de execução até a v1](docs/execution-to-v1.md) resume o ponto atual,
+a próxima entrega e os critérios de cada versão.
 
 CI e publicação automática estão adiadas para depois da 1.0. Até a 1.0 inclusive,
 o desenvolvimento usa validação local e as releases são publicadas manualmente.
@@ -76,8 +79,9 @@ build de distribuição quando suas interfaces ou configuração forem afetadas.
 O [guia de contribuição](CONTRIBUTING.md#verificações-locais) lista os comandos.
 Não é necessário aguardar CI para integrar um PR. Registre os testes locais no PR.
 
-Os testes atuais cobrem a fundação, o codec RESP2 e as fixtures Redis; ainda não
-demonstram compatibilidade do Sider. O [guia de testes](docs/testing.md) explica a
+Os testes atuais cobrem a fundação, o codec, os cinco comandos síncronos e as
+fixtures Redis; ainda não demonstram compatibilidade por TCP. O
+[guia de testes](docs/testing.md) explica a
 verificação externa opt-in, escrita em Rust. Testes de TCP, comparação Sider
 versus Redis e fuzzing serão adicionados nas suas etapas.
 Antes de cada release, os gates cumulativos continuam obrigatórios,
@@ -91,10 +95,12 @@ com execução manual e evidências nas plataformas previstas.
 | `src/main.rs` | Entrada do binário e tratamento dos argumentos iniciais |
 | `src/config.rs` | Configuração inicial e validação do endereço |
 | `src/resp/` | Frames, limites, encoder atômico e decoder incremental |
+| `src/command/` e `src/storage/` | Parser, respostas tipadas e mapa proprietário síncrono |
 | `src/error.rs` | Erros tipados da configuração |
 | `tests/cli.rs` | Testes de integração do binário |
 | `tests/reference.rs` e `tests/common/` | Fixtures binárias e referência Redis descartável |
 | `tests/resp_codec.rs` | Testes literais, fragmentação e propriedades do codec |
+| `tests/commands.rs` | Semântica dos cinco comandos e rejeições sem mutação |
 | `Cargo.toml` e `Cargo.lock` | Pacote Rust e dependências fixadas |
 | `rust-toolchain.toml` | Toolchain e componentes de desenvolvimento |
 | `.github/workflows-disabled/` | Workflows inativos, preservados para revisão depois da 1.0 |
@@ -115,8 +121,10 @@ com execução manual e evidências nas plataformas previstas.
 na imagem fixada no manifesto: oito casos, 48 trocas sequenciais e oito pipelines.
 `R01-02` entrega o [codec RESP2 isolado](docs/resp.md), com tipos, limites,
 encoder atômico, decoder incremental e testes de propriedades.
-A próxima tarefa é `R01-03`: parser e armazenamento síncrono dos cinco comandos,
-sem integrar rede ou tarefas assíncronas ainda.
+`R01-03` entrega parsing e armazenamento síncrono dos cinco comandos, com
+validação das fixtures e das divergências de `SET`/comando desconhecido.
+A próxima tarefa é `R01-04`: worker proprietário, canais limitados, TCP,
+configuração, timeouts e encerramento supervisionado.
 
 O alvo da versão 0.1 inclui `PING`, `ECHO`, `GET`, `SET` básico e `DEL`, com um
 único worker de armazenamento. TTL, persistência e múltiplos shards pertencem às

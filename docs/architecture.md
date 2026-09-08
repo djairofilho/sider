@@ -10,13 +10,16 @@ versão 0.1; este documento resume as fronteiras e identifica o que já existe.
 | --- | --- |
 | Biblioteca | Expor a configuração reutilizável pelo binário e pelos testes |
 | Codec RESP2 | Representar, validar, codificar e decodificar frames com limites |
+| Parser de comandos | Validar formato/aridade e mover argumentos para comandos tipados |
+| Armazenamento síncrono | Executar os cinco comandos sobre um `HashMap<Bytes, Bytes>` privado |
 | Configuração | Ler e validar `SIDER_ADDR`, com padrão `127.0.0.1:6379` |
 | Erros de configuração | Representar falhas de validação com tipos explícitos |
 | Binário | Processar ajuda e versão; validar a configuração na execução normal |
 | Ferramentas de desenvolvimento | Fixar toolchain e dependências; verificar formatação, lint, testes e build |
 
 A execução normal informa que o servidor TCP ainda não foi implementado. Não há
-listener, parser de comandos, mapa de dados ou tarefas assíncronas neste estágio.
+listener ou tarefas assíncronas neste estágio. Parser e mapa já podem ser usados
+e testados pela biblioteca, sem runtime.
 As dependências de produção são `thiserror`, para erros tipados, e `bytes`, para
 buffers e payloads binários. O código próprio usa `#![forbid(unsafe_code)]`.
 
@@ -36,12 +39,13 @@ inválida como falhas, com código de saída diferente de zero.
 | Conexão | Buffer, codec, parser, handle do worker e socket | Acesso direto ao mapa |
 | Servidor | Listener, configuração, tarefas e encerramento | Detalhes de cada comando |
 
-Além do codec, esses componentes serão criados nas respectivas etapas. A estrutura não
+Worker, conexão e servidor serão criados em R01-04. A estrutura não
 antecipa módulos vazios nem várias crates sem consumidores independentes.
 
 ### Propriedade do armazenamento
 
-Um único worker possuirá o `HashMap` e executará cada comando de forma síncrona.
+`Store` já possui o `HashMap` e executa cada comando de forma síncrona. Um único
+worker será seu proprietário na próxima etapa.
 Conexões enviarão pedidos por um canal `mpsc` limitado e receberão a resposta por
 um canal `oneshot`. Tokio e as dependências de observabilidade serão adicionados
 quando esses componentes forem implementados. `bytes` já é usado pelo codec.
@@ -57,13 +61,22 @@ O decoder é incremental: sua entrada pode conter um fragmento, um frame complet
 ou vários frames. Ele consome exatamente um frame completo, preserva o sufixo do
 buffer e mantém estado limitado enquanto aguarda mais bytes.
 
-O codec representa os cinco tipos RESP2. O parser aceitará como requisição apenas
-arrays não vazios de bulk strings não nulas. Chaves e valores preservarão os bytes,
+O codec representa os cinco tipos RESP2. O parser aceita como requisição apenas
+arrays não vazios de bulk strings não nulas. Chaves e valores preservam os bytes,
 inclusive conteúdo vazio e sequências que não sejam UTF-8.
 
 Payloads de entrada são copiados para alocações independentes após validação completa.
 Isso evita que uma chave pequena retenha um buffer grande de rede. A decisão poderá
 ser revista com medições. O [guia do codec](resp.md) detalha contratos e limites.
+
+O parser move os payloads para `Command`, sem copiar novamente seu conteúdo.
+`Reply` não depende de canais. A conversão de resposta para `Frame` fica na camada
+de comandos; o mapa não importa RESP. `GET` clona o handle imutável `Bytes`, de
+modo que uma resposta já obtida continua válida após sobrescrita ou remoção.
+
+Erro de formato é fatal para a futura conexão. Aridade, comando desconhecido e
+opções não suportadas são recuperáveis e nunca chegam ao mapa. O texto do erro
+desconhecido não reproduz os argumentos enviados pelo cliente.
 
 ### Limites e ciclo de vida
 
