@@ -8,8 +8,9 @@ O binário atende `PING`, `ECHO`, `GET`, `SET` básico e `DEL` por RESP2/TCP.
 Um worker proprietário serializa o armazenamento, com filas, conexões e buffers
 limitados. É um protótipo local, sem persistência, autenticação ou quota do dataset.
 A suíte diferencial compara o binário com Redis 8.10.1 e verifica os cinco comandos
-com `redis-cli`. O fuzz tem alvo isolado e gate próprio. A primeira release ainda
-depende da validação completa no seu SHA e dos pacotes extraídos.
+com `redis-cli`. O fuzz tem alvo isolado e gate próprio. A
+[candidata 0.1.0-rc.1](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1)
+foi publicada no repositório privado; a final ainda não foi publicada.
 
 As entregas até a 1.0 estão organizadas no [ROADMAP](ROADMAP.md), com 11 milestones,
 50 tarefas de implementação e um gate de publicação por versão. O
@@ -71,16 +72,17 @@ SIDER_ADDR=127.0.0.1:6380 cargo run --locked
 
 ## Verificar as alterações
 
-Para o ciclo rápido, execute na raiz do projeto:
+Durante a implementação, rode o teste afetado. Antes de integrar, use o comando
+local que reúne formatação, Clippy, build do binário e testes nativos:
 
 ```sh
-cargo fmt --all --check
-cargo check --locked --all-targets
-cargo test --locked
+cargo test --locked <filtro>
+cargo xtask check
 ```
 
-Amplie a validação conforme a mudança: Clippy para código Rust; documentação e
-build de distribuição quando suas interfaces ou configuração forem afetadas.
+Amplie a validação conforme a mudança: documentação e build de distribuição quando
+suas interfaces ou configuração forem afetadas. Não repita `cargo check` depois
+do Clippy, que já verifica os targets. Preserve o cache Cargo entre execuções.
 O [guia de contribuição](CONTRIBUTING.md#verificações-locais) lista os comandos.
 Não é necessário aguardar CI para integrar um PR. Registre os testes locais no PR.
 
@@ -117,7 +119,7 @@ com execução manual e evidências nas plataformas previstas.
 | `dev/test.Dockerfile` | Ambiente local Ubuntu para testes, distinto da imagem de distribuição |
 | `Cargo.toml` e `Cargo.lock` | Pacote Rust e dependências fixadas |
 | `rust-toolchain.toml` | Toolchain e componentes de desenvolvimento |
-| `.github/workflows-disabled/` | Workflows inativos, preservados para revisão depois da 1.0 |
+| `xtask/` e `.cargo/config.toml` | Ferramentas locais Rust, isoladas das dependências do banco |
 | `AGENTS.md` | Instruções locais para agentes de programação |
 | [PLANO.md](PLANO.md) | Etapas, contratos e critérios de conclusão da versão 0.1 |
 | [ROADMAP.md](ROADMAP.md) | Sequência de releases e dependências até a 1.0 |
@@ -141,24 +143,27 @@ validação das fixtures e das divergências de `SET`/comando desconhecido.
 `R01-04` conecta o núcleo ao worker e ao TCP, com configuração, timeouts,
 prontidão e encerramento supervisionado. `R01-05` acrescenta a comparação
 diferencial Sider/Redis, integração com `redis-cli` e fuzz, com execução registrada
-no guia de testes. Essas entregas estão integradas. `R01-GATE` prepara os
-[pacotes e seus smokes](docs/packages.md), valida e publica a primeira candidata
-e depois a final.
+no guia de testes. Essas entregas estão integradas. `R01-GATE` já publicou a
+candidata e ainda precisa conferir e publicar a final, com
+[pacotes e smokes](docs/packages.md). A migração das ferramentas não altera
+as evidências congeladas do SHA de release nem publica uma versão automaticamente.
 
 O alvo da versão 0.1 inclui `PING`, `ECHO`, `GET`, `SET` básico e `DEL`, com um
 único worker de armazenamento. TTL, persistência e múltiplos shards pertencem às
 versões seguintes. O [plano da 0.1](PLANO.md) detalha os contratos técnicos e o
 [ROADMAP](ROADMAP.md) organiza as versões posteriores.
 
-O desenvolvimento e os testes do banco usam Cargo, sem exigir Python. Apenas quem
-alterar ou executar os helpers opcionais de backlog e releases precisa de Python
-3.11 ou posterior, sem dependências adicionais:
+Banco, testes e ferramentas próprias usam Rust. Não há scripts Python nem workflows
+de CI no projeto. Ao alterar as ferramentas ou o manifesto, use:
 
 ```sh
-python -m tools.release.cli validate
-python -m unittest discover -s tools/release -t . -p "test_*.py"
+cargo xtask check --tools
+cargo xtask roadmap --write
+cargo xtask sync
 ```
 
+`sync` simula; só `sync --apply` escreve no GitHub pela CLI `gh` autenticada.
+O [guia de releases](docs/releases.md) separa o ciclo rápido dos testes de publicação.
 Releases exigem candidata e evidências dos testes específicos da capacidade.
 Gates pendentes bloqueiam a publicação, mesmo quando os testes do bootstrap passam.
 

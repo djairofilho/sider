@@ -1,6 +1,7 @@
 /target/
 /fuzz/target/
 /fuzz/artifacts/
+/xtask/target/
 
 .env
 .env.*

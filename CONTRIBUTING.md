@@ -13,16 +13,15 @@ Use `rustup` com a toolchain declarada em
 preserve `Cargo.lock`, pois o projeto distribui um binário. Atualize dependências
 de forma deliberada e revise as mudanças no lockfile.
 
-O bootstrap não exige Redis, Docker ou um serviço em execução. As etapas futuras
-de compatibilidade terão instruções próprias para dependências externas.
+Os testes nativos não exigem Redis, Docker ou um serviço externo em execução.
+Os diferenciais e o fuzz têm instruções próprias e execução explícita.
 
-O desenvolvimento e os testes do banco exigem apenas a toolchain Rust e as
-dependências específicas da tarefa. Os helpers opcionais de backlog e releases
-usam Python 3.11 ou posterior e sua biblioteca padrão. Operações no GitHub usam
-`gh` autenticado na conta com acesso ao repositório privado.
+O desenvolvimento, os testes e as ferramentas próprias usam Rust. O utilitário
+`xtask/` tem seu próprio manifesto e lockfile, sem dependências no servidor.
+Operações no GitHub usam `gh` autenticado na conta com acesso ao repositório privado.
 
-CI e publicação automática ficam adiadas para depois da 1.0. Os workflows estão
-inativos em [.github/workflows-disabled/](.github/workflows-disabled/).
+CI e publicação automática ficam adiadas para depois da 1.0. Os workflows e helpers
+Python foram removidos. Uma futura CI deverá chamar os comandos Rust existentes.
 
 ## Fluxo de trabalho
 
@@ -53,28 +52,30 @@ necessários. A integração de pull requests usa merge commit por padrão.
 
 ## Verificações locais
 
-Use este ciclo rápido durante a implementação:
+Durante a implementação, use o teste afetado; antes de integrar, rode o check local:
 
 ```sh
-cargo fmt --all --check
-cargo check --locked --all-targets
-cargo test --locked
+cargo test --locked <filtro>
+cargo xtask check
 ```
 
-Amplie a validação conforme a responsabilidade alterada:
+`check` executa fmt, Clippy, build do binário real e testes nativos, interrompendo
+na primeira falha. Clippy já verifica os targets, sem outro `cargo check` redundante.
+Não inicia Docker, fuzz ou publicação. Preserve caches Cargo; não limpe `target/`
+como parte normal de cada tarefa. Amplie a validação conforme a responsabilidade:
 
 ```sh
-# Código Rust e seus testes
-cargo clippy --locked --all-targets -- -D warnings
-
 # Interfaces, documentação de API ou configuração de build
 cargo doc --locked --no-deps
 cargo build --locked --release
 
 # Somente ao alterar o manifesto ou as ferramentas de backlog/releases
-python -m tools.release.cli validate
-python -m unittest discover -s tools/release -t . -p "test_*.py"
+cargo xtask check --tools
 ```
+
+`check --tools` testa apenas o utilitário e valida o plano e o roadmap; não repete
+a suíte do banco. Documentação isolada pede revisão de texto, links e comandos,
+não uma nova rodada de todos os testes sem mudança no código.
 
 Não há execução automática em Linux ou Windows nesta fase. Antes de publicar uma
 release, execute manualmente todos os gates exigidos nas plataformas do manifesto.
@@ -93,7 +94,7 @@ o binário em um processo filho com ambiente próprio. Não altere o ambiente gl
 do processo de testes com `std::env::set_var` ou `std::env::remove_var`: isso
 introduz interferência entre testes paralelos e exige `unsafe` na Edition 2024.
 
-Quando os testes de TCP existirem, use portas efêmeras e sincronização explícita.
+Nos testes de TCP, use portas efêmeras e sincronização explícita.
 Não dependa de uma porta fixa disponível ou de pausas arbitrárias para coordenar
 tarefas. Comparações com Redis devem usar instâncias descartáveis e uma versão de
 referência registrada na matriz de compatibilidade.
@@ -115,7 +116,7 @@ não marque uma etapa inteira como concluída por ter implementado apenas parte 
 
 ## Backlog e releases
 
-Edite o manifesto e regenere sua projeção com `python -m tools.release.plan --write`.
+Edite o manifesto e regenere sua projeção com `cargo xtask roadmap --write`.
 IDs como `R01-01` são estáveis e não devem ser reutilizados. Datas de milestones
 não são obrigatórias. Patches precisam de uma entrada própria no manifesto e de
 candidata, assim como minors e a 1.0.
@@ -123,8 +124,8 @@ candidata, assim como minors e a 1.0.
 O modo padrão apresenta a sincronização planejada; `--apply` grava no GitHub:
 
 ```sh
-python -m tools.release.cli sync
-python -m tools.release.cli sync --apply
+cargo xtask sync
+cargo xtask sync --apply
 ```
 
 Quando todas as tarefas funcionais estiverem concluídas, prepare as notas UTF-8

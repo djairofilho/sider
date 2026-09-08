@@ -15,14 +15,15 @@
 ## Backlog e releases
 
 - `releases/plan.json` é a fonte dos IDs, dependências e critérios; `ROADMAP.md` é
-  gerado por `python -m tools.release.plan --write`.
+  gerado por `cargo xtask roadmap --write`.
 - Leia `docs/releases.md` antes de alterar automação ou preparar uma release.
-- CI e publicação automática estão adiadas para depois da 1.0; mantenha os workflows
-  inativos em `.github/workflows-disabled/`. Não reative sem solicitação.
-- O desenvolvimento e os testes do banco usam Cargo, sem exigir Python. Apenas ao
-  alterar ou usar os helpers opcionais de release, use Python 3.11 ou posterior e valide com
-  `python -m tools.release.cli validate` e execute
-  `python -m unittest discover -s tools/release -t . -p "test_*.py"`.
+- CI e publicação automática estão adiadas para depois da 1.0. Os workflows e
+  helpers Python foram removidos; não os restaure nem reative CI sem solicitação.
+- Banco, testes e ferramentas próprias usam Rust. `xtask/` tem manifesto e lockfile
+  independentes; não acrescente suas dependências ao servidor ou ao fuzz.
+- Ao alterar o plano ou `xtask/`, execute `cargo xtask check --tools`.
+  `cargo xtask sync` só simula; `--apply` permite alterar o backlog no GitHub.
+  Não crie outro framework de publicação enquanto a publicação for manual.
 - Preserve IDs de tarefas, marcadores gerenciados e comentários humanos ao sincronizar.
 - Não trate testes do bootstrap como evidência das funcionalidades futuras.
 - Gates ausentes, ignorados ou cancelados bloqueiam publicação; nunca sintetize sucesso.
@@ -41,11 +42,15 @@
 - Teste comportamento e limites relevantes junto da implementação.
 - Injete a leitura de configuração nos testes. Não altere o ambiente global.
 - Use portas efêmeras e sincronização explícita nos testes de rede.
-- Use `cargo fmt --check`, `cargo check --locked` e `cargo test --locked`
-  no ciclo rápido local. Não espere CI para integrar PRs.
-- Execute `cargo clippy --locked --all-targets -- -D warnings` quando alterar
-  código Rust ou seus testes; amplie as verificações conforme o risco da mudança.
-- Verifique também `cargo doc --locked --no-deps` e `cargo build --locked`
+- Durante a implementação, execute testes focados (`cargo test --locked <filtro>`).
+  Antes de integrar mudanças do banco, execute `cargo xtask check`: fmt, Clippy,
+  build do binário e testes nativos. Clippy já verifica os targets; não duplique
+  com `cargo check` nessa sequência. Não espere CI para integrar PRs.
+- Valide documentação isolada sem repetir toda a suíte do banco. Execute os testes
+  das ferramentas somente quando elas, seus contratos ou seu manifesto mudarem.
+  Preserve os caches Cargo e execute gates externos apenas quando relevantes à
+  tarefa ou obrigatórios na release. Nunca use o check rápido como prova de fuzz.
+- Verifique também `cargo doc --locked --no-deps` e `cargo build --locked --release`
   quando mudar interfaces, configuração de build ou documentação de API.
 
 ## Texto e Git
