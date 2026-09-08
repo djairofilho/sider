@@ -46,6 +46,9 @@
   "release_policy": {
     "private": true,
     "publish_crate": false,
+    "ci_enabled": false,
+    "automatic_publication": false,
+    "automation_resume_after": "1.0.0",
     "candidate_required": true,
     "candidate_fuzz_seconds": 900,
     "stable_soak_seconds": 3600,
@@ -67,7 +70,7 @@
         {
           "id": "R01-01", "title": "Fixtures e referência Redis", "area": "testing", "depends_on": ["B00-01"],
           "objective": "Fixar um oráculo reproduzível para os cinco comandos da Sider 0.1 antes de implementar o codec.",
-          "deliverables": ["Fixtures RESP2 literais para PING, ECHO, GET, SET básico e DEL, incluindo erros de aridade.", "Infraestrutura descartável com Redis e redis-cli 8.10.1 na imagem e no digest registrados em reference; documentar execução local e na CI."],
+          "deliverables": ["Fixtures RESP2 literais para PING, ECHO, GET, SET básico e DEL, incluindo erros de aridade.", "Infraestrutura descartável com Redis e redis-cli 8.10.1 na imagem e no digest registrados em reference; documentar execução manual reproduzível."],
           "tests": ["Conferir bytes de PONG, nulos, vazios e respostas binárias sem reutilizar o futuro decoder Sider.", "Verificar versão, digest e disponibilidade da referência; ausência de ferramenta deve falhar explicitamente."],
           "acceptance": ["Fixtures e comandos de reprodução estão versionados; matriz distingue contratos pretendidos de suporte ainda não implementado."]
         },
@@ -100,7 +103,7 @@
           "acceptance": ["Cinco comandos comprovados com redis-cli; matriz indica testes reais, limitações e referência; teste externo ausente ou ignorado bloqueia a entrega."]
         }
       ],
-      "gate": {"id": "R01-GATE", "title": "Validar e publicar a 0.1.0", "acceptance": ["Todas as tarefas R01 concluídas com PR e CI; PING, ECHO, GET, SET básico e DEL funcionam via redis-cli.", "Gates native, compatibility, fuzz e tcp_smoke aprovados no SHA exato; fragmentação, binários, limites e ordenação cobertos.", "Publicar v0.1.0-rc.1 antes da final; conferir pacotes Linux/Windows extraídos, checksums e manifesto; fechar o milestone apenas após a final confirmada."]}
+      "gate": {"id": "R01-GATE", "title": "Validar e publicar a 0.1.0", "acceptance": ["Todas as tarefas R01 concluídas com PR e verificação manual registrada; PING, ECHO, GET, SET básico e DEL funcionam via redis-cli.", "Gates native, compatibility, fuzz e tcp_smoke aprovados no SHA exato; fragmentação, binários, limites e ordenação cobertos.", "Publicar v0.1.0-rc.1 antes da final; conferir pacotes Linux/Windows extraídos, checksums e manifesto; fechar o milestone apenas após a final confirmada."]}
     },
     {
       "id": "R02", "version": "0.2.0", "title": "Strings, TTL e memória", "depends_on": ["R01"],

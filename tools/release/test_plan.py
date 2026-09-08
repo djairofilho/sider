@@ -38,6 +38,19 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(render_roadmap(self.plan), render_roadmap(self.plan))
         self.assertEqual(before, self.plan)
 
+    def test_automation_is_deferred_without_removing_product_evidence(self):
+        policy = self.plan["release_policy"]
+        self.assertFalse(policy["ci_enabled"])
+        self.assertFalse(policy["automatic_publication"])
+        self.assertEqual(policy["automation_resume_after"], "1.0.0")
+        text = render_roadmap(self.plan)
+        self.assertIn("desativadas até e incluindo a 1.0", text)
+        self.assertIn("não dispara publicação", text)
+        self.assertIn("verificação manual registrada", text)
+        self.assertIn("15 minutos de fuzz", text)
+        self.assertIn("uma hora de carga contínua", text)
+        self.assertIn("CI multiplataforma", self.plan["bootstrap"][0]["title"])
+
     def test_only_bootstrap_is_checked_and_accents_are_valid(self):
         text = render_roadmap(self.plan)
         self.assertEqual(text.count("[x]"), 1)
@@ -166,7 +179,7 @@ class PlanTests(unittest.TestCase):
                 validate_plan(plan)
 
     def test_fixed_privacy_and_release_policies_cannot_silently_drift(self):
-        for field, value in (("private", False), ("publish_crate", True), ("candidate_required", False), ("candidate_fuzz_seconds", 899), ("stable_soak_seconds", 3599), ("targets", [])):
+        for field, value in (("private", False), ("publish_crate", True), ("candidate_required", False), ("candidate_fuzz_seconds", 899), ("stable_soak_seconds", 3599), ("targets", []), ("ci_enabled", True), ("automatic_publication", True), ("automation_resume_after", "0.10.0")):
             plan = copy.deepcopy(self.plan)
             plan["release_policy"][field] = value
             with self.subTest(field=field), self.assertRaises(ValueError):

@@ -118,6 +118,7 @@ def _render(item: dict, issues: dict[str, dict], repo: str) -> str:
                   "", "## Evidências do bootstrap", "", _paragraph_list(item.get("evidence", []))]
     elif item["kind"] == "release":
         lines += ["", "## Entregáveis", "", "- Publicar uma candidata e a versão final com evidências e artefatos verificados.",
+                  "- Até e incluindo a 1.0, verificar e publicar manualmente; CI e publicação automática ficam para depois da 1.0.",
                   "- Manter esta issue e o milestone abertos até a publicação final confirmada.",
                   "", "## Testes exigidos", "", _paragraph_list(item.get("required_gates", []))]
     else:
@@ -217,6 +218,7 @@ def sync_plan(plan: dict, client: Any, apply: bool = False) -> dict:
         title = "v" + release["version"]
         milestone = milestone_index.get(title)
         generated = "\n".join([START, f"<!-- sider:release {release['id']} -->", "", release["title"], "",
+                                "CI e publicação automática desativadas até e incluindo a 1.0; verificações e publicação manuais.", "",
                                 _paragraph_list(release["gate"]["acceptance"]), "", END])
         description = managed_body(milestone.get("description") if milestone else None, generated)
         if milestone is None:

@@ -9,6 +9,10 @@ O estado operacional das tarefas está nas issues do GitHub, sem duplicar o esta
 São 11 milestones e 62 issues: um bootstrap, tarefas funcionais e um gate de publicação por versão.
 O repositório e os artefatos permanecem privados; a crate usa `publish = false`.
 
+CI e publicação automática estão desativadas até e incluindo a 1.0.
+Sua retomada fica para depois da 1.0, mediante alteração explícita da política e dos workflows.
+Até lá, execute e registre manualmente as verificações e a publicação; os critérios de qualidade permanecem.
+
 ## Índice
 
 - [Sequência de versões](#sequência-de-versões)
@@ -86,7 +90,7 @@ Evidências obrigatórias: `native`, `compatibility`, `fuzz`, `tcp_smoke`.
 
 Critérios para publicação:
 
-- Todas as tarefas R01 concluídas com PR e CI; PING, ECHO, GET, SET básico e DEL funcionam via redis-cli.
+- Todas as tarefas R01 concluídas com PR e verificação manual registrada; PING, ECHO, GET, SET básico e DEL funcionam via redis-cli.
 - Gates native, compatibility, fuzz e tcp_smoke aprovados no SHA exato; fragmentação, binários, limites e ordenação cobertos.
 - Publicar v0.1.0-rc.1 antes da final; conferir pacotes Linux/Windows extraídos, checksums e manifesto; fechar o milestone apenas após a final confirmada.
 
@@ -309,13 +313,14 @@ Critérios para publicação:
 
 1. Selecione a próxima issue desbloqueada do milestone atual e implemente em branch própria.
 2. Inclua testes e evidências; mantenha código compilável e commits atômicos em cada etapa.
-3. Integre o PR vinculado à issue por merge commit após validação.
+3. Integre o PR vinculado à issue por merge commit após verificação manual registrada.
 4. Atualize compatibilidade e notas; prepare `v<versão>-rc.1` quando as tarefas funcionais terminarem.
-5. O merge do PR `chore/release-v<versão>`, com label `type:release`, valida o SHA exato e publica os pacotes.
+5. O merge do PR `chore/release-v<versão>`, com label `type:release`, não dispara publicação: valide e publique manualmente o SHA exato do merge.
 6. Mudança funcional após a RC exige outra RC; a final recompila e testa o mesmo conteúdo funcional aprovado.
 7. Encerre o milestone somente após conferir a publicação final e seus artefatos.
 
 O fluxo completo e os comandos de preparação estão no [guia de releases](docs/releases.md).
+Os workflows ficam arquivados em `.github/workflows-disabled/`, fora do diretório executado pelo GitHub.
 Cada candidata exige pelo menos 15 minutos de fuzz; a 1.0 acrescenta uma hora de carga contínua.
 As evidências são cumulativas. Teste ausente, ignorado, cancelado ou sem relatório bloqueia a publicação.
 Na primeira versão AOF, migração valida fixtures do formato inicial; nas seguintes, testa a versão anterior suportada.

@@ -30,6 +30,8 @@ def example_plan():
             "contracts": {"decisions": ["Dados binários"], "after_1_0": ["Cluster"],
                           "sources": ["https://redis.io/"], "commands_added": {}},
             "release_policy": {"private": True, "publish_crate": False, "candidate_required": True,
+                               "ci_enabled": False, "automatic_publication": False,
+                               "automation_resume_after": "1.0.0",
                                "merge_strategy": "merge", "release_branch_prefix": "chore/release-v",
                                "release_label": "type:release", "linux_runner": "ubuntu-24.04",
                                "docker_since": "0.10.0", "patch_requires_manifest_entry": True,
@@ -138,6 +140,12 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(self.client.issue("B00-01")["state"], "closed")
         self.assertEqual(self.client.issue("R01-01")["state"], "open")
         self.assertEqual(self.client.issue("R01-GATE")["state"], "open")
+
+    def test_generated_backlog_explains_manual_checks_and_keeps_historical_ci(self):
+        self.apply()
+        self.assertIn("verificar e publicar manualmente", self.client.issue("R01-GATE")["body"])
+        self.assertIn("CI concluída com sucesso", self.client.issue("B00-01")["body"])
+        self.assertIn("desativadas até e incluindo a 1.0", self.client.milestones[0]["description"])
 
     def test_human_text_comments_and_labels_survive_managed_update(self):
         self.apply()
