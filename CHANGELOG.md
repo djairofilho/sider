@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-08
+
+- Promoção da candidata aprovada, sem alterações funcionais ou de dependências.
+- Nova compilação e validação local dos dois pacotes antes da publicação final.
+- [Notas da final](releases/notes/v0.1.0.md), incluindo o requisito do runtime
+  Visual C++ v14 Redistributable x64 para o executável Windows.
+
 ## [0.1.0-rc.1] - 2026-09-08
 
 - Primeira candidata funcional, com pacotes Linux GNU e Windows MSVC validados
@@ -25,5 +32,5 @@
   adiadas para depois da 1.0.
 
 As [notas da candidata](releases/notes/v0.1.0-rc.1.md) descrevem o subconjunto e suas
-limitações. Esta entrada prepara a versão; a publicação depende da aprovação
-dos gates no SHA exato do merge e da conferência dos artefatos.
+limitações. A RC foi publicada e aprovada. A publicação final depende de nova
+aprovação dos gates no SHA exato de seu merge e da conferência dos artefatos.
