@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- Ferramentas locais de planejamento, backlog, verificação e integridade de
+  artefatos em Rust, acessíveis por `cargo xtask` e isoladas do servidor.
+- Remoção dos helpers Python e workflows arquivados. Publicação continua manual,
+  com os mesmos critérios de release; CI permanece adiada para depois da 1.0.
+- Ciclo curto com testes focados e checks separados para banco e ferramentas,
+  sem executar gates externos a cada edição ou duplicar check e Clippy.
+
 ## [0.1.0] - 2026-09-08
 
 - Promoção da candidata aprovada, sem alterações funcionais ou de dependências.
