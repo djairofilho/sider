@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "description": "Gates de produto pendentes falham explicitamente até a implementação dos testes. Comandos são arrays argv sem shell e devem falhar se nenhum teste executar.",
+  "gates": {
+    "compatibility": {"command": null, "timeout_seconds": 600},
+    "fuzz": {"command": null, "timeout_seconds": 1200, "minimum_seconds": 900},
+    "crash": {"command": null, "timeout_seconds": 600},
+    "recovery": {"command": null, "timeout_seconds": 600},
+    "migration": {"command": null, "timeout_seconds": 600},
+    "sharding": {"command": null, "timeout_seconds": 600},
+    "types": {"command": null, "timeout_seconds": 600},
+    "sorted_sets": {"command": null, "timeout_seconds": 600},
+    "transactions": {"command": null, "timeout_seconds": 600},
+    "pubsub": {"command": null, "timeout_seconds": 600},
+    "replication": {"command": null, "timeout_seconds": 1200},
+    "docker": {"command": null, "timeout_seconds": 1200},
+    "soak": {"command": null, "timeout_seconds": 3900, "minimum_seconds": 3600},
+    "benchmarks": {"command": null, "timeout_seconds": 1800}
+  }
+}
