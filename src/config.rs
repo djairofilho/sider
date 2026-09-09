@@ -134,6 +134,8 @@ impl ServerConfig {
         config.ready_file = lookup("SIDER_READY_FILE").map(PathBuf::from);
         if let Some(directory) = lookup("SIDER_AOF_DIR") {
             let mut aof = crate::persistence::AofConfig::new(PathBuf::from(directory));
+            crate::storage::routing::ShardRouter::new(config.shards)?;
+            aof.layout.shard_count = config.shards as u32;
             if let Some(value) = lookup("SIDER_AOF_SYNC") {
                 aof.sync = match value.to_str() {
                     Some("always") => crate::persistence::SyncPolicy::Always,
@@ -165,6 +167,11 @@ impl ServerConfig {
     pub fn validate(&self) -> Result<(), ConfigError> {
         if let Some(aof) = &self.aof {
             aof.validate()?;
+            if aof.layout.shard_count as usize != self.shards {
+                return Err(ConfigError::InvalidServerLimits {
+                    reason: "quantidade de shards do AOF difere do servidor",
+                });
+            }
         }
         self.resp_limits.validate()?;
         crate::storage::routing::ShardRouter::new(self.shards)?;

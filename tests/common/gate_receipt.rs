@@ -80,7 +80,7 @@ impl GateContext {
     ) -> Result<Self, String> {
         if !matches!(
             gate_id,
-            "compatibility" | "pubsub" | "crash" | "recovery" | "migration"
+            "compatibility" | "pubsub" | "crash" | "recovery" | "migration" | "sharding"
         ) {
             return Err("gate desconhecido ou sem runner implementado".into());
         }

@@ -41,12 +41,6 @@ pub struct PreparedServer {
 
 pub async fn prepare(config: &ServerConfig) -> Result<PreparedServer, ServerError> {
     config.validate()?;
-    if config.aof.is_some() && config.shards != 1 {
-        return Err(ConfigError::InvalidServerLimits {
-            reason: "AOF v1 requer um shard; migração durável é explícita",
-        }
-        .into());
-    }
     let store_config = StoreConfig {
         max_dataset_bytes: config.max_dataset_bytes,
     };

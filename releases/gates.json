@@ -6,7 +6,7 @@
     "crash": {"command": ["cargo", "test", "--locked", "--test", "persistence", "--", "--ignored", "--exact", "release_crash_gate", "--nocapture"], "timeout_seconds": 600},
     "recovery": {"command": ["cargo", "test", "--locked", "--test", "persistence", "--", "--ignored", "--exact", "release_recovery_gate", "--nocapture"], "timeout_seconds": 600},
     "migration": {"command": ["cargo", "test", "--locked", "--test", "persistence", "--", "--ignored", "--exact", "release_migration_gate", "--nocapture"], "timeout_seconds": 600},
-    "sharding": {"command": null, "timeout_seconds": 600},
+    "sharding": {"command": ["cargo", "test", "--locked", "--test", "sharding", "--", "--ignored", "--exact", "release_sharding_gate", "--nocapture"], "timeout_seconds": 600},
     "types": {"command": null, "timeout_seconds": 600},
     "sorted_sets": {"command": null, "timeout_seconds": 600},
     "transactions": {"command": null, "timeout_seconds": 600},
