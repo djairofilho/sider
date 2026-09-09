@@ -7,11 +7,12 @@ ARG SIDER_SOURCE_SHA
 ARG SIDER_SHA256
 ARG SIDER_MIGRATOR_SHA256
 
-COPY --chmod=0755 sider sider-aof-migrate /usr/local/bin/
+COPY sider sider-aof-migrate /usr/local/bin/
 COPY README.md LICENSE /usr/share/doc/sider/
 COPY licenses/ /usr/share/doc/sider/licenses/
 
-RUN test -n "$SIDER_VERSION" \
+RUN chmod 0755 /usr/local/bin/sider /usr/local/bin/sider-aof-migrate \
+    && test -n "$SIDER_VERSION" \
     && test "${#SIDER_SOURCE_SHA}" = 40 \
     && printf '%s\n' "$SIDER_SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$' \
     && printf '%s  /usr/local/bin/sider\n%s  /usr/local/bin/sider-aof-migrate\n' \
