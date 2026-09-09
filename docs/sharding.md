@@ -100,7 +100,12 @@ clientes compartilham a máquina com o servidor. RSS é amostrado, não um pico.
 RTT é por lote, não a latência individual dos comandos de um pipeline. Não há
 comparação de velocidade com Redis ou promessa de desempenho em outro ambiente.
 
-Para reproduzir no PowerShell, com checkout limpo e destino novo:
+O comando histórico abaixo pertence ao SHA registrado acima. Para a candidata
+1.0, use o [gate de benchmarks do pacote](benchmarks.md), com aquecimento,
+três repetições e RSS observado durante a medição.
+
+Para reproduzir o ensaio histórico no PowerShell, use um checkout separado
+daquele SHA, limpo e com destino novo:
 
 ```powershell
 cargo test --locked --release --test shard_benchmark --no-run

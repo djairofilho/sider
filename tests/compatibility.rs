@@ -2,6 +2,8 @@
 
 #![forbid(unsafe_code)]
 
+#[path = "common/cross_family.rs"]
+mod cross_family;
 #[path = "common/gate_receipt.rs"]
 mod gate_receipt;
 #[path = "common/process.rs"]
@@ -277,23 +279,46 @@ fn suite(require_cli: bool) -> (u64, Value) {
     } else {
         0
     };
+    let (cross_checks, cross_report) =
+        cross_family::audit(sider.address(), &reference, require_cli);
     sider.assert_alive();
     sider.finish();
     reference.finish();
     let report = json!({
         "suite": "resp2-strings-r01-r02", "seeds": SEEDS,
         "operations_per_seed": OPERATIONS, "pipeline_size": PIPELINE,
-        "fixture_cases": resp_fixtures::CASES.len(), "checks": comparisons,
-        "binary_comparisons": comparisons - r02_temporal_observations,
+        "fixture_cases": resp_fixtures::CASES.len(), "checks": comparisons + cli_cases + cross_checks,
+        "binary_comparisons": comparisons - r02_temporal_observations + cross_report["binary_comparisons"].as_u64().unwrap(),
         "r01_binary_comparisons": r01_comparisons, "r02_binary_comparisons": r02_comparisons,
         "r02_temporal_observations": r02_temporal_observations,
         "r02_pttl_tolerance_ms": 100, "r02_ttl_tolerance_seconds": 1,
-        "cli_cases": cli_cases, "cli_verified": require_cli,
+        "cli_cases": cli_cases + cross_report["cli_cases"].as_u64().unwrap(),
+        "r01_cli_cases": cli_cases, "cli_verified": require_cli,
+        "r11_cross_family":cross_report,
         "maximum_bulk_bytes": 1024 * 1024, "cleanup_confirmed": true,
         "sider_version": env!("CARGO_PKG_VERSION"),
     });
     eprintln!("{report}");
-    (comparisons + cli_cases, report)
+    (comparisons + cli_cases + cross_checks, report)
+}
+
+#[test]
+#[ignore = "somente corpus R11 novo; requer Docker/Redis fixados; CLI exige runner Linux isolado"]
+fn cross_family_audit_only() {
+    let runner = std::env::var("SIDER_TEST_RUNNER_CONTAINER").ok();
+    let reference = match &runner {
+        Some(id) => RedisReference::start_shared(id),
+        None => RedisReference::start(),
+    };
+    let mut sider = SiderProcess::start(
+        Path::new(env!("CARGO_BIN_EXE_sider")),
+        env!("CARGO_PKG_VERSION"),
+    );
+    let (_, report) = cross_family::audit(sider.address(), &reference, runner.is_some());
+    sider.assert_alive();
+    sider.finish();
+    reference.finish();
+    eprintln!("{report}");
 }
 
 fn r02_exchange(pair: &mut Pair, args: &[&[u8]]) -> Observed {

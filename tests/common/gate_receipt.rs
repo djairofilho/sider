@@ -91,6 +91,8 @@ impl GateContext {
                 | "transactions"
                 | "docker"
                 | "replication"
+                | "soak"
+                | "benchmarks"
         ) {
             return Err("gate desconhecido ou sem runner implementado".into());
         }
@@ -417,13 +419,18 @@ fn observe(root: &Path) -> Result<Observation, String> {
         compiled_version: env!("CARGO_PKG_VERSION").to_owned(),
         compiled_os: std::env::consts::OS.to_owned(),
         compiled_arch: std::env::consts::ARCH.to_owned(),
-        compiled_env: if cfg!(target_env = "gnu") {
-            "gnu"
-        } else {
-            "other"
-        }
-        .to_owned(),
+        compiled_env: compiled_environment().to_owned(),
     })
+}
+
+pub(crate) fn compiled_environment() -> &'static str {
+    if cfg!(target_env = "gnu") {
+        "gnu"
+    } else if cfg!(target_env = "msvc") {
+        "msvc"
+    } else {
+        "other"
+    }
 }
 
 fn checked(command: &mut Command) -> Result<Vec<u8>, String> {

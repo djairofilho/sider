@@ -1,5 +1,10 @@
 # Compatibilidade com Redis
 
+Consulte a [matriz consolidada para 1.0](compatibility-matrix.md) para todas as
+formas implementadas, restrições, testes responsáveis e política após a 1.0.
+Esta página preserva as evidências históricas por marco. A consolidação não
+encerra os gates nem representa aprovação da candidata.
+
 Os cinco comandos da 0.1 estão implementados e verificados por comparação
 diferencial do binário Sider com Redis 8.10.1. O teste separado com `redis-cli`
 também passou contra o Sider. Isso comprova o subconjunto abaixo nos casos
@@ -80,19 +85,19 @@ em 91 comparações binárias, incluindo `WRONGTYPE`, coleções, inscrições d
 [guia de transações](transactions.md) registra comandos, restrições, formato
 especial RESP2, persistência e reprodução das verificações.
 
-## Subconjunto alvo
+## Protocolo implementado
 
 `INFO [seção ...]` expõe um diagnóstico próprio do Sider por RESP2. As seções e
 os indicadores estão no [guia operacional](metrics.md); não há promessa de
 reproduzir todos os campos INFO do Redis. A consulta respeita o modo assinante
 e os limites de resposta, podendo ser enfileirada em `MULTI`.
 
-O Sider aceitará requisições RESP2 formadas por arrays não vazios de bulk strings
-não nulas. Os nomes dos comandos serão comparados sem distinguir maiúsculas de
-minúsculas ASCII. Chaves e valores serão binários, sem exigir UTF-8.
+O Sider aceita requisições RESP2 formadas por arrays não vazios de bulk strings
+não nulas. Os nomes dos comandos são comparados sem distinguir maiúsculas de
+minúsculas ASCII. Chaves e valores são binários, sem exigir UTF-8.
 
 O codec representa os cinco tipos RESP2, mas isso não significa que todos os
-tipos serão aceitos como argumentos de comandos. Valor nulo, valor vazio,
+tipos são aceitos como argumentos de comandos. Valor nulo, valor vazio,
 array nulo e array vazio têm representações distintas.
 
 Frames fragmentados e comandos concatenados são tratados desde R01-04.
@@ -147,7 +152,7 @@ O teste com `redis-cli` é uma evidência de integração separada: sua saída
 textual não substitui a comparação dos bytes no protocolo. Uma ferramenta ausente
 ou um teste ignorado deve permanecer registrado como pendente.
 
-## Evolução planejada
+## Integração das capacidades
 
 Pub/Sub está implementado em R08: `SUBSCRIBE canal [canal ...]`,
 `UNSUBSCRIBE [canal ...]`, `PUBLISH canal mensagem` e `PING [mensagem]` no modo
@@ -160,8 +165,9 @@ O [ROADMAP](../ROADMAP.md) é a sequência oficial. Strings, opções de `SET`, 
 quota de R02 estão implementadas, assim como AOF e shards fixos duráveis (R03/R04).
 O formato AOF é próprio, sem compatibilidade de arquivo com Redis. Hashes, listas,
 sets e sorted sets estão implementados com TTL/quota e persistência tipada.
-Transações de um shard ficam na 0.7; replicação
-Sider→Sider na 0.9; operação e imagem Docker na 0.10. A 1.0 estabiliza esse subconjunto.
+Transações de um shard estão implementadas em R07; replicação Sider→Sider em
+R09; backup, métricas e distribuição possuem implementação e runners em R10.
+A baseline operacional completa e a candidata 1.0 continuam sujeitas aos gates.
 
 Com `SIDER_SHARDS` maior que um, operações multichave precisam do mesmo shard,
 com rejeição `CROSSSLOT` antes de qualquer efeito. Essa divergência intencional
