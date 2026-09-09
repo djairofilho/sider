@@ -3,9 +3,9 @@
 ## Escopo e arquitetura
 
 - Leia `PLANO.md`, `README.md`, `ROADMAP.md` e `docs/compatibility.md` antes de implementar.
-- Avance pela próxima tarefa desbloqueada do milestone atual, em etapas compiláveis
-  e testáveis. Após validar e integrar diferenciais/CLI de `R01-05`, o próximo
-  item é `R01-GATE`, com candidata e final verificadas antes de avançar à 0.2.
+- Avance por tarefas tecnicamente desbloqueadas, em etapas compiláveis e testáveis.
+  R01–R10 são marcos internos; seus checkpoints não exigem publicação. Use até
+  três frentes em worktrees separados, com um integrador dos contratos compartilhados.
 - Crie módulos quando houver implementação real; evite stubs e diretórios vazios.
 - Preserve as fronteiras entre RESP, comandos, armazenamento e rede.
 - Use dados binários para chaves e valores. Não limite o protocolo a UTF-8.
@@ -27,10 +27,14 @@
 - Preserve IDs de tarefas, marcadores gerenciados e comentários humanos ao sincronizar.
 - Não trate testes do bootstrap como evidência das funcionalidades futuras.
 - Gates ausentes, ignorados ou cancelados bloqueiam publicação; nunca sintetize sucesso.
-- Toda versão exige candidata; mudança funcional após RC exige outra candidata.
-- Até a 1.0 inclusive, valide os gates e publique manualmente o SHA exato do merge
-  de release. O merge não publica nada. Mantenha repositório e artefatos privados
-  e `publish = false`; só encerre milestone após conferir a release final.
+- Somente R11 publica candidata e final. O pacote já identifica `1.0.0` na RC;
+  a final promove o mesmo SHA e todos os mesmos arquivos, sem recompilar ou
+  repetir gates. Qualquer mudança no bundle exige outra candidata.
+- Publique manualmente o build do SHA exato do merge de preparação. O merge não
+  publica nada. Mantenha repositório e artefatos privados e `publish = false`.
+  Checkpoints internos encerram após validação técnica; R11 após conferir a final.
+- Preserve evidências por tarefa/SHA nos marcos internos e a baseline de R10 para
+  migração. Não atribua resultados antigos a outro SHA ou altere releases históricas.
 
 ## Rust e testes
 
@@ -50,6 +54,9 @@
   das ferramentas somente quando elas, seus contratos ou seu manifesto mudarem.
   Preserve os caches Cargo e execute gates externos apenas quando relevantes à
   tarefa ou obrigatórios na release.
+- Execute uma bateria integrada ao fechar o núcleo durável com shards/transações;
+  a próxima bateria completa é a do build candidato 1.0, incluindo soak de 3600 s.
+  Benchmarks não compartilham a máquina com builds ou ensaios de carga.
 - Verifique também `cargo doc --locked --no-deps` e `cargo build --locked --release`
   quando mudar interfaces, configuração de build ou documentação de API.
 

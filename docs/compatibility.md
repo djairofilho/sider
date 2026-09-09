@@ -34,8 +34,8 @@ Sider, incluindo pipelines. Em R01-05, `tests/compatibility.rs` passou com 3.588
 comparações binárias no Windows e no Linux Ubuntu 24.04. O caminho Linux também
 passou em nove cenários de CLI contra ambos os servidores, com processos e
 containers descartáveis. Os [comandos reproduzíveis](differential.md) registram
-seeds, cobertura e limites; os gates de cada release devem ser executados novamente
-no SHA da candidata ou final.
+seeds, cobertura e limites. A candidata 1.0 valida a matriz completa no seu SHA;
+a final promove os mesmos arquivos e evidências desse build aprovado.
 
 ## Subconjunto alvo
 

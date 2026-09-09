@@ -6,7 +6,7 @@ subconjunto explícito de compatibilidade com Redis. O nome é Redis ao contrár
 Este plano detalha a versão 0.1. O [ROADMAP](ROADMAP.md) e seu
 [manifesto versionado](releases/plan.json) definem a sequência oficial até a 1.0,
 com tarefas, dependências e critérios. O [guia de releases](docs/releases.md)
-descreve candidatas e publicação. O bootstrap já contém pacote Rust, configuração de
+descreve checkpoints internos e a publicação da 1.0. O bootstrap já contém pacote Rust, configuração de
 endereço e binário com testes. A referência Redis e o codec RESP2 isolado estão
 implementados, assim como parser e armazenamento síncrono dos cinco comandos.
 Worker e servidor TCP também estão implementados em R01-04. A suíte diferencial
@@ -14,8 +14,9 @@ e a integração com CLI de R01-05 estão implementadas. As execuções
 e seus limites estão no [guia de testes](docs/testing.md).
 
 CI e publicação automática foram adiadas para depois da 1.0. Até a 1.0 inclusive,
-as etapas avançam com testes locais e publicação manual, mantendo os critérios
-funcionais e as evidências exigidas por release.
+as etapas avançam com testes locais proporcionais. Os marcos 0.1–0.10 não exigem
+publicação. A 1.0 terá candidata e final promovidas manualmente com o mesmo SHA e
+os mesmos arquivos, preservando os critérios funcionais e as evidências reais.
 
 ## Índice
 
@@ -627,5 +628,5 @@ Redis/CLI estão implementados. A execução de `R01-01` está documentada no
 [guia de testes](docs/testing.md). O codec isolado de `R01-02` também está
 implementado, assim como parser e armazenamento síncrono de `R01-03`, worker e
 TCP de `R01-04`. `R01-05` integra diferenciais e CLI. `R01-GATE` publicou a
-primeira candidata; a final aguarda nova candidata com as alterações de
-ferramentas e gates. O roadmap preserva os checkpoints internos deste plano.
+primeira candidata, preservada como histórico. O marco 0.1 será encerrado como
+checkpoint técnico, sem outra publicação. O roadmap preserva os IDs deste plano.

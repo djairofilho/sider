@@ -121,5 +121,7 @@ checkout alterado, target errado, recibo antigo ou execução filtrada sem casos
 produzem aprovação. Se o diretório estiver dentro do checkout, use `target/`, que
 é ignorado pelo Git. Copie os resultados para fora do runner antes de removê-lo.
 
-A candidata e a final exigem novos recibos no próprio SHA; resultados de uma
-branch de trabalho não substituem essa validação.
+A candidata 1.0 exige novos recibos no próprio SHA, com versão de build `1.0.0`.
+A final promove esses mesmos arquivos; não gera novos recibos. Resultados de uma
+branch de trabalho não substituem a validação do build candidato. Ensaios internos
+usam as entradas diretas da suíte e registram tarefa/SHA, sem contexto de release.

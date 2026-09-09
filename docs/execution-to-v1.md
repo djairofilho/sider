@@ -1,100 +1,108 @@
-# Execução até a v1.0
+# Execução acelerada até a v1.0
 
-Este plano resume a ordem de trabalho após a implementação do núcleo RESP2 da 0.1.
-Os IDs, dependências e critérios completos continuam em
-[releases/plan.json](../releases/plan.json). O [ROADMAP](../ROADMAP.md) apresenta
-as tarefas; as issues do GitHub registram seu estado operacional.
+O escopo funcional da v1 permanece completo. Os marcos `R01` a `R10` são internos;
+somente `R11` publica candidata e final. A final promove exatamente o SHA e os
+arquivos aprovados na candidata. Fuzz permanece removido, e CI e publicação
+automática continuam desligadas.
 
-## Ponto de partida
+Os IDs, dependências e critérios estão em [releases/plan.json](../releases/plan.json).
+O [ROADMAP](../ROADMAP.md) é gerado; as issues registram o estado operacional.
+O [guia de releases](releases.md) define os contratos de evidência e publicação.
 
-- Fundação Rust, licença MIT e backlog versionado estão implementados.
-- R01-01 a R01-04 foram integradas: fixtures Redis, codec, parser, armazenamento,
-  worker e TCP, com limites, prazos e prontidão.
-- R01-05 integrou os diferenciais e CLI pelo PR #68.
-  A validação local passou nos dois sistemas. R01-GATE publicou a candidata
-  [v0.1.0-rc.1](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1).
-  As notas e evidências dessa RC preservam o fuzz executado sob a política anterior.
-- Ainda não há persistência ou quota. A final continua pendente. A migração para
-  ferramentas Rust e a remoção do fuzz alteraram ferramentas e gates, exigindo
-  uma nova candidata antes de publicar essas mudanças.
-- CI e publicação automática ficam desligadas até a 1.0 inclusive. Reativá-las
-  depois disso será uma entrega própria, não um efeito automático da versão.
+## Checkpoints internos
 
-## Próxima entrega: fechar a 0.1
+- Preservar IDs, issues e milestones existentes. O campo `publication` distingue
+  marcos internos de releases publicáveis.
+- Fechar `R01-GATE` a `R10-GATE` após cumprir implementação e validação do marco,
+  sem candidata, empacotamento ou publicação como requisito do checkpoint.
+- Registrar resultados pelo ID da tarefa e SHA de origem. Não alterar a versão do
+  pacote a cada checkpoint nem atribuir resultados históricos a outro SHA.
+- Concluir `R01-GATE` com as entregas já verificadas. A candidata histórica
+  [v0.1.0-rc.1](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1)
+  permanece intacta; não haverá outra candidata ou final da 0.1 neste fluxo.
+- Cada checkpoint depende das tarefas locais. `R11-GATE` depende de todos os
+  checkpoints internos e das tarefas finais.
 
-1. Integrar e validar a remoção do fuzz e os ajustes de ferramentas e documentação.
-2. Preparar uma nova candidata da 0.1 com esses ajustes e validar seus gates no
-   SHA exato. Preservar as evidências anteriores como histórico, sem transferi-las
-   para outro SHA nem aplicar a política nova à final anteriormente preparada.
-3. Preparar e revalidar a final a partir da nova candidata, seguindo as conferências
-   do [guia de releases](releases.md).
-4. Publicar e conferir a final; então fechar o gate e o milestone e iniciar
-   `R02-01`, os comandos adicionais de strings.
+## Execução por dependências técnicas
 
-O [plano técnico da 0.1](../PLANO.md) detalha os contratos de rede e ciclo de vida.
-
-## Sequência das releases
-
-Cada linha depende da conclusão da anterior. Cada versão inclui sua própria
-candidata, validação cumulativa e publicação final.
-
-| Versão | Ordem de implementação | Critério central |
+| Etapa | Trabalho | Condição de conclusão |
 | --- | --- | --- |
-| `0.1.0` | Nova candidata com os ajustes de ferramentas e gates; validar e publicar a final | Cinco comandos via TCP e CLI, com limites e ordenação testados |
-| `0.2.0` | Strings adicionais; opções de `SET`; TTL passivo/ativo; quota | Overflow e expiração corretos; rejeições preservam estado; sem eviction |
-| `0.3.0` | AOF versionado/checksum; append/fsync; recuperação; compactação; crashes | Nenhum registro parcial aplicado; durabilidade e substituição de arquivos testadas nos dois sistemas |
-| `0.4.0` | Hash estável/hash tags; workers; multichave; AOF; medições | Rejeitar operações entre shards antes de qualquer alteração |
-| `0.5.0` | Valores tipados; hashes; listas; sets; integração | `WRONGTYPE`, TTL, quota e recuperação verificados para cada tipo |
-| `0.6.0` | Sorted sets; comandos; persistência e limites | Scores, desempate binário, índices negativos e ordenação corretos |
-| `0.7.0` | Estado transacional; lotes; `WATCH`; AOF atômico | Um shard; conflitos/expiração invalidam `WATCH`; replay sem meio lote; erros individuais sem rollback |
-| `0.8.0` | Assinaturas; publicação; modo assinante; clientes lentos | Filas limitadas, inscrições liberadas e assinantes sem bloquear o banco |
-| `0.9.0` | Protocolo Sider→Sider; sincronização completa; incremental; reconexão; promoção | Réplicas somente leitura; TTL/transações preservados; histórico insuficiente exige sincronização completa |
-| `0.10.0` | Métricas; diagnóstico; backup/restauração; Docker; ensaios | Restauração reproduzível e imagem privada executada, testada e exportada |
-| `1.0.0` | Congelar escopo; auditoria diferencial; carga; migração da 0.10; benchmarks/documentação | Matriz completa, uma hora de carga e nenhuma falha conhecida de corrupção ou perda além das garantias declaradas |
+| Fundação | R02: strings, opções de SET, TTL e quota | Semântica, overflow, expiração e rejeições sem mutação comprovados |
+| Frente A | R03: AOF; depois R04: shards e integração durável | Replay, compactação, falhas de escrita e operações entre shards verificados |
+| Frente B | R05: valores tipados e coleções; depois R06: sorted sets | Comandos, WRONGTYPE, TTL, quota e persistência integrados |
+| Frente C | R08: Pub/Sub; depois R07: transações | Clientes lentos isolados; WATCH e execução/persistência atômica dos lotes |
+| Integração final | R09: replicação, em paralelo com R10: operação e distribuição | Snapshot, retomada, promoção manual, backup/restauração e pacotes funcionais |
+| Estabilização | R11: auditoria, migração, carga e benchmarks | Escopo completo comprovado no build candidato |
 
-## Ciclo de execução
+A ordem no JSON não cria dependências. O `xtask` valida referências e ciclos,
+mas só considera os vínculos técnicos explícitos; não injeta o gate anterior.
 
-1. Escolher a próxima issue desbloqueada do milestone atual.
-2. Implementar em branch própria, com testes e commits pequenos por responsabilidade.
-3. Executar a validação local relevante e abrir PR vinculado à issue.
-4. Revisar e integrar por merge commit, registrando resultados e limitações reais.
-5. Atualizar compatibilidade, changelog e backlog sem duplicar issues ou apagar
-   comentários humanos.
-6. Preparar a RC somente quando todas as tarefas funcionais estiverem concluídas.
-7. Encerrar o milestone apenas após conferir a release final publicada e seus assets.
+Um integrador coordena interfaces e merges; até três agentes trabalham em
+worktrees separados. Coleções começam após TTL/quota e sua integração durável
+espera o formato e replay do AOF. Pub/Sub pode usar a rede atual. Transações
+aguardam roteamento/execução por worker e, para concluir, lotes duráveis.
+Replicação precisa de sequência de mutações, snapshots e shards; sua aprovação
+cobre todos os tipos e transações.
 
-Para acelerar, usar testes focados durante a implementação e `cargo xtask check`
-uma vez sobre o diff final antes de integrar. Não repetir verificação sem mudança
-nos arquivos relevantes. `cargo xtask check --tools` fica reservado a mudanças no
-utilitário e no plano. Os ensaios longos são executados quando relevantes à tarefa
-ou obrigatórios para publicar, não a cada edição. Não aguardar CI nesta fase.
-Separar tarefas independentes em paralelo e conservar os caches Cargo.
+Métricas e diagnóstico acompanham seus subsistemas. Backup depende de snapshot
+consistente; ensaios operacionais completos aguardam a integração. O integrador
+concentra contratos compartilhados: arrays/erros, entradas com TTL e contabilidade,
+mutações resolvidas, lotes e modos da conexão. Cada abstração tem consumidor real.
 
-## Validação e distribuição
+Usar PRs por entrega coesa, podendo fechar várias issues relacionadas. Manter
+commits pequenos por responsabilidade com implementação e testes necessários
+juntos; integrar por merge commit após validação local.
 
-- Banco, testes e ferramentas próprias usam Rust/Cargo. Os helpers Python e os
-  workflows arquivados foram removidos. Não há um publicador automático para manter.
-- Desde a 0.1: validação nativa em Linux GNU x86_64 (Ubuntu 24.04) e Windows MSVC
-  x86_64; teste TCP dos pacotes extraídos e diferenciais.
-- Cada candidata exige aprovação dos gates no próprio SHA. A final também é
-  recompilada e revalidada no SHA exato do seu merge de release.
-- Desde a 0.3: crashes, recuperação e migração nos dois sistemas. Cada capacidade
-  posterior acrescenta seus testes aos gates anteriores.
-- Na 1.0: carga contínua por uma hora e benchmarks com throughput, p50/p95/p99,
-  memória, pipelines, hot keys e diferentes quantidades de shards.
-- Publicação manual do SHA exato do merge de release, com notas, manifesto,
-  checksums e licença MIT nos pacotes. RC nunca é latest.
-- Repositório e artefatos continuam privados; `publish = false` permanece ativo.
-  Desde a 0.10, a imagem Docker é exportada como asset privado.
-- Correções posteriores usam patch com candidata. Novas capacidades usam minor;
-  incompatibilidades anteriores à 1.0 ficam nas minors e aparecem nas notas.
+## Validação proporcional
 
-Não publicar se qualquer gate obrigatório estiver ausente, ignorado, cancelado
-ou com falha. O [guia de releases](releases.md) define o procedimento completo.
+| Momento | Validação |
+| --- | --- |
+| Durante implementação | Testes focados no comportamento alterado |
+| Antes de integrar cada PR do banco | Uma execução de `cargo xtask check` sobre o diff final |
+| Ferramentas/plano | `cargo xtask check --tools` |
+| Novos comandos ou semântica | Diferenciais da família afetada contra a referência fixada |
+| Persistência, shards e transações | Falha, replay, migração e atomicidade afetados; Windows/Linux para filesystem |
+| Replicação e operação | Snapshot interrompido, sequências, reconexão, TTL, lotes, backup e restauração |
+| Candidata 1.0 | Matriz completa, pacotes extraídos, Docker, migração, soak de 3600 segundos e benchmarks |
+
+Executar uma bateria integrada ao concluir o núcleo durável com shards e
+transações. A próxima bateria completa será no build candidato da 1.0. Ensaios
+internos chamam as suítes diretamente e registram tarefa/SHA, sem exigir recibos
+ou pacotes de release. Implementar runners futuros junto das funcionalidades.
+
+Documentação isolada recebe revisão de texto, links e comandos. Interfaces e
+build também exigem `cargo doc --locked --no-deps` e
+`cargo build --locked --release`. Preservar caches e não repetir verificações
+aprovadas sem mudanças relevantes. Benchmarks rodam sem builds ou carga
+concorrentes na mesma máquina. Gate ausente, ignorado ou com falha fica pendente.
+
+## Baseline e publicação da 1.0
+
+1. Congelar uma baseline interna de R10 com executável, dados, configuração,
+   formato AOF, SHA e hashes. Ela substitui a exigência de uma 0.10 final publicada
+   no ensaio de migração para 1.0.
+2. Concluir documentação/notas, fixar o pacote em `1.0.0` e integrar o PR de
+   preparação. Construir e validar seu SHA exato.
+3. Produzir pacotes e recibos com versão `1.0.0`. O manifesto de artefatos v2 usa
+   `artifact_version: "1.0.0"`; tag e status no GitHub identificam `v1.0.0-rc.N`.
+4. Publicar a candidata privada, conferir downloads e registrar sua aprovação.
+5. Criar a tag final no mesmo SHA e publicar os mesmos arquivos, incluindo
+   manifesto, evidências e checksums. Não recompilar, reempacotar ou repetir o soak.
+6. Registrar a conferência da promoção fora do conjunto imutável. Qualquer mudança
+   nesse conjunto exige outra candidata.
+
+O verificador aceita RC e final para o mesmo build e rejeita divergências de
+versão, SHA e hashes. Conferir a origem dos bytes e a aprovação remota continua
+parte da publicação manual, não uma autorização inferida do verificador local.
+
+A execução termina quando todas as capacidades estiverem comprovadas, a final
+1.0 publicada e seus arquivos conferidos. Repositório e artefatos permanecem
+privados; `publish = false`, Rust, RESP2 binário, workers proprietários, canais
+limitados e suporte Linux/Windows permanecem obrigatórios.
 
 ## Fora do escopo até a 1.0
 
 Redis Cluster, Sentinel, failover automático, resharding online, RESP3, Lua,
-operações bloqueantes, transações entre shards, TLS e ACL. O ambiente suportado
-permanece controlado; a replicação é assíncrona entre instâncias Sider da mesma
-versão e configuração de shards, com promoção manual.
+operações bloqueantes, transações entre shards, TLS e ACL. A replicação é
+assíncrona entre instâncias Sider da mesma versão e configuração de shards,
+com promoção manual em ambiente controlado.

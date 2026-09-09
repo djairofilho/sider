@@ -10,12 +10,13 @@ limitados. É um protótipo local, sem persistência, autenticação ou quota do
 A suíte diferencial compara o binário com Redis 8.10.1 e verifica os cinco comandos
 com `redis-cli`. A
 [candidata 0.1.0-rc.1](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1)
-foi publicada no repositório privado; a final ainda não foi publicada.
+foi publicada no repositório privado e permanece como registro histórico.
 
 As entregas até a 1.0 estão organizadas no [ROADMAP](ROADMAP.md), com 11 milestones,
-50 tarefas de implementação e um gate de publicação por versão. O
+50 tarefas de implementação. Os marcos 0.1–0.10 têm checkpoints técnicos;
+somente a 1.0 terá candidata e final. O
 [guia de releases](docs/releases.md) descreve como sincronizar o backlog e preparar
-candidatas e versões finais. O bootstrap não será publicado como banco funcional.
+candidata e final com o mesmo SHA e os mesmos arquivos aprovados.
 O [plano de execução até a v1](docs/execution-to-v1.md) resume o ponto atual,
 a próxima entrega e os critérios de cada versão.
 
@@ -142,10 +143,9 @@ validação das fixtures e das divergências de `SET`/comando desconhecido.
 prontidão e encerramento supervisionado. `R01-05` acrescenta a comparação
 diferencial Sider/Redis e integração com `redis-cli`, com execução registrada
 no guia de testes. Essas entregas estão integradas. `R01-GATE` já publicou a
-candidata. A migração das ferramentas e a remoção do fuzz alteram a preparação
-de release e exigem uma nova candidata antes da final, com
-[pacotes e smokes](docs/packages.md). As evidências anteriores continuam
-vinculadas aos seus SHAs e não aprovam o checkout alterado.
+candidata histórica. O checkpoint R01-GATE passa a encerrar o marco técnico,
+sem nova publicação da 0.1. A implementação segue por dependências reais até
+a 1.0; as evidências anteriores continuam vinculadas aos seus próprios SHAs.
 
 O alvo da versão 0.1 inclui `PING`, `ECHO`, `GET`, `SET` básico e `DEL`, com um
 único worker de armazenamento. TTL, persistência e múltiplos shards pertencem às
@@ -163,7 +163,7 @@ cargo xtask sync
 
 `sync` simula; só `sync --apply` escreve no GitHub pela CLI `gh` autenticada.
 O [guia de releases](docs/releases.md) separa o ciclo rápido dos testes de publicação.
-Releases exigem candidata e evidências dos testes específicos da capacidade.
+A publicação 1.0 exige candidata e evidências de todas as capacidades.
 Gates pendentes bloqueiam a publicação, mesmo quando os testes do bootstrap passam.
 
 ## Licença

@@ -1,8 +1,9 @@
 # Pacotes locais e smoke do executável extraído
 
-Antes de publicar, compile e teste o SHA exato do merge de release no sistema
-nativo. Use diretórios novos para staging, arquivo compactado e extração. Não
-substitua um artefato enviado ao GitHub por outro build da mesma versão.
+Antes de publicar a candidata 1.0, compile e teste o SHA exato do merge de
+preparação no sistema nativo. Use diretórios novos para staging, arquivo compactado
+e extração. RC e final usam os mesmos pacotes, já identificados como `1.0.0`.
+A promoção confere os mesmos bytes; não recompila nem reempacota.
 
 ## Conteúdo
 
@@ -49,7 +50,8 @@ Ausência de configuração, arquivo inválido, timeout ou resposta divergente f
 
 O ciclo padrão testa as validações do harness, mas ignora explicitamente a entrada
 externa. Testar uma cópia do binário de desenvolvimento não conta como smoke do
-pacote extraído. Execute a entrada opt-in nos dois sistemas para cada RC e final.
+pacote extraído. Execute a entrada opt-in nos dois sistemas para cada build
+candidato. A final reutiliza essa evidência somente para o mesmo SHA e arquivos.
 
 ## Evidência e publicação
 
