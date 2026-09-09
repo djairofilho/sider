@@ -83,6 +83,16 @@ impl Default for ServerConfig {
 }
 
 impl ServerConfig {
+    /// Versão e configuração efetiva sem caminhos, valores de ambiente ou I/O.
+    /// Não testa prontidão, acesso ao disco nem recuperação do banco.
+    pub fn diagnostic(&self) -> String {
+        format!(
+            "sider_version:{}\r\ndiagnostic_scope:configuration_only\r\nbind_addr:{}\r\n{}",
+            env!("CARGO_PKG_VERSION"),
+            self.bind_addr,
+            crate::metrics::configuration(self)
+        )
+    }
     /// Lê as variáveis `SIDER_*` do ambiente sem modificá-lo.
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::from_lookup(|name| std::env::var_os(name))

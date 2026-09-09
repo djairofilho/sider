@@ -13,7 +13,8 @@ fn main() -> ExitCode {
         [flag] if flag == "--help" || flag == "-h" => {
             println!(
                 "Sider: servidor de banco de dados em memória em desenvolvimento.\n\n\
-                 Uso: sider [--help | --version]\n\n\
+                 Uso: sider [--help | --version | --diagnose]\n\n\
+                 --diagnose: valida a configuração sem iniciar o servidor ou acessar a AOF.\n\
                  SIDER_ADDR: IP e porta (padrão: 127.0.0.1:6379).\n\
                  SIDER_READY_FILE: arquivo JSON de prontidão opcional.\n\
                  Limites: SIDER_MAX_CONNECTIONS, SIDER_WORKER_QUEUE_CAPACITY,\n\
@@ -32,6 +33,25 @@ fn main() -> ExitCode {
             println!("sider {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
+        [flag] if flag == "--diagnose" => match ServerConfig::from_env() {
+            Ok(config) => {
+                print!("{}", config.diagnostic());
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                // O valor de uma variável malformada pode conter dados sensíveis.
+                let reason = match &error {
+                    sider::ConfigError::InvalidServerLimits { reason }
+                    | sider::ConfigError::InvalidRespLimits { reason } => *reason,
+                    sider::ConfigError::InvalidInteger { name, .. }
+                    | sider::ConfigError::NonUnicodeValue { name } => *name,
+                    sider::ConfigError::InvalidAddress { .. }
+                    | sider::ConfigError::NonUnicodeAddress => "SIDER_ADDR",
+                };
+                eprintln!("configuração inválida: {reason}");
+                ExitCode::FAILURE
+            }
+        },
         [] => match ServerConfig::from_env() {
             Ok(config) => start(config),
             Err(error) => {
@@ -40,7 +60,7 @@ fn main() -> ExitCode {
             }
         },
         _ => {
-            eprintln!("argumentos inválidos; uso: sider [--help | --version]");
+            eprintln!("argumentos inválidos; uso: sider [--help | --version | --diagnose]");
             ExitCode::FAILURE
         }
     }
