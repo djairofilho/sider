@@ -252,8 +252,15 @@ fn collections_match_redis() {
     assert!(collections_cases().0 > 0);
 }
 
+fn reference() -> redis_reference::RedisReference {
+    match std::env::var("SIDER_TEST_RUNNER_CONTAINER") {
+        Ok(id) => redis_reference::RedisReference::start_shared(&id),
+        Err(_) => redis_reference::RedisReference::start(),
+    }
+}
+
 fn collections_cases() -> (usize, usize) {
-    let redis = redis_reference::RedisReference::start();
+    let redis = reference();
     let mut sider = sider_process::SiderProcess::start(
         Path::new(env!("CARGO_BIN_EXE_sider")),
         env!("CARGO_PKG_VERSION"),
@@ -448,7 +455,7 @@ fn sorted_sets_match_redis() {
 }
 
 fn sorted_cases() -> usize {
-    let redis = redis_reference::RedisReference::start();
+    let redis = reference();
     let mut sider = sider_process::SiderProcess::start(
         Path::new(env!("CARGO_BIN_EXE_sider")),
         env!("CARGO_PKG_VERSION"),
