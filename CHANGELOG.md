@@ -4,19 +4,22 @@
 
 - Ferramentas locais de planejamento, backlog, verificação e integridade de
   artefatos em Rust, acessíveis por `cargo xtask` e isoladas do servidor.
-- Remoção dos helpers Python e workflows arquivados. Publicação continua manual,
-  com os mesmos critérios de release; CI permanece adiada para depois da 1.0.
+- Remoção dos helpers Python e workflows arquivados. Publicação continua manual;
+  CI permanece adiada para depois da 1.0.
 - Ciclo curto com testes focados e checks separados para banco e ferramentas,
   sem executar gates externos a cada edição ou duplicar check e Clippy.
 - Remoção completa da estrutura, dependências e gate de fuzz. Permanecem os
   testes nativos, de propriedades, diferenciais e de pacotes extraídos.
-- As alterações de ferramentas e gates exigem nova candidata antes da final.
+- Marcos R01–R10 internos, checkpoints técnicos e dependências explícitas,
+  preservando IDs e escopo. Somente R11 publica candidata e final.
+- Manifesto de artefatos v2: o build já usa `1.0.0` na candidata, e a final promove
+  o mesmo SHA e arquivos. Divergências de identidade ou hashes são rejeitadas.
+- Migração para 1.0 a partir de baseline interna R10, sem publicação intermediária.
 
 ## [0.1.0] - Preparação anterior, não publicada
 
-- A preparação anterior previa promover a candidata aprovada, sem alterações
-  funcionais ou de dependências. A final permanece pendente e precisa de nova
-  candidata para incluir as mudanças em ferramentas e gates.
+- A preparação anterior foi encerrada sem publicação. O marco 0.1 passa a ser
+  um checkpoint interno; a candidata anterior permanece como registro histórico.
 - [Rascunho das notas da final](releases/notes/v0.1.0.md), incluindo o requisito do runtime
   Visual C++ v14 Redistributable x64 para o executável Windows.
 
@@ -44,6 +47,5 @@
 
 As [notas da candidata](releases/notes/v0.1.0-rc.1.md) descrevem o subconjunto e suas
 limitações e preservam a política de validação vigente naquela publicação.
-A RC foi publicada e aprovada. A publicação final com as alterações atuais depende
-de outra candidata aprovada, dos gates no SHA exato de seu merge e da conferência
-dos artefatos.
+A RC foi publicada e aprovada sob a política daquela revisão. Sua evidência não
+aprova os SHAs posteriores; o fluxo atual publica somente a candidata e a final 1.0.

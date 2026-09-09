@@ -167,6 +167,7 @@ struct Item {
     title: String,
     kind: &'static str,
     version: String,
+    publication: bool,
     area: String,
     dependencies: Vec<String>,
     data: Value,
@@ -175,15 +176,6 @@ struct Item {
 fn descriptors(plan: &Value) -> Result<Vec<Item>, String> {
     let releases = array(plan, "releases")?;
     let first_version = text(releases.first().ok_or("Plano sem releases")?, "version")?;
-    let release_gates: BTreeMap<_, _> = releases
-        .iter()
-        .map(|release| {
-            Ok((
-                text(release, "id")?.to_owned(),
-                text(&release["gate"], "id")?.to_owned(),
-            ))
-        })
-        .collect::<Result<_, String>>()?;
     let mut items = Vec::new();
     for data in array(plan, "bootstrap")? {
         items.push(Item {
@@ -191,6 +183,7 @@ fn descriptors(plan: &Value) -> Result<Vec<Item>, String> {
             title: text(data, "title")?.into(),
             kind: "bootstrap",
             version: first_version.into(),
+            publication: false,
             area: "foundation".into(),
             dependencies: Vec::new(),
             data: data.clone(),
@@ -198,46 +191,29 @@ fn descriptors(plan: &Value) -> Result<Vec<Item>, String> {
     }
     for release in releases {
         let version = text(release, "version")?;
-        let previous = strings(release, "depends_on")?
-            .iter()
-            .map(|id| {
-                release_gates
-                    .get(id)
-                    .cloned()
-                    .ok_or_else(|| "Dependência de release ausente".into())
-            })
-            .collect::<Result<Vec<_>, String>>()?;
+        let publication = release["publication"] == true;
         for data in array(release, "tasks")? {
-            let mut dependencies = strings(data, "depends_on")?;
-            for dependency in &previous {
-                if !dependencies.contains(dependency) {
-                    dependencies.push(dependency.clone());
-                }
-            }
             items.push(Item {
                 id: text(data, "id")?.into(),
                 title: text(data, "title")?.into(),
                 kind: "task",
                 version: version.into(),
+                publication,
                 area: text(data, "area")?.into(),
-                dependencies,
+                dependencies: strings(data, "depends_on")?,
                 data: data.clone(),
             });
         }
         let mut data = release["gate"].clone();
         data["required_gates"] = release["required_gates"].clone();
-        let mut dependencies = array(release, "tasks")?
-            .iter()
-            .map(|task| text(task, "id").map(str::to_owned))
-            .collect::<Result<Vec<_>, _>>()?;
-        dependencies.extend(previous);
         items.push(Item {
             id: text(&data, "id")?.into(),
             title: text(&data, "title")?.into(),
-            kind: "release",
+            kind: if publication { "release" } else { "checkpoint" },
             version: version.into(),
+            publication,
             area: "release".into(),
-            dependencies,
+            dependencies: crate::plan::gate_dependencies(plan, release)?,
             data,
         });
     }
@@ -277,7 +253,14 @@ fn render(item: &Item, issues: &Index) -> Result<String, String> {
         "".into(),
         objective.into(),
         "".into(),
-        format!("Versão: `v{}`.", item.version),
+        if item.publication {
+            format!("Versão publicável: `v{}`.", item.version)
+        } else {
+            format!(
+                "Marco interno: `{}`. Não cria candidata, tag ou release.",
+                item.version
+            )
+        },
     ];
     let (deliverables, tests) = match item.kind {
         "bootstrap" => (
@@ -286,10 +269,17 @@ fn render(item: &Item, issues: &Index) -> Result<String, String> {
         ),
         "release" => (
             vec![
-                "Publicar uma candidata e a versão final com evidências e artefatos verificados."
-                    .into(),
+                "Validar uma candidata em SHA e bundle imutáveis e promover a final com o mesmo SHA e os mesmos assets, sem recompilar.".into(),
+                "Qualquer mudança no bundle exige outra candidata; conferir todos os marcos internos antes de publicar.".into(),
                 "Até e incluindo a 1.0, verificar e publicar manualmente; CI e publicação automática ficam para depois da 1.0.".into(),
                 "Manter esta issue e o milestone abertos até a publicação final confirmada.".into(),
+            ],
+            strings(&item.data, "required_gates")?,
+        ),
+        "checkpoint" => (
+            vec![
+                "Conferir as tarefas e os critérios técnicos deste marco com evidências locais.".into(),
+                "Encerrar o marco sem candidata, tag ou publicação; baselines de migração permanecem congeladas por SHA e hashes.".into(),
             ],
             strings(&item.data, "required_gates")?,
         ),
@@ -588,6 +578,13 @@ fn sync_plan(plan: &Value, client: &mut impl GitHub, apply: bool) -> Result<Valu
             ("5319e7", "Validação e publicação de uma versão".into()),
         ),
         (
+            "type:checkpoint".into(),
+            (
+                "7057ff",
+                "Validação de um marco interno sem publicação".into(),
+            ),
+        ),
+        (
             "type:bootstrap".into(),
             ("0e8a16", "Fundação já comprovada por commits e CI".into()),
         ),
@@ -634,8 +631,13 @@ fn sync_plan(plan: &Value, client: &mut impl GitHub, apply: bool) -> Result<Valu
     for release in releases {
         let id = text(release, "id")?;
         let title = format!("v{}", text(release, "version")?);
+        let publication = if release["publication"] == true {
+            "Publicação manual: candidata e final usam o mesmo SHA e os mesmos assets. CI e publicação automática ficam para depois da 1.0."
+        } else {
+            "Marco interno: validação local e encerramento sem candidata, tag ou release publicada."
+        };
         let generated = format!(
-            "{START}\n<!-- sider:release {id} -->\n\n{}\n\nCI e publicação automática desativadas até e incluindo a 1.0; verificações e publicação manuais.\n\n{}\n\n{END}",
+            "{START}\n<!-- sider:release {id} -->\n\n{}\n\n{publication}\n\n{}\n\n{END}",
             text(release, "title")?,
             paragraphs(&strings(&release["gate"], "acceptance")?)
         );
@@ -814,7 +816,7 @@ mod tests {
         let mut releases = Vec::new();
         for index in 1..=2 {
             let id = format!("R{index:02}");
-            releases.push(json!({"id":id,"version":format!("0.{index}.0"),"title":format!("Versão {index}"),"depends_on":if index == 1 {vec![]} else {vec!["R01"]},"scope":["Escopo"],"required_gates":["native","compatibility","tcp_smoke"],"tasks":[{"id":format!("{id}-01"),"title":"Implementar operação","area":"storage","objective":"Comportamento binário.","deliverables":["Implementação"],"tests":["Regressão"],"acceptance":["Estado correto"],"depends_on":if index == 1 {vec!["B00-01"]} else {vec![]}}],"gate":{"id":format!("{id}-GATE"),"title":"Validar e publicar","acceptance":["Publicação confirmada"]}}));
+            releases.push(json!({"id":id,"version":format!("0.{index}.0"),"title":format!("Versão {index}"),"publication":false,"scope":["Escopo"],"required_gates":["native","compatibility","tcp_smoke"],"tasks":[{"id":format!("{id}-01"),"title":"Implementar operação","area":"storage","objective":"Comportamento binário.","deliverables":["Implementação"],"tests":["Regressão"],"acceptance":["Estado correto"],"depends_on":if index == 1 {vec!["B00-01"]} else {vec!["R01-GATE"]}}],"gate":{"id":format!("{id}-GATE"),"title":"Validar marco interno","acceptance":["Critérios locais conferidos"]}}));
         }
         plan["releases"] = json!(releases);
         plan
@@ -965,17 +967,60 @@ mod tests {
     }
 
     #[test]
-    fn migration_keeps_existing_policy_text_without_remote_churn() {
+    fn migration_relabels_internal_gates_without_changing_human_state() {
         let plan = example_plan();
         let mut client = FakeGitHub::default();
         client.apply(&plan).unwrap();
-        assert!(body_text(client.issue("R01-GATE"), "body").unwrap().contains(
-            "- Até e incluindo a 1.0, verificar e publicar manualmente; CI e publicação automática ficam para depois da 1.0."
+        let issue = client.issue_mut("R01-GATE");
+        issue["labels"] = json!(["type:release", "area:release", "priority:high"]);
+        issue["state"] = json!("closed");
+        issue["comments"] = json!(["Aprovação humana preservada"]);
+        issue["body"] = json!(format!(
+            "Contexto anterior.\n\n{}",
+            issue["body"].as_str().unwrap()
         ));
+        client.apply(&plan).unwrap();
+        assert!(
+            body_text(client.issue("R01-GATE"), "body")
+                .unwrap()
+                .contains("Encerrar o marco sem candidata, tag ou publicação")
+        );
         assert!(body_text(&client.milestones[0], "description").unwrap().contains(
-            "CI e publicação automática desativadas até e incluindo a 1.0; verificações e publicação manuais."
+            "Marco interno: validação local e encerramento sem candidata, tag ou release publicada."
         ));
+        let issue = client.issue("R01-GATE");
+        assert!(
+            body_text(issue, "body")
+                .unwrap()
+                .starts_with("Contexto anterior.")
+        );
+        assert_eq!(issue["state"], "closed");
+        assert_eq!(issue["comments"], json!(["Aprovação humana preservada"]));
+        assert!(labels(issue).unwrap().contains(&"type:checkpoint".into()));
+        assert!(labels(issue).unwrap().contains(&"priority:high".into()));
+        assert!(!labels(issue).unwrap().contains(&"type:release".into()));
         assert_eq!(client.apply(&plan).unwrap()["total_changes"], 0);
+    }
+
+    #[test]
+    fn technical_dependencies_do_not_inherit_other_milestone_gates() {
+        let plan: Value = serde_json::from_str(include_str!("../../releases/plan.json")).unwrap();
+        let items = descriptors(&plan).unwrap();
+        assert_eq!(items.len(), 62);
+        let item = |id: &str| items.iter().find(|item| item.id == id).unwrap();
+        for id in ["R04-01", "R08-01", "R10-01"] {
+            assert_eq!(item(id).dependencies, ["R01-04"]);
+        }
+        for id in ["R05-02", "R05-03", "R05-04", "R06-01"] {
+            assert_eq!(item(id).dependencies, ["R05-01"]);
+        }
+        assert_eq!(item("R05-GATE").kind, "checkpoint");
+        assert_eq!(item("R05-GATE").dependencies.len(), 5);
+        assert_eq!(item("R11-GATE").kind, "release");
+        assert_eq!(item("R11-GATE").dependencies.len(), 15);
+        let rendered = render(item("R11-GATE"), &Index::new()).unwrap();
+        assert!(rendered.contains("mesmo SHA e os mesmos assets"));
+        assert!(rendered.contains("sem recompilar"));
     }
 
     #[test]

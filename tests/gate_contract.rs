@@ -47,25 +47,26 @@ impl Fixture {
             head: SHA.to_owned(),
             status: Vec::new(),
             cargo_metadata: json!({"packages": [{
-                "name": "sider", "version": "0.1.0", "publish": [], "license": "MIT",
+                "name": "sider", "version": "1.0.0", "publish": [], "license": "MIT",
                 "repository": "https://github.com/djairofilho/sider",
                 "manifest_path": root.join("Cargo.toml")
             }]}),
             plan: json!({
-                "schema_version": 1,
+                "schema_version": 2,
                 "repository": "djairofilho/sider",
                 "reference": {"image": IMAGE, "platform": "linux/amd64", "redis_version": "8.10.1", "redis_cli_version": "8.10.1"},
-                "release_policy": {"private": true, "publish_crate": false, "targets": [TARGET]},
-                "releases": [{"version": "0.1.0", "required_gates": ["compatibility"]}]
+                "release_policy": {"private": true, "publish_crate": false, "targets": [TARGET],
+                    "final_promotion": "same_sha_same_assets", "bundle_change_requires_new_candidate": true},
+                "releases": [{"version": "1.0.0", "publication": true, "required_gates": ["compatibility"]}]
             }),
             compiler: format!("rustc 1.97.1\nhost: {TARGET}\nrelease: 1.97.1\n"),
-            compiled_version: "0.1.0".into(),
+            compiled_version: "1.0.0".into(),
             compiled_os: "linux".into(),
             compiled_arch: "x86_64".into(),
             compiled_env: "gnu".into(),
         };
         let env = BTreeMap::from([
-            ("SIDER_RELEASE_VERSION", OsString::from("0.1.0")),
+            ("SIDER_RELEASE_VERSION", OsString::from("1.0.0")),
             ("SIDER_RELEASE_SHA", OsString::from(SHA)),
             ("SIDER_RELEASE_TARGET", OsString::from(TARGET)),
             ("SIDER_REFERENCE_IMAGE", OsString::from(IMAGE)),
@@ -121,7 +122,7 @@ fn valid_context_exposes_exact_values_and_publishes_complete_receipt() {
     let fixture = Fixture::new();
     let context = fixture.context("compatibility").unwrap();
     assert_eq!(context.release_dir(), fixture.out);
-    assert_eq!(context.version(), "0.1.0");
+    assert_eq!(context.version(), "1.0.0");
     assert_eq!(context.sha(), SHA);
     assert_eq!(context.target(), TARGET);
     context
@@ -138,7 +139,7 @@ fn valid_context_exposes_exact_values_and_publishes_complete_receipt() {
     assert_eq!(receipt["schema_version"], 1);
     assert_eq!(receipt["gate"], "compatibility");
     assert_eq!(receipt["sha"], SHA);
-    assert_eq!(receipt["version"], "0.1.0");
+    assert_eq!(receipt["version"], "1.0.0");
     assert_eq!(receipt["target"], TARGET);
     assert_eq!(receipt["reference_image"], IMAGE);
     assert_eq!(receipt["status"], "success");
@@ -238,13 +239,13 @@ fn tracked_and_untracked_changes_both_block_publication() {
 #[test]
 fn rejects_wrong_version_invalid_semver_and_stale_compiled_test() {
     for version in [
-        "v0.1.0",
+        "v1.0.0",
         "0.01.0",
         "0.1",
-        "0.1.0-rc.0",
-        "0.1.0-rc.01",
-        "0.1.0-beta.1",
-        "0.1.0+meta",
+        "1.0.0-rc.0",
+        "1.0.0-rc.01",
+        "1.0.0-beta.1",
+        "1.0.0+meta",
         "0.2.0",
     ] {
         let mut fixture = Fixture::new();
@@ -257,19 +258,31 @@ fn rejects_wrong_version_invalid_semver_and_stale_compiled_test() {
 }
 
 #[test]
-fn accepts_registered_release_candidate_with_matching_cargo_version() {
+fn rejects_candidate_version_even_when_cargo_and_compiled_test_match() {
     let mut fixture = Fixture::new();
     fixture
         .env
-        .insert("SIDER_RELEASE_VERSION", "0.1.0-rc.2".into());
+        .insert("SIDER_RELEASE_VERSION", "1.0.0-rc.2".into());
     fixture.change(|observed| {
-        observed.compiled_version = "0.1.0-rc.2".into();
-        observed.cargo_metadata["packages"][0]["version"] = json!("0.1.0-rc.2");
+        observed.compiled_version = "1.0.0-rc.2".into();
+        observed.cargo_metadata["packages"][0]["version"] = json!("1.0.0-rc.2");
     });
-    assert_eq!(
-        fixture.context("compatibility").unwrap().version(),
-        "0.1.0-rc.2"
-    );
+    assert!(fixture.context("compatibility").is_err());
+    assert!(fixture.entries().is_empty());
+}
+
+#[test]
+fn internal_milestone_cannot_produce_release_receipts() {
+    let mut fixture = Fixture::new();
+    fixture.env.insert("SIDER_RELEASE_VERSION", "0.10.0".into());
+    fixture.change(|observed| {
+        observed.compiled_version = "0.10.0".into();
+        observed.cargo_metadata["packages"][0]["version"] = json!("0.10.0");
+        observed.plan["releases"][0]["version"] = json!("0.10.0");
+        observed.plan["releases"][0]["publication"] = json!(false);
+    });
+    assert!(fixture.context("compatibility").is_err());
+    assert!(fixture.entries().is_empty());
 }
 
 #[test]
@@ -304,9 +317,19 @@ fn rejects_non_native_or_mislabeled_target() {
 #[test]
 fn requires_private_policy_registered_gate_and_exact_reference() {
     for (pointer, invalid) in [
+        ("/schema_version", json!(1)),
+        ("/schema_version", json!(2.0)),
         ("/release_policy/private", json!(false)),
         ("/release_policy/publish_crate", json!(true)),
+        ("/release_policy/final_promotion", json!("rebuild")),
+        (
+            "/release_policy/bundle_change_requires_new_candidate",
+            json!(false),
+        ),
         ("/release_policy/targets", json!([])),
+        ("/releases/0/publication", json!(false)),
+        ("/releases/0/publication", json!("true")),
+        ("/releases/0/publication", Value::Null),
         ("/releases/0/required_gates", json!([])),
         ("/releases/0/version", json!("0.2.0")),
         ("/reference/platform", json!("linux/arm64")),

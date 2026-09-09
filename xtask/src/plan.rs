@@ -186,9 +186,6 @@ impl Graph {
                 let Some(&index) = self.positions.get(dependency) else {
                     return Err(format!("{}: dependência inexistente {dependency}", node.id));
                 };
-                if node.kind == Kind::Release && self.nodes[index].kind != Kind::Release {
-                    return Err(format!("{}: release depende apenas de releases", node.id));
-                }
                 if node.kind == Kind::Task && self.nodes[index].kind == Kind::Release {
                     return Err(format!(
                         "{}: tarefa deve depender de tarefa, bootstrap ou gate",
@@ -218,18 +215,6 @@ impl Graph {
         if visited != self.nodes.len() {
             return Err("Ciclo de dependências no manifesto".into());
         }
-        for (position, node) in self.nodes.iter().enumerate() {
-            if node
-                .dependencies
-                .iter()
-                .any(|dependency| self.positions[dependency] >= position)
-            {
-                return Err(format!(
-                    "{}: dependência fora da ordem de execução",
-                    node.id
-                ));
-            }
-        }
         Ok(())
     }
 }
@@ -244,10 +229,10 @@ pub fn load(path: &Path) -> Result<Value, String> {
     Ok(plan)
 }
 
-/// Valida IDs, dependências, ordem, políticas e cobertura cumulativa de gates.
+/// Valida o DAG, gates locais dos marcos e cobertura cumulativa da publicação.
 pub fn validate(plan: &Value) -> Result<(), String> {
-    if plan.get("schema_version").and_then(Value::as_u64) != Some(1) {
-        return Err("schema_version deve ser 1".into());
+    if plan.get("schema_version").and_then(Value::as_u64) != Some(2) {
+        return Err("schema_version deve ser 2".into());
     }
     let repository = text(plan, "repository", "plan")?;
     let parts: Vec<_> = repository.split('/').collect();
@@ -305,7 +290,8 @@ pub fn validate(plan: &Value) -> Result<(), String> {
         "automation_resume_after": "1.0.0", "merge_strategy": "merge",
         "release_branch_prefix": "chore/release-v", "release_label": "type:release",
         "linux_runner": "ubuntu-24.04", "docker_since": "0.10.0",
-        "patch_requires_manifest_entry": true, "functional_change_requires_new_candidate": true,
+        "patch_requires_manifest_entry": true, "bundle_change_requires_new_candidate": true,
+        "final_promotion": "same_sha_same_assets",
         "targets": ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
     });
     for (field, expected) in object(&expected, "política interna")? {
@@ -338,16 +324,21 @@ pub fn validate(plan: &Value) -> Result<(), String> {
     let mut previous_gates = BTreeSet::new();
     for release in releases {
         object(release, "release")?;
-        let dependencies = strings(&release["depends_on"], "release.depends_on", true)?;
-        let id = graph.register(
-            release,
-            Kind::Release,
-            "",
-            dependencies.iter().map(|s| (*s).to_owned()).collect(),
-        )?;
+        if release.get("depends_on").is_some() {
+            return Err(
+                "release.depends_on não existe no schema 2; declare dependências nas tarefas"
+                    .into(),
+            );
+        }
+        let id = graph.register(release, Kind::Release, "", Vec::new())?;
         let version = text(release, "version", &id)?;
         let numbers =
             base_version(version).ok_or_else(|| format!("Versão-base inválida: {version}"))?;
+        if release["publication"].as_bool() != Some(numbers >= (1, 0, 0)) {
+            return Err(format!(
+                "{id}: publication deve ser false antes da 1.0 e true a partir dela"
+            ));
+        }
         if !versions.insert(version) {
             return Err(format!("Versão duplicada: {version}"));
         }
@@ -366,21 +357,26 @@ pub fn validate(plan: &Value) -> Result<(), String> {
         if required.iter().any(|gate| !GATES.contains(gate)) {
             return Err(format!("{id}: gate de evidência desconhecido"));
         }
-        if !previous_gates.is_subset(&required)
-            || !GATES[..3].iter().all(|gate| required.contains(gate))
-        {
-            return Err(format!("{id}: gates obrigatórios devem ser cumulativos"));
-        }
+        let publication = release["publication"] == true;
+        let mut expected: BTreeSet<_> = GATES[..3].iter().copied().collect();
         for (threshold, gates) in THRESHOLDS {
-            if numbers >= *threshold && !gates.iter().all(|gate| required.contains(gate)) {
-                return Err(format!(
-                    "{id}: faltam gates da capacidade {}.{}.{}",
-                    threshold.0, threshold.1, threshold.2
-                ));
+            if (publication && numbers >= *threshold) || numbers == *threshold {
+                expected.extend(gates.iter().copied());
             }
         }
-        previous_gates = required;
-        let mut gate_dependencies = Vec::new();
+        if publication {
+            expected.extend(previous_gates.iter().copied());
+            if !expected.is_subset(&required) {
+                return Err(format!(
+                    "{id}: publicação exige a união cumulativa dos gates de todas as capacidades"
+                ));
+            }
+        } else if required != expected {
+            return Err(format!(
+                "{id}: gates internos devem corresponder à capacidade local"
+            ));
+        }
+        previous_gates.extend(required);
         for task in array(&release["tasks"], &format!("{id}.tasks"), false)? {
             object(task, &format!("{id}: tarefa"))?;
             let dependencies = strings(&task["depends_on"], "task.depends_on", true)?;
@@ -396,14 +392,13 @@ pub fn validate(plan: &Value) -> Result<(), String> {
             for field in ["deliverables", "tests", "acceptance"] {
                 strings(&task[field], &format!("{task_id}.{field}"), false)?;
             }
-            gate_dependencies.push(task_id);
         }
-        gate_dependencies.extend(
-            dependencies
-                .iter()
-                .map(|dependency| format!("{dependency}-GATE")),
-        );
-        let gate_id = graph.register(&release["gate"], Kind::Gate, &id, gate_dependencies)?;
+        let gate_id = graph.register(
+            &release["gate"],
+            Kind::Gate,
+            &id,
+            gate_dependencies(plan, release)?,
+        )?;
         strings(
             &release["gate"]["acceptance"],
             &format!("{gate_id}.acceptance"),
@@ -419,14 +414,36 @@ pub fn validate(plan: &Value) -> Result<(), String> {
     graph.validate()
 }
 
-/// Resolve uma final ou RC. Patches exigem sua própria entrada válida no manifesto.
+/// Gates internos dependem das tarefas locais; publicação agrega todos os marcos internos.
+pub fn gate_dependencies(plan: &Value, release: &Value) -> Result<Vec<String>, String> {
+    let mut dependencies = array(&release["tasks"], "tasks", false)?
+        .iter()
+        .map(|task| text(task, "id", "task").map(str::to_owned))
+        .collect::<Result<Vec<_>, _>>()?;
+    if release["publication"] == true {
+        for milestone in array(&plan["releases"], "releases", false)? {
+            if milestone["publication"] == false {
+                dependencies.push(text(&milestone["gate"], "id", "gate")?.to_owned());
+            }
+        }
+    }
+    Ok(dependencies)
+}
+
+/// Resolve uma final ou RC publicável. Marcos internos não são versões publicáveis.
 pub fn release_for_version<'a>(plan: &'a Value, version: &str) -> Result<&'a Value, String> {
     let base = release_base(version)?;
     validate(plan)?;
-    array(&plan["releases"], "releases", false)?
+    let release = array(&plan["releases"], "releases", false)?
         .iter()
         .find(|release| release["version"] == base)
-        .ok_or_else(|| format!("Versão {base} sem milestone no manifesto"))
+        .ok_or_else(|| format!("Versão {base} sem milestone no manifesto"))?;
+    if release["publication"] != true {
+        return Err(format!(
+            "Marco interno {base} não permite publicação de RC ou final"
+        ));
+    }
+    Ok(release)
 }
 
 fn append(lines: &mut Vec<String>, values: &[&str]) {
@@ -447,17 +464,20 @@ pub fn render(plan: &Value) -> Result<String, String> {
     append(
         &mut lines,
         &[
-            "# Roadmap de releases do Sider",
+            "# Roadmap de marcos internos e publicação do Sider",
             "",
             "<!-- Gerado por cargo xtask roadmap --write; editar releases/plan.json. -->",
             "",
-            "Este roteiro organiza as entregas até a 1.0. O bootstrap é a única capacidade",
-            "concluída nesta linha de base; as funcionalidades do banco permanecem planejadas.",
+            "Este roteiro organiza as entregas até a 1.0. R01 a R10 são marcos internos;",
+            "R11 reúne a estabilização e a publicação da 1.0, sem retirar funcionalidades do escopo.",
             "O estado operacional das tarefas está nas issues do GitHub, sem duplicar o estado neste arquivo.",
             "",
         ],
     );
-    lines.push(format!("São {} milestones e {count} issues: um bootstrap, tarefas funcionais e um gate de publicação por versão.", releases.len()));
+    lines.push(format!(
+        "São {} milestones e {count} issues: um bootstrap, tarefas funcionais e um gate por marco.",
+        releases.len()
+    ));
     append(
         &mut lines,
         &[
@@ -469,29 +489,28 @@ pub fn render(plan: &Value) -> Result<String, String> {
             "",
             "## Índice",
             "",
-            "- [Sequência de versões](#sequência-de-versões)",
+            "- [Marcos e publicação](#marcos-e-publicação)",
             "- [Bootstrap comprovado](#bootstrap-comprovado)",
             "- [Contratos transversais](#contratos-transversais)",
-            "- [Tarefas por versão](#tarefas-por-versão)",
+            "- [Tarefas por marco](#tarefas-por-marco)",
             "- [Execução e publicação](#execução-e-publicação)",
             "",
-            "## Sequência de versões",
+            "## Marcos e publicação",
             "",
-            "| Milestone | Entrega | Tarefas | Depende de |",
+            "| Milestone | Entrega | Tarefas | Encerramento |",
             "| --- | --- | --- | --- |",
         ],
     );
     for release in releases {
-        let dependencies = strings(&release["depends_on"], "depends_on", true)?.join(", ");
         lines.push(format!(
-            "| `{}` | {} | {} + publicação | {} |",
+            "| `{}` | {} | {} + gate | {} |",
             text(release, "version", "release")?,
             text(release, "title", "release")?,
             array(&release["tasks"], "tasks", false)?.len(),
-            if dependencies.is_empty() {
-                "Bootstrap"
+            if release["publication"] == true {
+                "Candidata e final com o mesmo SHA e os mesmos assets"
             } else {
-                &dependencies
+                "Validação interna, sem publicação"
             }
         ));
     }
@@ -534,10 +553,11 @@ pub fn render(plan: &Value) -> Result<String, String> {
             "",
             "A imagem fixada é uma entrada da suíte; só uma execução registrada constitui evidência de compatibilidade.",
             "",
-            "## Tarefas por versão",
+            "## Tarefas por marco",
             "",
             "Objetivos, entregáveis, testes e critérios completos de cada issue estão no",
-            "[manifesto versionado](releases/plan.json). As dependências indicam a ordem de execução.",
+            "[manifesto versionado](releases/plan.json). Somente as dependências técnicas das tarefas",
+            "limitam o paralelismo; a ordem dos marcos neste documento não cria dependências.",
             "",
         ],
     );
@@ -570,9 +590,10 @@ pub fn render(plan: &Value) -> Result<String, String> {
         }
         let gate = &release["gate"];
         lines.push(format!(
-            "| `{}` | {} | Todas as tarefas da versão e os gates anteriores |",
+            "| `{}` | {} | {} |",
             text(gate, "id", "gate")?,
-            text(gate, "title", "gate")?
+            text(gate, "title", "gate")?,
+            gate_dependencies(plan, release)?.join(", ")
         ));
         lines.push(String::new());
         lines.push(format!(
@@ -583,7 +604,7 @@ pub fn render(plan: &Value) -> Result<String, String> {
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
-        append(&mut lines, &["", "Critérios para publicação:", ""]);
+        append(&mut lines, &["", "Critérios para encerrar o marco:", ""]);
         for acceptance in strings(&gate["acceptance"], "acceptance", false)? {
             lines.push(format!("- {acceptance}"));
         }
@@ -594,27 +615,26 @@ pub fn render(plan: &Value) -> Result<String, String> {
         &[
             "## Execução e publicação",
             "",
-            "1. Selecione a próxima issue desbloqueada do milestone atual e implemente em branch própria.",
+            "1. Selecione tarefas desbloqueadas pelo DAG técnico; trilhas independentes podem avançar em paralelo.",
             "2. Inclua testes e evidências; mantenha código compilável e commits atômicos em cada etapa.",
             "3. Integre o PR vinculado à issue por merge commit após verificação manual registrada.",
-            "4. Atualize compatibilidade e notas; prepare `v<versão>-rc.1` quando as tarefas funcionais terminarem.",
-            "5. O merge do PR `chore/release-v<versão>`, com label `type:release`, não dispara publicação: valide e publique manualmente o SHA exato do merge.",
-            "6. Mudança funcional após a RC exige outra RC; a final recompila e testa o mesmo conteúdo funcional aprovado.",
-            "7. Encerre o milestone somente após conferir a publicação final e seus artefatos.",
+            "4. Encerre R01 a R10 após conferir os critérios locais; esses marcos não criam candidata, tag ou release.",
+            "5. Depois de validar todos os marcos, prepare a candidata 1.0 em um SHA e bundle imutáveis; o merge não dispara publicação.",
+            "6. A final promove exatamente o mesmo SHA e os mesmos assets aprovados na candidata, sem recompilar. Qualquer mudança no bundle exige outra candidata.",
+            "7. Encerre R11 somente após conferir a publicação final e seus artefatos.",
             "",
             "O fluxo completo e os comandos de preparação estão no [guia de releases](docs/releases.md).",
             "Não há workflows de CI nem publicador automático neste repositório.",
-            "A 1.0 acrescenta uma hora de carga contínua aos gates de cada candidata e final.",
-            "As evidências são cumulativas. Teste ausente, ignorado, cancelado ou sem relatório bloqueia a publicação.",
-            "Na primeira versão AOF, migração valida fixtures do formato inicial; nas seguintes, testa a versão anterior suportada.",
+            "A candidata 1.0 exige uma hora de carga contínua, além de todos os gates das capacidades entregues.",
+            "Teste obrigatório ausente, ignorado, cancelado ou sem relatório bloqueia o encerramento do marco e a publicação.",
+            "Migração usa fixtures e executáveis das baselines internas congeladas por SHA e hashes; a 1.0 migra a baseline R10.",
             "",
             "Os pacotes são Linux GNU x86_64 (`.tar.gz`, Ubuntu 24.04) e Windows MSVC x86_64 (`.zip`).",
-            "Desde a 0.10, uma imagem Docker Linux amd64 exportada acompanha a release privada.",
+            "R10 valida a imagem Docker Linux amd64 exportada que acompanha a publicação privada da 1.0.",
             "Checksums SHA-256, manifesto de build e notas acompanham os binários testados depois da extração.",
             "",
-            "Patches, como `0.3.1`, precisam de registro próprio no manifesto e de milestone criado quando necessário.",
-            "Patches também têm candidata. Novas capacidades entram em minor; incompatibilidades antes da 1.0",
-            "são restritas às minors e descritas nas notas. Não há datas artificiais.",
+            "Patches publicáveis, como `1.0.1`, precisam de registro próprio no manifesto e de candidata.",
+            "Mudanças de compatibilidade dos marcos internos permanecem documentadas. Não há datas artificiais.",
             "",
             "Na retomada manual, confira drafts e uploads existentes. Tag com SHA divergente ou artefato publicado diferente",
             "interrompe o fluxo. Uma release publicada não é sobrescrita.",
@@ -693,9 +713,11 @@ mod tests {
             "CI multiplataforma",
             "Replicação",
             "desativadas até e incluindo a 1.0",
-            "não dispara publicação",
+            "o merge não dispara publicação",
             "verificação manual registrada",
             "uma hora de carga contínua",
+            "mesmo SHA e os mesmos assets",
+            "sem recompilar",
             "34177280948",
         ] {
             assert!(rendered.contains(text), "trecho ausente: {text}");
@@ -728,10 +750,10 @@ mod tests {
     #[test]
     fn rc_and_final_resolve_the_exact_same_manifest_entry() {
         let plan = real();
-        for version in ["0.1.0", "v0.1.0", "0.1.0-rc.1", "v0.1.0-rc.12"] {
+        for version in ["1.0.0", "v1.0.0", "1.0.0-rc.1", "v1.0.0-rc.12"] {
             assert!(std::ptr::eq(
                 release_for_version(&plan, version).unwrap(),
-                &plan["releases"][0]
+                &plan["releases"][10]
             ));
         }
         for version in ["0.3.1", "0.3.1-rc.1", "2.0.0"] {
@@ -744,22 +766,61 @@ mod tests {
     }
 
     #[test]
+    fn internal_milestones_cannot_be_published_as_candidates_or_finals() {
+        let plan = real();
+        for release in plan["releases"].as_array().unwrap().iter().take(10) {
+            let version = release["version"].as_str().unwrap();
+            for requested in [version.to_owned(), format!("v{version}-rc.1")] {
+                assert!(
+                    release_for_version(&plan, &requested)
+                        .unwrap_err()
+                        .contains("Marco interno")
+                );
+            }
+        }
+        for (index, value) in [(0, json!(true)), (10, json!(false)), (0, json!("false"))] {
+            invalid(
+                |p| p["releases"][index]["publication"] = value,
+                "publication",
+            );
+        }
+    }
+
+    #[test]
+    fn internal_gates_only_require_local_tasks_and_publication_aggregates_them() {
+        let plan = real();
+        for release in plan["releases"].as_array().unwrap().iter().take(10) {
+            let expected: Vec<_> = release["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|task| task["id"].as_str().unwrap().to_owned())
+                .collect();
+            assert_eq!(gate_dependencies(&plan, release).unwrap(), expected);
+        }
+        let final_dependencies = gate_dependencies(&plan, &plan["releases"][10]).unwrap();
+        assert_eq!(final_dependencies.len(), 15);
+        for index in 1..=10 {
+            assert!(final_dependencies.contains(&format!("R{index:02}-GATE")));
+        }
+    }
+
+    #[test]
     fn explicit_patch_entry_uses_new_ids_and_inherits_required_gates() {
         let mut plan = real();
-        let mut patch = plan["releases"][2].clone();
+        let mut patch = plan["releases"][10].clone();
         patch["id"] = json!("R12");
-        patch["version"] = json!("0.3.1");
-        patch["depends_on"] = json!(["R03"]);
+        patch["version"] = json!("1.0.1");
         patch["gate"]["id"] = json!("R12-GATE");
         let mut task = patch["tasks"][0].clone();
         task["id"] = json!("R12-01");
-        task["depends_on"] = json!(["R03-GATE"]);
+        task["depends_on"] = json!(["R11-GATE"]);
         patch["tasks"] = json!([task]);
-        plan["releases"].as_array_mut().unwrap().insert(3, patch);
+        plan["releases"].as_array_mut().unwrap().push(patch);
         validate(&plan).unwrap();
         assert!(std::ptr::eq(
-            release_for_version(&plan, "0.3.1-rc.2").unwrap(),
-            &plan["releases"][3]
+            release_for_version(&plan, "1.0.1-rc.2").unwrap(),
+            &plan["releases"][11]
         ));
     }
 
@@ -812,7 +873,7 @@ mod tests {
     }
 
     #[test]
-    fn dependency_existence_types_cycles_and_order_are_checked() {
+    fn dependency_existence_types_and_cycles_are_checked() {
         invalid(
             |p| p["releases"][0]["tasks"][0]["depends_on"] = json!(["R99-01"]),
             "inexistente",
@@ -823,24 +884,25 @@ mod tests {
         );
         invalid(
             |p| p["releases"][0]["depends_on"] = json!(["B00-01"]),
-            "release depende apenas",
+            "release.depends_on não existe",
         );
         invalid(
             |p| p["releases"][0]["tasks"][0]["depends_on"] = json!(["R01-02"]),
             "Ciclo",
         );
-        invalid(|p| p["releases"][0]["depends_on"] = json!(["R02"]), "Ciclo");
         invalid(
             |p| p["releases"][0]["tasks"][0]["depends_on"] = json!(["R01-GATE"]),
             "Ciclo",
         );
-        invalid(
-            |p| {
-                p["releases"][0]["tasks"][0]["depends_on"] = json!(["R01-02"]);
-                p["releases"][0]["tasks"][1]["depends_on"] = json!([]);
-            },
-            "ordem de execução",
-        );
+    }
+
+    #[test]
+    fn acyclic_dependencies_can_reference_tasks_later_in_the_json() {
+        let mut plan = real();
+        plan["releases"][0]["tasks"][0]["depends_on"] = json!(["R01-02"]);
+        plan["releases"][0]["tasks"][1]["depends_on"] = json!([]);
+        plan["releases"][7]["tasks"][0]["depends_on"] = json!(["R10-01"]);
+        validate(&plan).unwrap();
     }
 
     #[test]
@@ -859,12 +921,12 @@ mod tests {
         }
         invalid(
             |p| {
-                p["releases"][0]
+                p["releases"][0]["tasks"][0]
                     .as_object_mut()
                     .unwrap()
                     .remove("depends_on");
             },
-            "release.depends_on",
+            "task.depends_on",
         );
     }
 
@@ -888,7 +950,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_unknown_and_noncumulative_gates_are_rejected() {
+    fn missing_unknown_and_unrelated_internal_gates_are_rejected() {
         for (index, gate) in [
             (0, "native"),
             (0, "compatibility"),
@@ -930,7 +992,7 @@ mod tests {
                     .unwrap()
                     .push(json!("types"))
             },
-            "cumulativos",
+            "capacidade local",
         );
         invalid(
             |p| {
@@ -1063,7 +1125,7 @@ mod tests {
             "private",
             "candidate_required",
             "patch_requires_manifest_entry",
-            "functional_change_requires_new_candidate",
+            "bundle_change_requires_new_candidate",
         ] {
             invalid(|p| p["release_policy"][field] = json!(false), field);
             invalid(|p| p["release_policy"][field] = json!(1), field);
@@ -1079,6 +1141,7 @@ mod tests {
             ("release_label", "release"),
             ("linux_runner", "ubuntu-latest"),
             ("docker_since", "1.0.0"),
+            ("final_promotion", "rebuild_final"),
         ] {
             invalid(|p| p["release_policy"][field] = json!(value), field);
         }

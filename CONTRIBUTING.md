@@ -25,7 +25,7 @@ Python foram removidos. Uma futura CI deverá chamar os comandos Rust existentes
 
 ## Fluxo de trabalho
 
-1. Selecione a próxima issue desbloqueada do milestone atual, atualize a branch
+1. Selecione uma issue desbloqueada pelas dependências técnicas, atualize a branch
    `main` e abra uma branch com uma responsabilidade clara, como
    `feat/resp2-decoder` ou `docs/compatibility-matrix`.
 2. Implemente uma parte revisável da etapa, com os testes necessários para provar
@@ -118,8 +118,8 @@ não marque uma etapa inteira como concluída por ter implementado apenas parte 
 
 Edite o manifesto e regenere sua projeção com `cargo xtask roadmap --write`.
 IDs como `R01-01` são estáveis e não devem ser reutilizados. Datas de milestones
-não são obrigatórias. Patches precisam de uma entrada própria no manifesto e de
-candidata, assim como minors e a 1.0.
+não são obrigatórias. R01–R10 são marcos internos, com checkpoints técnicos e
+evidências por tarefa/SHA. Somente R11 publica candidata e final neste fluxo.
 
 O modo padrão apresenta a sincronização planejada; `--apply` grava no GitHub:
 
@@ -129,12 +129,13 @@ cargo xtask sync --apply
 ```
 
 Quando todas as tarefas funcionais estiverem concluídas, prepare as notas UTF-8
-e a candidata conforme o [guia de releases](docs/releases.md). Até a 1.0 inclusive,
-o merge do PR `chore/release-v<versão>`, com label `type:release`, não publica nada.
-Um responsável valida e publica manualmente o SHA exato integrado. Toda versão
-final exige uma candidata aprovada; alterações funcionais posteriores exigem outra RC.
+e a candidata 1.0 conforme o [guia de releases](docs/releases.md). O merge do PR
+`chore/release-v1.0.0`, com label `type:release`, não publica nada. O pacote já usa
+`1.0.0` na candidata. A final promove o mesmo SHA e os mesmos arquivos aprovados,
+sem recompilar, reempacotar ou repetir gates. Mudança no conjunto exige nova RC.
 
 Teste obrigatório ausente, ignorado, cancelado ou sem evidência bloqueia a release.
-Nenhuma release funcional é criada para o bootstrap. O milestone só encerra após
-conferir a publicação final e os pacotes privados Linux/Windows; a 0.10 acrescenta
-imagem Docker exportada. Publicação da crate permanece desabilitada.
+Nenhuma release funcional é criada para o bootstrap. Marcos internos encerram após
+validar seus critérios técnicos. O milestone 1.0 encerra após conferir a publicação
+final, pacotes privados Linux/Windows e imagem Docker exportada. Publicação da
+crate permanece desabilitada.

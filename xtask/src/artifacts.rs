@@ -26,13 +26,21 @@ struct Proof {
 
 type GateKey = (String, String);
 
-/// Confere bytes e coerência dos registros locais; não autentica sua origem.
+/// Confere o mesmo bundle para o identificador de uma RC ou de sua versão final.
 ///
 /// Não consulta o GitHub, executa testes, extrai pacotes ou autoriza publicação.
+/// A aprovação da RC e a igualdade dos assets publicados são conferidas fora do
+/// bundle; seus arquivos e recibos usam sempre a versão final do binário.
 /// O diretório deve permanecer imóvel durante a leitura. ZIP64, links e nomes
 /// não portáveis são rejeitados no formato limitado do arquivo de evidências.
-pub fn verify(plan: &Value, version: &str, sha: &str, directory: &Path) -> Result<Value, String> {
-    let (base, candidate) = parse_version(version)?;
+pub fn verify(
+    plan: &Value,
+    release_identifier: &str,
+    sha: &str,
+    directory: &Path,
+) -> Result<Value, String> {
+    let (base, candidate) = parse_version(release_identifier)?;
+    let artifact_version = format!("{}.{}.{}", base[0], base[1], base[2]);
     require_hex(sha, 40, "SHA da release")?;
     let (required, docker) = required_gates(plan, base)?;
     let mut expected: BTreeSet<String> = [
@@ -45,19 +53,21 @@ pub fn verify(plan: &Value, version: &str, sha: &str, directory: &Path) -> Resul
     .into_iter()
     .map(str::to_owned)
     .collect();
-    let evidence_name = format!("sider-v{version}-validation.zip");
+    let evidence_name = format!("sider-v{artifact_version}-validation.zip");
     expected.extend([
         evidence_name.clone(),
-        format!("sider-v{version}-{WINDOWS}.zip"),
-        format!("sider-v{version}-{LINUX}.tar.gz"),
+        format!("sider-v{artifact_version}-{WINDOWS}.zip"),
+        format!("sider-v{artifact_version}-{LINUX}.tar.gz"),
     ]);
     if docker {
-        expected.insert(format!("sider-v{version}-linux-amd64-image.tar.gz"));
+        expected.insert(format!(
+            "sider-v{artifact_version}-linux-amd64-image.tar.gz"
+        ));
     }
     let proofs = directory_proofs(directory, &expected)?;
     verify_checksums(directory, &proofs)?;
     let manifest = read_json(&directory.join("release-manifest.json"))?;
-    verify_identity(plan, &manifest, version, sha, candidate)?;
+    verify_identity(plan, &manifest, &artifact_version, sha)?;
     if text(&manifest, "evidence_archive")? != evidence_name
         || text(&manifest, "notes")? != "release-notes.md"
         || text(&manifest, "runtime_requirements")? != "runtime-requirements.md"
@@ -79,7 +89,7 @@ pub fn verify(plan: &Value, version: &str, sha: &str, directory: &Path) -> Resul
             return Err(format!("Asset divergente do manifesto: {name}"));
         }
     }
-    let gates = gate_records(plan, &manifest, &required, version, sha)?;
+    let gates = gate_records(plan, &manifest, &required, &artifact_version, sha)?;
     let evidence = inventory(&manifest["evidence_files"], MAX_ENTRY_BYTES, true)?;
     if evidence.is_empty() || evidence.len() > MAX_ENTRIES {
         return Err("Quantidade de evidências inválida".into());
@@ -116,11 +126,12 @@ pub fn verify(plan: &Value, version: &str, sha: &str, directory: &Path) -> Resul
         return Err("Arquivos mudaram durante a verificação".into());
     }
     Ok(json!({
-        "status": "integrity_verified", "version": version, "sha": sha,
+        "status": "integrity_verified", "release_identifier": release_identifier,
+        "artifact_version": artifact_version, "sha": sha,
         "prerelease": candidate, "assets": proofs.len(), "checksums": proofs.len() - 1,
         "gate_records": gates.len(), "evidence_files": evidence.len(),
         "evidence_expanded_bytes": expanded_bytes, "publication_authorized": false,
-        "scope": "Integridade e coerência offline; não comprova execução, autenticidade, aprovação da RC ou estado atual do GitHub.",
+        "scope": "Integridade e coerência offline; não comprova execução, autenticidade, aprovação da RC, promoção dos mesmos assets ou estado atual do GitHub.",
         "limits": {"asset_bytes": MAX_ASSET_BYTES, "json_bytes": MAX_JSON_BYTES,
             "evidence_zip_bytes": MAX_EVIDENCE_ZIP_BYTES, "entry_bytes": MAX_ENTRY_BYTES,
             "expanded_bytes": MAX_EXPANDED_BYTES, "entries": MAX_ENTRIES, "zip64": false}
@@ -177,6 +188,15 @@ fn number(value: &str) -> Result<u64, String> {
 }
 
 fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bool), String> {
+    let policy = &plan["release_policy"];
+    if plan["schema_version"] != 2
+        || policy["private"] != true
+        || policy["publish_crate"] != false
+        || policy["final_promotion"] != "same_sha_same_assets"
+        || policy["bundle_change_requires_new_candidate"] != true
+    {
+        return Err("Plano deve exigir publicação privada e promoção do bundle imutável".into());
+    }
     let targets = plan["release_policy"]["targets"]
         .as_array()
         .ok_or("Targets ausentes no plano")?;
@@ -193,6 +213,9 @@ fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bo
         let (release_version, candidate) = parse_version(text(release, "version")?)?;
         if candidate || !versions.insert(release_version) {
             return Err("Versão duplicada ou RC no plano".into());
+        }
+        if release_version == base && release["publication"] != true {
+            return Err("Marco interno não permite verificação de publicação".into());
         }
         if release_version <= base {
             for gate in release["required_gates"]
@@ -231,15 +254,12 @@ fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bo
 fn verify_identity(
     plan: &Value,
     manifest: &Value,
-    version: &str,
+    artifact_version: &str,
     sha: &str,
-    candidate: bool,
 ) -> Result<(), String> {
-    if manifest["schema_version"] != 1
-        || manifest["version"] != version
+    if manifest["schema_version"] != 2
+        || manifest["artifact_version"] != artifact_version
         || manifest["sha"] != sha
-        || manifest["tag"] != format!("v{version}")
-        || manifest["prerelease"] != candidate
         || manifest["private"] != true
         || manifest["crate_publication"] != false
         || manifest["license"] != "MIT"
@@ -253,38 +273,25 @@ fn verify_identity(
     {
         return Err("Identidade, referência ou proveniência local do manifesto inválida".into());
     }
+    for field in [
+        "version",
+        "tag",
+        "prerelease",
+        "approved_candidate",
+        "release_identifier",
+    ] {
+        if manifest.get(field).is_some() {
+            return Err(format!(
+                "Campo de publicação não pertence ao bundle imutável: {field}"
+            ));
+        }
+    }
     let targets = manifest["targets"]
         .as_array()
         .ok_or("Targets do manifesto ausentes")?;
     if targets.len() != 2 || !targets.contains(&json!(LINUX)) || !targets.contains(&json!(WINDOWS))
     {
         return Err("Targets do manifesto divergentes".into());
-    }
-    let approved = &manifest["approved_candidate"];
-    if candidate {
-        if !approved.is_null() {
-            return Err("Uma RC não deve declarar promoção de candidata".into());
-        }
-    } else {
-        let tag = text(approved, "tag")?
-            .strip_prefix('v')
-            .ok_or("Tag da candidata sem v")?;
-        let (rc_base, is_rc) = parse_version(tag)?;
-        if !is_rc || rc_base != parse_version(version)?.0 {
-            return Err("Candidata declarada não pertence à versão-base".into());
-        }
-        require_hex(text(approved, "sha")?, 40, "SHA da candidata")?;
-        require_hex(
-            text(approved, "manifest_sha256")?,
-            64,
-            "Hash do manifesto da candidata",
-        )?;
-        for name in ["release", "approval", "published_at"] {
-            text(approved, name)?;
-        }
-        if approved["version_only_cargo_diff"] != true {
-            return Err("Promoção não declara diff somente de versão".into());
-        }
     }
     Ok(())
 }
@@ -754,6 +761,9 @@ mod tests {
 
     impl Fixture {
         fn new(version: &str) -> Self {
+            let (base, _) = parse_version(version).unwrap();
+            let artifact_version = format!("{}.{}.{}", base[0], base[1], base[2]);
+            let version = artifact_version.as_str();
             let root = loop {
                 let root = std::env::temp_dir().join(format!(
                     "sider-artifact-check-{}-{}",
@@ -766,16 +776,17 @@ mod tests {
                     Err(e) => panic!("Temp fixture: {e}"),
                 }
             };
-            let plan = json!({"repository":"example/sider", "reference":{"image":"redis:fixed"},
+            let plan = json!({"schema_version":2,"repository":"example/sider", "reference":{"image":"redis:fixed"},
             "release_policy":{"targets":[LINUX,WINDOWS], "docker_since":"0.10.0",
-                "stable_soak_seconds":3600},
+                "private":true,"publish_crate":false,"final_promotion":"same_sha_same_assets",
+                "bundle_change_requires_new_candidate":true,"stable_soak_seconds":3600},
             "releases":[
-                {"version":"0.1.0","required_gates":["native","tcp_smoke","compatibility"]},
-                {"version":"0.3.0","required_gates":["crash","recovery","migration"]},
-                {"version":"0.10.0","required_gates":["docker"]},
-                {"version":"1.0.0","required_gates":["soak","benchmarks"]}
+                {"version":"0.1.0","publication":false,"required_gates":["native","tcp_smoke","compatibility"]},
+                {"version":"0.3.0","publication":false,"required_gates":["crash","recovery","migration"]},
+                {"version":"0.10.0","publication":false,"required_gates":["docker"]},
+                {"version":"1.0.0","publication":true,"required_gates":["sharding","types","sorted_sets",
+                    "transactions","pubsub","replication","soak","benchmarks"]}
             ]});
-            let (base, candidate) = parse_version(version).unwrap();
             let (required, docker) = required_gates(&plan, base).unwrap();
             let gates: Vec<Value> = required
                 .into_iter()
@@ -809,18 +820,10 @@ mod tests {
                     ("nested/binary.log".into(), vec![0, 255, 13, 10]),
                 ])
                 .collect();
-            let approved = if candidate {
-                Value::Null
-            } else {
-                json!({"tag":format!("v{version}-rc.1"),"sha":SHA,"manifest_sha256":"ab".repeat(32),
-                    "release":"https://github.com/example/sider/releases/tag/candidate",
-                    "approval":"https://github.com/example/sider/issues/1#issuecomment-1",
-                    "published_at":"2026-09-08T00:00:00Z","version_only_cargo_diff":true})
-            };
-            let manifest = json!({"schema_version":1,"repository":"example/sider","private":true,
-                "version":version,"tag":format!("v{version}"),"sha":SHA,"prerelease":candidate,
+            let manifest = json!({"schema_version":2,"repository":"example/sider","private":true,
+                "artifact_version":version,"sha":SHA,
                 "provenance":{"kind":"manual-local","ci_enabled":false,"github_actions_run":null,"frozen_checkout":SHA},
-                "approved_candidate":approved,"reference":plan["reference"],"targets":[LINUX,WINDOWS],
+                "reference":plan["reference"],"targets":[LINUX,WINDOWS],
                 "gates":gates,"evidence_archive":format!("sider-v{version}-validation.zip"),
                 "evidence_files":[],"artifacts":[],"notes":"release-notes.md",
                 "runtime_requirements":"runtime-requirements.md","checksums":"SHA256SUMS",
@@ -873,7 +876,7 @@ mod tests {
         }
 
         fn version(&self) -> &str {
-            self.manifest["version"].as_str().unwrap()
+            self.manifest["artifact_version"].as_str().unwrap()
         }
 
         fn zip_path(&self) -> PathBuf {
@@ -935,7 +938,24 @@ mod tests {
         }
 
         fn check(&self) -> Result<Value, String> {
-            verify(&self.plan, self.version(), SHA, &self.root)
+            self.check_as("1.0.0")
+        }
+
+        fn check_as(&self, release_identifier: &str) -> Result<Value, String> {
+            verify(&self.plan, release_identifier, SHA, &self.root)
+        }
+
+        fn bytes(&self) -> BTreeMap<String, Vec<u8>> {
+            fs::read_dir(&self.root)
+                .unwrap()
+                .map(|entry| {
+                    let path = entry.unwrap().path();
+                    (
+                        path.file_name().unwrap().to_str().unwrap().to_owned(),
+                        fs::read(path).unwrap(),
+                    )
+                })
+                .collect()
         }
     }
 
@@ -944,36 +964,45 @@ mod tests {
     }
 
     #[test]
-    fn valid_rc_and_final_report_integrity_not_publication_authority() {
-        for version in ["0.1.0-rc.1", "0.1.0"] {
-            let fixture = Fixture::new(version);
-            let result = fixture.check().unwrap();
+    fn same_bundle_verifies_as_rc_and_final_without_changing_any_bytes() {
+        let fixture = Fixture::new("1.0.0-rc.1");
+        let original = fixture.bytes();
+        for (identifier, prerelease) in
+            [("1.0.0-rc.1", true), ("1.0.0-rc.2", true), ("1.0.0", false)]
+        {
+            let result = fixture.check_as(identifier).unwrap();
             assert_eq!(result["status"], "integrity_verified");
             assert_eq!(result["publication_authorized"], false);
-            assert_eq!(result["gate_records"], 5);
-            assert_eq!(result["assets"], 8);
+            assert_eq!(result["release_identifier"], identifier);
+            assert_eq!(result["artifact_version"], "1.0.0");
+            assert_eq!(result["sha"], SHA);
+            assert_eq!(result["prerelease"], prerelease);
+            assert_eq!(result["gate_records"], 20);
+            assert_eq!(result["assets"], 9);
+            assert_eq!(fixture.bytes(), original);
         }
+        assert!(original.keys().all(|name| !name.contains("-rc.")));
     }
 
     #[test]
     fn cumulative_gates_require_both_systems_for_persistence_and_docker_asset() {
-        for (version, count, assets) in [("0.3.0-rc.1", 11, 8), ("0.10.0-rc.1", 12, 9)] {
-            let mut fixture = Fixture::new(version);
-            let result = fixture.check().unwrap();
-            assert_eq!(result["gate_records"], count);
-            assert_eq!(result["assets"], assets);
+        for gate in ["crash", "recovery", "migration"] {
+            let mut fixture = Fixture::new("1.0.0");
             fixture.manifest["gates"]
                 .as_array_mut()
                 .unwrap()
-                .retain(|gate| gate["gate"] != "crash" || gate["target"] != WINDOWS);
+                .retain(|record| record["gate"] != gate || record["target"] != WINDOWS);
             fixture.write_manifest_and_checksums();
             assert!(fixture.check().unwrap_err().contains("Matriz cumulativa"));
         }
+        let fixture = Fixture::new("1.0.0");
+        fs::remove_file(fixture.root.join("sider-v1.0.0-linux-amd64-image.tar.gz")).unwrap();
+        assert!(fixture.check().unwrap_err().contains("ausentes"));
     }
 
     #[test]
     fn changed_bytes_wrong_sha_and_missing_asset_are_rejected() {
-        let fixture = Fixture::new("0.1.0-rc.1");
+        let fixture = Fixture::new("1.0.0-rc.1");
         assert!(
             verify(
                 &fixture.plan,
@@ -996,7 +1025,7 @@ mod tests {
     #[test]
     fn checksum_missing_duplicate_and_self_reference_are_rejected() {
         for kind in 0..3 {
-            let fixture = Fixture::new("0.1.0-rc.1");
+            let fixture = Fixture::new("1.0.0-rc.1");
             let path = fixture.root.join("SHA256SUMS");
             let original = fs::read_to_string(&path).unwrap();
             let first = original.lines().next().unwrap();
@@ -1013,7 +1042,7 @@ mod tests {
     #[test]
     fn missing_extra_duplicate_wrong_target_zero_or_failed_gate_is_rejected() {
         for kind in 0..7 {
-            let mut fixture = Fixture::new("0.1.0-rc.1");
+            let mut fixture = Fixture::new("1.0.0-rc.1");
             let gates = fixture.manifest["gates"].as_array_mut().unwrap();
             match kind {
                 0 => {
@@ -1054,7 +1083,7 @@ mod tests {
 
     #[test]
     fn changed_zip_payload_is_rejected_even_with_updated_outer_checksums() {
-        let mut fixture = Fixture::new("0.1.0-rc.1");
+        let mut fixture = Fixture::new("1.0.0-rc.1");
         fixture.entries.last_mut().unwrap().1[1] = 254;
         fixture.write_zip(false);
         fixture.refresh();
@@ -1064,7 +1093,7 @@ mod tests {
     #[test]
     fn missing_and_duplicate_inventory_entries_are_rejected() {
         for field in ["artifacts", "evidence_files"] {
-            let mut fixture = Fixture::new("0.1.0-rc.1");
+            let mut fixture = Fixture::new("1.0.0-rc.1");
             let array = fixture.manifest[field].as_array_mut().unwrap();
             array.push(array[0].clone());
             fixture.write_manifest_and_checksums();
@@ -1101,7 +1130,7 @@ mod tests {
 
     #[test]
     fn zip_duplicate_names_are_not_hidden_by_the_library_index() {
-        let mut fixture = Fixture::new("0.1.0-rc.1");
+        let mut fixture = Fixture::new("1.0.0-rc.1");
         fixture.entries.extend([
             ("extra/a.txt".into(), b"a".to_vec()),
             ("extra/b.txt".into(), b"b".to_vec()),
@@ -1121,7 +1150,7 @@ mod tests {
     #[test]
     fn zip_symlink_oversized_entry_and_zip64_are_rejected_before_decompression() {
         for kind in 0..3 {
-            let mut fixture = Fixture::new("0.1.0-rc.1");
+            let mut fixture = Fixture::new("1.0.0-rc.1");
             let mut bytes = fs::read(fixture.zip_path()).unwrap();
             let central = bytes.windows(4).position(|s| s == b"PK\x01\x02").unwrap();
             match kind {
@@ -1158,7 +1187,7 @@ mod tests {
 
     #[test]
     fn zip64_extra_without_sentinels_is_rejected() {
-        let mut fixture = Fixture::new("0.1.0-rc.1");
+        let mut fixture = Fixture::new("1.0.0-rc.1");
         let bytes = fs::read(fixture.zip_path()).unwrap();
         let central = bytes.windows(4).position(|s| s == b"PK\x01\x02").unwrap();
         let size = u32_at(&bytes, central + 24);
@@ -1180,7 +1209,7 @@ mod tests {
             vec![0xfe, 0xca, 4, 0, 1],
             vec![0xfe, 0xca, 0, 0, 1],
         ] {
-            let mut fixture = Fixture::new("0.1.0-rc.1");
+            let mut fixture = Fixture::new("1.0.0-rc.1");
             insert_central_extra(&mut fixture, &malformed);
             assert!(
                 fixture
@@ -1189,20 +1218,105 @@ mod tests {
                     .contains("extra field ZIP truncado")
             );
         }
-        let mut fixture = Fixture::new("0.1.0-rc.1");
+        let mut fixture = Fixture::new("1.0.0-rc.1");
         insert_central_extra(&mut fixture, &[0xfe, 0xca, 0, 0]);
         fixture.check().unwrap();
     }
 
     #[test]
-    fn final_requires_same_base_candidate_claim_without_authenticating_it() {
-        let mut fixture = Fixture::new("0.1.0");
-        fixture.manifest["approved_candidate"]["tag"] = json!("v0.2.0-rc.1");
+    fn publication_metadata_is_rejected_inside_the_immutable_manifest() {
+        for (field, value) in [
+            ("version", json!("1.0.0")),
+            ("tag", json!("v1.0.0-rc.1")),
+            ("prerelease", json!(false)),
+            ("approved_candidate", Value::Null),
+            (
+                "approved_candidate",
+                json!({"tag":"v1.0.0-rc.1", "sha":SHA}),
+            ),
+            ("release_identifier", json!("1.0.0")),
+        ] {
+            let mut fixture = Fixture::new("1.0.0");
+            fixture.manifest[field] = value;
+            fixture.write_manifest_and_checksums();
+            assert!(
+                fixture.check().unwrap_err().contains("Campo de publicação"),
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn public_verifier_rejects_internal_milestones_and_invalid_publication_policy() {
+        let fixture = Fixture::new("1.0.0");
+        for identifier in ["0.1.0", "0.1.0-rc.1", "0.3.0", "0.10.0", "0.10.0-rc.1"] {
+            assert!(
+                fixture
+                    .check_as(identifier)
+                    .unwrap_err()
+                    .contains("Marco interno")
+            );
+        }
+        for publication in [json!(false), json!("true"), json!(1), Value::Null] {
+            let mut plan = fixture.plan.clone();
+            plan["releases"][3]["publication"] = publication;
+            assert!(verify(&plan, "1.0.0", SHA, &fixture.root).is_err());
+        }
+        let mut plan = fixture.plan.clone();
+        plan["releases"][3]
+            .as_object_mut()
+            .unwrap()
+            .remove("publication");
+        assert!(verify(&plan, "1.0.0", SHA, &fixture.root).is_err());
+        for (pointer, value) in [
+            ("/schema_version", json!(1)),
+            ("/schema_version", json!(2.0)),
+            ("/release_policy/private", json!(false)),
+            ("/release_policy/publish_crate", json!(true)),
+            ("/release_policy/final_promotion", json!("rebuild")),
+            (
+                "/release_policy/bundle_change_requires_new_candidate",
+                json!(false),
+            ),
+        ] {
+            let mut plan = fixture.plan.clone();
+            *plan.pointer_mut(pointer).unwrap() = value;
+            assert!(
+                verify(&plan, "1.0.0", SHA, &fixture.root).is_err(),
+                "{pointer}"
+            );
+        }
+    }
+
+    #[test]
+    fn artifact_and_receipt_versions_must_be_the_final_binary_version() {
+        for value in [json!("1.0.0-rc.1"), json!("1.0.1"), json!(1), Value::Null] {
+            let mut fixture = Fixture::new("1.0.0");
+            fixture.manifest["artifact_version"] = value;
+            fixture.write_manifest_and_checksums();
+            assert!(fixture.check().unwrap_err().contains("Identidade"));
+        }
+        let mut fixture = Fixture::new("1.0.0");
+        fixture.manifest["schema_version"] = json!(1);
         fixture.write_manifest_and_checksums();
-        assert!(fixture.check().unwrap_err().contains("versão-base"));
-        fixture.manifest["approved_candidate"] = Value::Null;
+        assert!(fixture.check().unwrap_err().contains("Identidade"));
+        let mut fixture = Fixture::new("1.0.0");
+        fixture.manifest["gates"][0]["version"] = json!("1.0.0-rc.1");
         fixture.write_manifest_and_checksums();
-        assert!(fixture.check().is_err());
+        assert!(
+            fixture
+                .check()
+                .unwrap_err()
+                .contains("Registro de gate inválido")
+        );
+        let mut fixture = Fixture::new("1.0.0");
+        let (_, bytes) = fixture.entries.first_mut().unwrap();
+        let mut receipt: Value = serde_json::from_slice(bytes).unwrap();
+        receipt["version"] = json!("1.0.0-rc.1");
+        *bytes = serde_json::to_vec(&receipt).unwrap();
+        fixture.write_zip(true);
+        fixture.refresh();
+        assert!(fixture.check().unwrap_err().contains("Recibo"));
     }
 
     #[test]
@@ -1220,7 +1334,7 @@ mod tests {
         }
         let value = json!([{"name":"x","size":MAX_ENTRY_BYTES+1,"sha256":digest(b"")}]);
         assert!(inventory(&value, MAX_ENTRY_BYTES, true).is_err());
-        let fixture = Fixture::new("0.1.0-rc.1");
+        let fixture = Fixture::new("1.0.0-rc.1");
         assert!(verify(&fixture.plan, "0.2.0-rc.1", SHA, &fixture.root).is_err());
     }
 
@@ -1228,7 +1342,7 @@ mod tests {
     #[test]
     fn filesystem_symlinks_are_rejected() {
         use std::os::unix::fs::symlink;
-        let fixture = Fixture::new("0.1.0-rc.1");
+        let fixture = Fixture::new("1.0.0-rc.1");
         let path = fixture.root.join("runtime-requirements.md");
         fs::remove_file(&path).unwrap();
         symlink("release-notes.md", &path).unwrap();

@@ -1,41 +1,36 @@
 # Desenvolvimento e releases locais
 
 Banco, testes e ferramentas próprias usam Rust. CI e publicação automática ficam
-adiadas até depois da 1.0. Os workflows e helpers Python foram removidos, não
-arquivados para manutenção. A CLI `gh` continua responsável pela autenticação e
-pelas operações manuais no GitHub. Não há um segundo publicador para manter.
+adiadas até depois da 1.0. A CLI `gh` executa operações manuais no GitHub; não há
+outro publicador ou framework de scripts. Repositório e artefatos permanecem
+privados, com `publish = false`.
 
 ## Ciclo curto
 
-| Momento | Comando | O que verificar |
-| --- | --- | --- |
-| Durante a implementação | `cargo test --locked <filtro>` | Comportamento que está sendo alterado |
-| Antes de integrar código do banco | `cargo xtask check` | fmt, Clippy, build do binário real e testes nativos |
-| Ao alterar ferramentas ou plano | `cargo xtask check --tools` | fmt, Clippy, testes do xtask, manifesto, gates e roadmap |
-| Antes de publicar | Gates da versão no SHA exato | Linux, Windows, diferenciais e pacotes extraídos |
+| Momento | Comando ou evidência |
+| --- | --- |
+| Durante implementação | `cargo test --locked <filtro>` |
+| Antes de integrar cada PR do banco | Uma execução de `cargo xtask check` sobre o diff final |
+| Ferramentas ou plano alterados | `cargo xtask check --tools` |
+| Semântica de comandos alterada | Diferenciais da família afetada contra a referência fixada |
+| Filesystem, persistência e atomicidade alterados | Testes de falha/replay/migração relevantes em Linux e Windows |
+| Núcleo durável com shards e transações integrado | Bateria integrada dos subsistemas disponíveis |
+| Build candidato 1.0 congelado | Matriz completa de gates, pacotes extraídos, imagem Docker e evidências |
 
-Clippy já verifica os targets; não repita `cargo check` na mesma sequência.
-Os checks param na primeira falha e não iniciam Docker ou testes externos.
-Documentação isolada pede revisão de texto, links e comandos. Interfaces e build
-também exigem `cargo doc --locked --no-deps` e build de distribuição.
+Clippy já verifica os targets; não duplique com `cargo check`. Os checks param
+na primeira falha e não iniciam Docker ou testes externos. Documentação isolada
+pede revisão de texto, links e comandos. Interfaces e build também exigem
+`cargo doc --locked --no-deps` e `cargo build --locked --release`.
 
-Preserve os caches Cargo. Rode testes em paralelo quando não disputarem o mesmo
-estado externo. Não limpe `target/` nem reconstrua ambientes em cada edição.
-Resultados de release continuam vinculados ao SHA, à plataforma e à configuração
-em que foram produzidos; cache de compilação não
-é reaproveitamento de recibos de aprovação.
+Preserve caches Cargo e não repita verificações aprovadas sem mudanças relevantes.
+Ensaios internos chamam as suítes diretamente, com ID da tarefa e SHA registrado,
+sem exigir empacotamento ou recibos de release. Teste ignorado não conta como
+aprovação. Benchmarks não disputam a máquina com builds ou outras cargas.
 
-Na publicação, use um `CARGO_TARGET_DIR` isolado por versão, SHA e plataforma;
-não use o diretório incremental do desenvolvimento para os binários distribuídos.
-Preserve downloads de crates e imagens já verificadas, mas nunca deixe o binário
-de uma RC anterior ser tratado como build da final.
+## Ferramenta Rust e backlog
 
-## Ferramenta Rust
-
-`cargo xtask` é um [alias Cargo](https://doc.rust-lang.org/cargo/reference/config.html#alias)
-para o pacote em [xtask/](../xtask/). Seu manifesto e lockfile são independentes:
-as dependências de tooling não entram no servidor ou nos pacotes do banco.
-Use os comandos a partir da raiz. A toolchain é a mesma do projeto.
+`cargo xtask` usa o pacote em [xtask/](../xtask/), com manifesto e lockfile
+independentes. As dependências de tooling não entram no servidor. Execute da raiz:
 
 ```sh
 cargo xtask --help
@@ -47,166 +42,151 @@ cargo xtask sync --json
 cargo xtask sync --apply
 ```
 
-`validate` verifica o plano, os comandos declarados de gates e a projeção do roadmap.
-Gates futuros com `command: null` são pendências válidas no plano, nunca testes
-aprovados. `roadmap` mostra o documento; somente `--write` o atualiza.
+[releases/plan.json](../releases/plan.json), schema 2, preserva os 11 milestones,
+as 50 tarefas e seus IDs. `publication: false` em R01–R10 define checkpoints
+internos; somente R11 é publicável. [ROADMAP.md](../ROADMAP.md) é gerado.
+O estado operacional fica nas issues. Não altere a versão do pacote por checkpoint.
 
-`sync` simula por padrão e resume as mudanças. `--json` mostra os corpos completos
-para revisão. Só `--apply` autoriza escritas no backlog privado.
-O cliente usa [`gh api`](https://cli.github.com/manual/gh_api) com argumentos
-separados e JSON UTF-8 via stdin, sem shell, PAT adicional ou extração de token.
-Os testes do sincronizador usam um cliente falso, sem mutações reais no GitHub.
+O DAG usa dependências técnicas explícitas, independentemente da posição no JSON.
+Cada checkpoint depende das tarefas do próprio marco; o gate publicável depende
+também de todos os checkpoints internos. Referências inválidas e ciclos falham.
+Nenhuma tarefa recebe automaticamente o gate da versão anterior.
 
-O utilitário não cria commits, PRs, tags ou releases automaticamente. Os antigos
-comandos de publicação e preparação acoplados à CI não foram portados. Preparação,
-build, empacotamento e publicação seguem os comandos Cargo/Git/`gh` e o
-[guia de pacotes](packages.md), sem exigir Python ou um novo framework de scripts.
-Os scripts de ensaios antigos, quando anexados como evidências, são registros
-históricos imutáveis; não são ferramentas atuais nem dependências do desenvolvimento.
+Escolha tarefas desbloqueadas, implemente em worktrees separados e integre PRs
+coesos por merge commit após validação local. Até três frentes podem implementar
+em paralelo com um integrador responsável pelos contratos compartilhados.
+PRs funcionais podem fechar várias issues relacionadas. Checkpoints internos
+fecham após conferir critérios e evidências de origem, sem candidata ou publicação.
+`R11-GATE` fecha somente após a final publicada e conferida.
 
-## Backlog e execução
+`validate` confere plano, gates e roadmap. Runners futuros com `command: null`
+são pendências válidas, nunca resultados aprovados. Implemente-os junto das
+funcionalidades. `roadmap` só escreve com `--write`.
 
-[releases/plan.json](../releases/plan.json) define os 11 milestones, as 50 tarefas
-funcionais e os gates de publicação. [ROADMAP.md](../ROADMAP.md) é gerado.
-O estado operacional fica nas issues do GitHub; não o duplique no roadmap.
+`sync` simula por padrão; `--json` mostra os corpos completos e `--apply` permite
+escritas. Confira a simulação antes de aplicar. Marcadores `sider:task` e
+`sider:managed` são estáveis; texto fora do bloco gerenciado, comentários humanos,
+labels não gerenciados e estados existentes são preservados. IDs duplicados ou
+ambíguos interrompem o sync antes das escritas. O sincronizador não fecha issues
+ou milestones. Após aplicar, nova simulação deve mostrar zero mudanças.
+O cliente usa `gh api`, argumentos separados e JSON UTF-8, sem extração de token.
 
-1. Escolha a próxima issue desbloqueada do milestone atual.
-2. Implemente em branch própria, com testes focados e commits por responsabilidade.
-3. Valide o diff final localmente e abra um PR com `Closes #N`.
-4. Integre por merge commit. Registre testes e limitações no PR, sem aguardar CI.
-5. Atualize compatibilidade e notas quando o comportamento mudar.
-6. Sincronize o backlog quando o manifesto ou o estado das dependências mudar,
-   não em cada edição. Confira a simulação antes de aplicar.
-7. Prepare a candidata quando as tarefas funcionais terminarem. O gate de
-   publicação não usa `Closes`: só fecha depois da final publicada e conferida.
-
-Marcadores de tarefa, como `<!-- sider:task R01-01 -->`, são estáveis. O bloco
-`sider:managed` pode ser regenerado; texto fora dele, comentários humanos e labels
-não gerenciados são preservados. IDs duplicados ou ambíguos interrompem o sync
-antes das escritas. Uma nova execução encontra recursos pelos mesmos IDs.
-
-O sincronizador não fecha tarefas funcionais, gates ou milestones. O bootstrap
-só pode ser fechado após comprovar os commits e a execução histórica de CI
-registrados no manifesto. Esse histórico não significa que existe CI ativa.
-Após aplicar, repetir `sync` deve mostrar zero mudanças.
-
-Patches exigem entrada própria no manifesto, ID novo, dependência da versão-base,
-teste de regressão e gate próprio. Toda patch tem RC. Novas capacidades entram em
-minor; antes da 1.0, incompatibilidades ficam nas minors e aparecem nas notas.
-Não crie datas artificiais nem renumere tarefas.
-
-## Preparar uma release
+## Histórico e baseline interna
 
 A [v0.1.0-rc.1](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1)
-já foi publicada como candidata privada. A final ainda não foi publicada.
-A migração de tooling e a remoção do fuzz exigem outra candidata para publicar
-essas alterações na final. Tags e evidências anteriores são preservadas e
-continuam vinculadas aos seus próprios SHAs; não aprovam a nova revisão.
-O bootstrap não deve ser publicado como banco funcional.
+permanece como publicação histórica. A preparação da final 0.1 foi encerrada sem
+publicação; não haverá outra candidata 0.1 neste fluxo. Tags, notas e evidências
+anteriores continuam vinculadas aos seus SHAs e à política daquele momento.
+Não transferir resultados antigos para o SHA atual nem reescrever assets históricos.
 
-Atualize `main`, busque tags e use a branch `chore/release-v<VERSAO>`.
-Atualize juntos a versão em `Cargo.toml`, a entrada local `sider` em `Cargo.lock`,
-o changelog e `releases/notes/v<VERSAO>.md`. O título das notas é `# Sider v<VERSAO>`.
-Preserve `publish = false` e as dependências.
-O pacote `sider-xtask` tem versão e lockfile independentes; não acompanha a versão
-do servidor.
+`R01-GATE` pode usar as entregas e validações já registradas, identificando os
+SHAs de origem. A conclusão desse checkpoint técnico não é aprovação de um novo
+build para publicação. Confira bundles históricos com a política do seu SHA.
 
-Confira o manifesto do servidor com `cargo metadata --locked --format-version 1`.
-Abra PR com `type:release`, do próprio repositório para `main`, e referência ao
-gate, sem fechá-lo.
-O merge commit não publica nada. Registre seu SHA completo, nunca o substitua
-por um `main` mais recente.
+Em R10, congele uma baseline interna com executável, dados de todos os tipos,
+TTL e transações, configuração, formato AOF, toolchain, SHA e hashes. Preserve os
+arquivos e o procedimento de backup/restauração. O gate de migração da 1.0 parte
+dessa baseline, sem exigir uma release 0.10 final publicada. Também valide fixtures
+de formato inicial, corrupção e versões desconhecidas conforme os contratos AOF.
 
-A final exige uma candidata aprovada da mesma versão-base e ancestral do commit
-final. Só podem mudar a identidade do pacote em `Cargo.toml` e `Cargo.lock`, changelog
-e notas. Mudanças em código, dependências, configuração, ferramentas ou gates no
-SHA da final exigem outra candidata. A final recompila e testa novamente.
-Evidências de um SHA congelado anterior continuam válidas apenas para esse SHA.
+## Preparar o build candidato 1.0
 
-Confira bundles históricos com o procedimento e a política do SHA da publicação.
-O verificador atual exige a matriz de gates atual e pode rejeitar bundles antigos
-que incluam gates removidos. Preserve os recibos e artefatos originais nesses casos.
+Conclua escopo, documentação e notas antes de construir a candidata. Atualize
+`main` e tags e use a branch `chore/release-v1.0.0`. Fixe juntos a versão do
+servidor em `Cargo.toml` e sua entrada em `Cargo.lock` como `1.0.0`; atualize
+changelog e `releases/notes/v1.0.0.md`. O pacote `sider-xtask` é independente.
+Confira `cargo metadata --locked --format-version 1` e preserve `publish = false`.
+
+Abra o PR de preparação no próprio repositório para `main`, com `type:release`
+e referência ao gate, sem fechá-lo. Integre por merge commit e registre seu SHA
+completo. O merge não publica. Construa e valide esse SHA exato, sem substituir
+por um `main` posterior. Use `CARGO_TARGET_DIR` isolado por SHA e plataforma para
+os binários distribuídos; caches de downloads e imagens podem ser preservados.
+
+Pacotes, binários e recibos já usam `1.0.0` desde a candidata. O número RC é
+identidade de publicação, não versão do executável. Qualquer mudança no SHA ou
+no conjunto de arquivos aprovado exige uma nova candidata.
 
 ## Gates do produto
 
-[releases/gates.json](../releases/gates.json) registra os comandos externos.
-Um comando é um array de argumentos executado sem shell. Gates ausentes, com
-erro, cancelados, ignorados ou sem casos positivos bloqueiam publicação.
+[releases/gates.json](../releases/gates.json) define comandos como arrays de
+argumentos sem shell. Cada checkpoint interno valida as capacidades afetadas;
+a candidata 1.0 exige a matriz completa abaixo. Gate ausente, cancelado, ignorado,
+com falha ou sem casos positivos bloqueia publicação.
 
-| Gate | Plataforma e início |
+| Gate | Plataforma obrigatória na candidata 1.0 |
 | --- | --- |
-| `native`, `tcp_smoke` | Linux GNU e Windows MSVC desde 0.1 |
-| `compatibility` | Linux desde 0.1 |
-| `crash`, `recovery`, `migration` | Linux e Windows desde 0.3 |
-| `sharding`, `types`, `sorted_sets`, `transactions`, `pubsub`, `replication` | Linux, cumulativos desde cada capacidade |
-| `docker` | Linux desde 0.10 |
-| `soak`, `benchmarks` | Linux na 1.0 |
+| `native`, `tcp_smoke` | Linux GNU x86_64 e Windows MSVC x86_64 |
+| `crash`, `recovery`, `migration` | Linux GNU x86_64 e Windows MSVC x86_64 |
+| `compatibility`, `sharding`, `types`, `sorted_sets`, `transactions`, `pubsub`, `replication` | Linux GNU x86_64 |
+| `docker`, `soak`, `benchmarks` | Linux GNU x86_64 |
 
-O runner recebe `SIDER_REFERENCE_IMAGE`, `SIDER_RELEASE_VERSION`,
+O runner recebe `SIDER_REFERENCE_IMAGE`, `SIDER_RELEASE_VERSION=1.0.0`,
 `SIDER_RELEASE_SHA`, `SIDER_RELEASE_TARGET` e `SIDER_RELEASE_DIR`.
-O diretório de evidências é novo. O recibo `receipt-ID.json` registra SHA,
-versão, target, `status: "success"`, `cases` positivo e detalhes reais da execução.
-Não reutilize recibos antigos ou sintetize resultados.
+O diretório de evidências deve ser novo. Recibos schema 1 registram
+`version: "1.0.0"`, SHA, target, `status: "success"`, número positivo de casos
+e detalhes reais. Não sintetize resultados ou reutilize recibos de outro SHA.
 
-O soak da 1.0 dura 3600 segundos. Benchmarks registram throughput, p50/p95/p99,
-memória, pipelines, hot keys e quantidades de shards.
+O soak dura pelo menos 3600 segundos. Benchmarks registram throughput,
+p50/p95/p99, memória, pipelines, hot keys e quantidades de shards com configuração
+reproduzível. Redis e `redis-cli` usam versão/digest fixados no plano. Normalize
+somente respostas sem ordem garantida. Consulte [diferenciais](differential.md)
+e [testes](testing.md).
 
-Redis e `redis-cli` usam a versão e o digest fixados no plano. Respostas sem ordem
-garantida são normalizadas por conteúdo; as ordenadas também comparam ordem.
-Veja os guias de [diferenciais](differential.md) e
-[testes](testing.md). A migração inicial da 0.3 usa fixtures AOF; a partir da versão
-seguinte, também abre dados reais da versão anterior suportada.
+O smoke executa o binário extraído com `SIDER_ADDR=127.0.0.1:0` e
+`SIDER_READY_FILE`; confere PID, loopback, porta, `--version`, PING e operações TCP.
+O servidor publica prontidão atomicamente. A imagem Docker precisa executar,
+ser exportada e restaurada; nenhum arquivo fictício conta como imagem testada.
 
-### Contrato de prontidão do binário extraído
+## Conjunto imutável de arquivos
 
-O smoke usa o binário realmente extraído, `SIDER_ADDR=127.0.0.1:0` e
-`SIDER_READY_FILE`. Confere PID, loopback, porta efetiva, `--version`, PING e
-operações TCP. O próprio servidor publica o JSON de prontidão atomicamente.
-A imagem Docker da 0.10 precisa executar, ser exportada e restaurada; não há
-registry público nem arquivo fictício aceito como prova.
+Siga o [guia de pacotes](packages.md): Linux GNU x86_64 em `.tar.gz`, produzido no
+Ubuntu 24.04, e Windows MSVC x86_64 em `.zip`, com binário, README, MIT e avisos de
+[releases/licenses/](../releases/licenses/). Inclua a imagem Docker exportada,
+notas, requisitos, manifesto, evidências e `SHA256SUMS`.
 
-## Conferência e publicação manual
+O manifesto de artefatos usa schema 2 e `artifact_version: "1.0.0"`. Os nomes
+usam `sider-v1.0.0-*` tanto na RC quanto na final. Recibos e o relatório local de
+preflight pertencem a esse conjunto e não são reescritos durante a promoção.
+Tag, status prerelease e aprovação da candidata ficam no GitHub ou em registro
+externo ao conjunto. Não inserir `tag`, `prerelease` ou `approved_candidate`
+no manifesto imutável.
 
-1. Confirme repositório privado, origem/branch/label do PR integrado, SHA completo,
-   tarefas concluídas, milestones anteriores e aprovação da candidata, se final.
-2. Execute os gates desse SHA nas plataformas exigidas, com logs e recibos.
-3. Gere Linux GNU x86_64 em `.tar.gz` no Ubuntu 24.04 e Windows MSVC x86_64 em
-   `.zip`. Inclua binário, `releases/README.md` como README, MIT e todos os avisos
-   de `releases/licenses/`. Confira os hashes e execute os smokes extraídos.
-4. Reúna notas, requisitos de runtime, manifesto, evidências e `SHA256SUMS`.
-   Registre toolchain, SHA, targets, comandos e resultados reais como evidência
-   local, sem inventar execuções de CI.
-5. Confira os arquivos locais com o verificador Rust:
+```sh
+cargo xtask verify-release 1.0.0-rc.1 <SHA_COMPLETO> <DIRETORIO_DOS_ASSETS>
+cargo xtask verify-release 1.0.0 <SHA_COMPLETO> <DIRETORIO_DOS_ASSETS>
+```
 
-   ```sh
-   cargo xtask verify-release <VERSAO> <SHA_COMPLETO> <DIRETORIO_DOS_ASSETS>
-   ```
+Os dois identificadores aceitam o mesmo build. O verificador confere nomes,
+tamanhos, SHA-256, versão/SHA dos recibos, matriz de gates e ZIP de evidências.
+Rejeita publicações de marcos internos e identidades divergentes. Não executa
+binários nem confirma origem dos bytes, aprovação remota ou autorização de
+publicação; seu resultado mantém `publication_authorized: false`.
 
-   Ele confere nomes, tamanhos, SHA-256, identidade dos recibos, matriz de gates
-   declarada e conteúdo do ZIP de evidências. Não executa binários, não publica,
-   não confirma o estado remoto e não transforma um relatório em prova independente.
-6. Crie ou confira a tag no SHA aprovado, com mensagem explícita de tag para
-   respeitar a configuração de assinatura do usuário. Crie ou retome um draft
-   com `gh release`. Não mova tags nem sobrescreva assets divergentes.
-7. Envie os assets sem `--clobber`, baixe em diretório novo e execute o verificador
-   novamente. Compare também os hashes com os arquivos originais e os digests
-   retornados pelo GitHub; consistência interna não prova a origem dos bytes.
-8. Publique RC como prerelease e nunca latest. Para final, confirme novamente a
-   candidata e a validação. Leia a release publicada e confira SHA, nomes,
-   tamanhos e digests. Só então registre o resultado e feche gate/milestone.
+## Publicar a candidata e promover a final
 
-Mantenha uma publicação por vez. Após erro ou resposta perdida, releia o estado
-remoto antes de repetir. Drafts podem ser retomados; uma release publicada não é
-sobrescrita. Falha ao comentar ou fechar o milestone exige apenas reconciliar o
-backlog, sem recompilar ou republicar. A [API de releases](https://docs.github.com/en/rest/releases/releases)
-é a referência para as operações manuais.
+1. Confirme repositório privado, PR de preparação integrado, label, SHA, tarefas
+   concluídas e matriz completa aprovada no build congelado.
+2. Confira o bundle local com o identificador RC. Crie a tag `v1.0.0-rc.N` no SHA
+   aprovado, respeitando a configuração de assinatura, e crie um draft privado.
+3. Envie os arquivos sem `--clobber`. Baixe tudo em diretório novo, verifique o
+   bundle e compare hashes com os originais e digests retornados pelo GitHub.
+4. Publique a candidata como prerelease, nunca latest. Confira novamente a release
+   publicada e registre aprovação com tag, SHA e hashes fora dos assets imutáveis.
+5. Para promover, confirme a aprovação e crie `v1.0.0` no mesmo SHA. Publique os
+   mesmos arquivos baixados da candidata. Não faça novo merge, bump, compilação,
+   empacotamento ou soak. O identificador final deve passar no mesmo verificador.
+6. Confira os downloads finais contra os da candidata, incluindo manifesto,
+   evidências e checksums. Registre a promoção fora do diretório de assets.
+   Somente então encerre `R11-GATE` e o milestone 1.0.
 
-A licença do código próprio é [MIT](../LICENSE); dependências mantêm seus avisos.
-Licença não muda visibilidade: repositório e artefatos continuam privados e a crate
-não é publicada no crates.io. A imagem da 0.10 também carrega os avisos aplicáveis.
+Qualquer mudança nos arquivos exige nova candidata e validação do build afetado.
+Não mova tags nem sobrescreva publicações existentes. Mantenha uma publicação
+por vez; após falha ou resposta perdida, releia o estado remoto antes de repetir.
+Draft pode ser retomado. Falha ao comentar ou fechar milestone pede reconciliação
+do backlog, não recompilação ou republicação.
 
-## Retomada futura de CI
-
-Somente uma solicitação explícita depois da 1.0 deve introduzir CI. Ela deverá
-reutilizar os comandos Rust existentes. Não há workflow arquivado para restaurar,
-publicador Python ou reativação automática ao lançar a 1.0.
+A licença [MIT](../LICENSE) não torna o repositório ou os artefatos públicos.
+A crate não é publicada no crates.io; a imagem é um asset privado, sem registry
+público. CI futura depende de solicitação explícita e deve reutilizar os comandos
+Rust existentes, sem reativação automática ao lançar a 1.0.

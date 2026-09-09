@@ -214,6 +214,9 @@ impl GateContext {
             );
         }
         let base = base_version(&expected.version)?;
+        if base != expected.version {
+            return Err("recibos identificam a versão final do binário, sem sufixo RC".into());
+        }
         if observed.compiled_version != expected.version {
             return Err("versão compilada do teste diverge da release".into());
         }
@@ -234,14 +237,16 @@ impl GateContext {
         }
         let plan = &observed.plan;
         let policy = &plan["release_policy"];
-        if plan["schema_version"] != 1
+        if plan["schema_version"] != 2
             || policy["private"] != true
             || policy["publish_crate"] != false
+            || policy["final_promotion"] != "same_sha_same_assets"
+            || policy["bundle_change_requires_new_candidate"] != true
             || !policy["targets"]
                 .as_array()
                 .is_some_and(|targets| targets.contains(&json!(expected.target)))
         {
-            return Err("política de release privada ou target inválido".into());
+            return Err("política de release privada, bundle imutável ou target inválido".into());
         }
         let releases = plan["releases"].as_array().ok_or("releases ausente")?;
         let matches: Vec<_> = releases
@@ -249,11 +254,14 @@ impl GateContext {
             .filter(|release| release["version"] == base)
             .collect();
         if matches.len() != 1
+            || matches[0]["publication"] != true
             || !matches[0]["required_gates"]
                 .as_array()
                 .is_some_and(|gates| gates.contains(&json!(self.gate)))
         {
-            return Err("versão ou gate não registrado de forma única no manifesto".into());
+            return Err(
+                "versão publicável ou gate não registrado de forma única no manifesto".into(),
+            );
         }
         let reference = &plan["reference"];
         let redis_version = reference["redis_version"]
