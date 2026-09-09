@@ -253,7 +253,7 @@ struct Compaction {
 struct Writer {
     config: AofConfig,
     file: File,
-    _lock: File,
+    _lock: DirectoryLock,
     generation: u64,
     sequence: u64,
     bytes_since_compact: u64,
@@ -261,6 +261,32 @@ struct Writer {
     synced: Instant,
     compaction: Option<Compaction>,
     faults: Arc<dyn FaultInjector>,
+}
+
+pub(super) struct DirectoryLock(File);
+impl DirectoryLock {
+    pub(super) fn acquire(directory: &Path, create: bool) -> Result<Self, AofError> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(create)
+            .truncate(false)
+            .open(directory.join("writer.lock"))?;
+        file.try_lock().map_err(|error| match error {
+            fs::TryLockError::WouldBlock => AofError::Locked,
+            fs::TryLockError::Error(error) => AofError::Io(error),
+        })?;
+        Ok(Self(file))
+    }
+}
+impl Drop for DirectoryLock {
+    fn drop(&mut self) {
+        // flock pertence à descrição aberta: fork/dup pode manter outro descritor vivo.
+        // Libera explicitamente a propriedade antes de fechar o nosso handle.
+        if let Err(error) = self.0.unlock() {
+            tracing::warn!(%error, "falha ao liberar lock AOF");
+        }
+    }
 }
 
 pub fn recover(
@@ -302,16 +328,7 @@ fn load(
     if !read_only {
         fs::create_dir_all(&config.directory)?;
     }
-    let lock = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(!read_only)
-        .truncate(false)
-        .open(config.directory.join("writer.lock"))?;
-    lock.try_lock().map_err(|error| match error {
-        fs::TryLockError::WouldBlock => AofError::Locked,
-        fs::TryLockError::Error(error) => AofError::Io(error),
-    })?;
+    let lock = DirectoryLock::acquire(&config.directory, !read_only)?;
     let mut generations = Vec::new();
     for entry in fs::read_dir(&config.directory)? {
         let entry = entry?;
@@ -477,6 +494,34 @@ fn load(
             faults,
         },
     })
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_unlock_releases_ownership_while_duplicate_descriptor_survives() {
+        let directory = temporary_path(&std::env::temp_dir(), "sider-lock-regression");
+        fs::create_dir(&directory).unwrap();
+        let config = AofConfig::new(directory.clone());
+        let recovered = recover(
+            config.clone(),
+            StoreConfig::default(),
+            Arc::new(crate::storage::SystemClock),
+        )
+        .unwrap();
+        let duplicate = recovered.writer._lock.0.try_clone().unwrap();
+        drop(recovered);
+        let reopened = recover(
+            config,
+            StoreConfig::default(),
+            Arc::new(crate::storage::SystemClock),
+        )
+        .unwrap();
+        drop((reopened, duplicate));
+        fs::remove_dir_all(directory).unwrap();
+    }
 }
 
 fn batch_shard(mutations: &[Mutation], layout: DurableLayout) -> Result<usize, AofError> {

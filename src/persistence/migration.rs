@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::format::{self, Next, Record};
-use super::writer::{recover_read_only, sync_directory};
+use super::writer::{DirectoryLock, recover_read_only, sync_directory};
 use super::{AofConfig, AofError, DurableLayout, RecoveryMetadata};
 use crate::storage::{Clock, Mutation, Store, StoreConfig};
 
@@ -219,12 +219,7 @@ pub fn migrate_offline(
         directory: destination_path,
         committed: false,
     };
-    let lock = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .open(destination.directory.join("writer.lock"))?;
-    lock.try_lock().map_err(|_| AofError::Locked)?;
+    let lock = DirectoryLock::acquire(&destination.directory, true)?;
     let sequence = recovered.metadata.sequence;
     let mut file = OpenOptions::new()
         .write(true)
