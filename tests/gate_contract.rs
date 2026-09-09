@@ -53,7 +53,14 @@ fn persistence_receipts_support_both_native_targets_without_cross_compilation() 
 
 #[test]
 fn family_receipt_requires_its_gate_in_the_plan() {
-    for gate in ["pubsub", "types", "sorted_sets", "sharding", "transactions"] {
+    for gate in [
+        "pubsub",
+        "types",
+        "sorted_sets",
+        "sharding",
+        "transactions",
+        "docker",
+    ] {
         let fixture = Fixture::new();
         assert!(fixture.context(gate).is_err());
         fixture.change(|state| {
