@@ -21,7 +21,10 @@ do ensaio é 512 MiB de RSS por processo, incluindo runtime e buffers.
 
 A cada segundo o runner registra RSS, filas, dataset, expiração, AOF e estado
 de replicação em `soak-samples.jsonl`. Filas não podem exceder sua capacidade,
-o dataset não pode ultrapassar a quota e falhas de worker/AOF são bloqueantes.
+o dataset não pode ultrapassar a quota e falhas de worker/AOF, inclusive de
+compactação, são bloqueantes. Ao menos uma compactação precisa ser observada;
+o relatório soma os contadores de cada processo antes dos cortes e ao terminar,
+acumulando as compactações observadas antes de cada reinício.
 Os resultados incluem configuração, duração monotônica, contagens e estado
 final. A amostragem não promete capturar picos entre observações.
 
@@ -65,6 +68,12 @@ SIDER_SOAK_BINARY=/caminho/absoluto/sider \
 SIDER_SOAK_OUTPUT_DIR=/caminho/absoluto/saida-nova \
 cargo test --locked --test soak -- --ignored --exact internal_soak_rehearsal --nocapture
 ```
+
+O ensaio curto reduz o limiar de compactação para **8 KiB** e mantém a exigência
+de observar uma compactação concluída, sem falhas. O relatório registra
+`compaction_after_bytes:8192` e a contagem `compactions`. Os eventos funcionais
+acontecem a cada cinco segundos e os reinícios a cada oito segundos. O gate de
+3600 segundos mantém 128 KiB, eventos por minuto e reinícios a cada cinco minutos.
 
 Esse ensaio curto exige o binário integrado com replicação e métricas. Ele
 não aprova a duração, o pacote ou o gate da candidata. Uma entrada ignorada

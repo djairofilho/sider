@@ -339,6 +339,7 @@ fn start(
     name: &str,
     epoch: u64,
     upstream: Option<SocketAddr>,
+    compact_after: u64,
 ) -> Instance {
     let data = output.join(format!("{name}-data"));
     let ready = output.join(format!("{name}-internal-{epoch}.json"));
@@ -347,7 +348,10 @@ fn start(
         ("SIDER_MAX_DATASET_BYTES", OsString::from(QUOTA.to_string())),
         ("SIDER_AOF_DIR", data.into_os_string()),
         ("SIDER_AOF_SYNC", OsString::from("always")),
-        ("SIDER_AOF_COMPACT_AFTER_BYTES", OsString::from("131072")),
+        (
+            "SIDER_AOF_COMPACT_AFTER_BYTES",
+            OsString::from(compact_after.to_string()),
+        ),
         ("SIDER_REPLICATION_ADDR", OsString::from("127.0.0.1:0")),
         (
             "SIDER_REPLICATION_READY_FILE",
@@ -405,6 +409,7 @@ fn observe(instance: &Instance) -> Value {
     assert!(metric(&fields, "worker_queue_used") <= metric(&fields, "worker_queue_capacity"));
     assert_eq!(metric(&fields, "worker_failures_total"), 0);
     assert_eq!(metric(&fields, "aof_fatal_failures_total"), 0);
+    assert_eq!(metric(&fields, "aof_compaction_failures_total"), 0);
     let memory = rss(instance.process.id());
     assert!(
         memory <= RSS_ENVELOPE,
@@ -427,7 +432,15 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
         .unwrap();
     let mut primary_epoch = 0;
     let mut replica_epoch = 0;
-    let mut primary = start(binary, output, "primary", primary_epoch, None);
+    let compact_after = if rehearsal { 8192 } else { 131072 };
+    let mut primary = start(
+        binary,
+        output,
+        "primary",
+        primary_epoch,
+        None,
+        compact_after,
+    );
     let mut writer = connect(primary.process.address());
     let mut model = [0; SLOTS];
     for slot in 0..SLOTS {
@@ -439,6 +452,7 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
         "replica",
         replica_epoch,
         Some(primary.internal),
+        compact_after,
     );
     await_replica(replica.process.address(), &model);
     let began = Instant::now();
@@ -466,6 +480,7 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
     let mut replica_crashes = 0;
     let mut full_syncs = 0;
     let mut partial_syncs = 0;
+    let mut compactions = 0;
     let mut last_progress = began;
     while Instant::now() < deadline {
         let tick = Instant::now();
@@ -498,15 +513,24 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
             let fields = info(replica.process.address());
             full_syncs += metric(&fields, "replication_full_syncs_total");
             partial_syncs += metric(&fields, "replication_partial_syncs_total");
+            compactions += metric(&fields, "aof_compactions_total");
             replica.process.finish();
             replica_crashes += 1;
             replica_epoch += 1;
             if replica_crashes % 2 == 0 {
                 drop(writer);
+                compactions += metric(&info(primary.process.address()), "aof_compactions_total");
                 primary.process.finish();
                 primary_crashes += 1;
                 primary_epoch += 1;
-                primary = start(binary, output, "primary", primary_epoch, None);
+                primary = start(
+                    binary,
+                    output,
+                    "primary",
+                    primary_epoch,
+                    None,
+                    compact_after,
+                );
                 verify_all(primary.process.address(), &model);
                 writer = connect(primary.process.address());
             } else {
@@ -521,6 +545,7 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
                 "replica",
                 replica_epoch,
                 Some(primary.internal),
+                compact_after,
             );
             await_replica(replica.process.address(), &model);
             next_restart = Instant::now() + restart_period;
@@ -548,6 +573,12 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
     let replica_fields = info(replica.process.address());
     full_syncs += metric(&replica_fields, "replication_full_syncs_total");
     partial_syncs += metric(&replica_fields, "replication_partial_syncs_total");
+    compactions += metric(&replica_fields, "aof_compactions_total");
+    compactions += metric(&info(primary.process.address()), "aof_compactions_total");
+    assert!(
+        compactions > 0,
+        "compactação precisa ser observada no ensaio"
+    );
     assert!(primary_crashes > 0 && replica_crashes > 1);
     assert!(
         full_syncs > 1 && partial_syncs > 0,
@@ -567,7 +598,7 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
         "duration_seconds": elapsed.as_secs_f64(), "required_seconds": duration.as_secs(),
         "seed": SEED, "slots": SLOTS, "shards": 4, "quota_bytes": QUOTA,
         "rss_envelope_bytes": RSS_ENVELOPE, "target_iterations_per_second": 20,
-        "durability": "always", "compaction_after_bytes": 131072,
+        "durability": "always", "compaction_after_bytes": compact_after, "compactions": compactions,
         "rounds": rounds, "invariant_checks": checks, "samples": samples_count,
         "ttl_checks": ttl_checks, "watch_aborts": watch_checks, "slow_subscriber_checks": pubsub_checks,
         "primary_crashes": primary_crashes, "replica_crashes": replica_crashes,
