@@ -13,7 +13,7 @@ Do not run builds, tests, soak tests, or other workloads concurrently.
 
 The [input helper](../tests/common/release_input.rs) can be shared with other gates
 that run the package. It requires a clean checkout at the declared SHA, Cargo and
-artifact version `1.0.0`, a native target, and the public publication policy
+the candidate's artifact version, a native target, and the public publication policy
 from the [release contract](releases.md).
 
 Before and after the test, the helper checks:
@@ -79,12 +79,12 @@ part of the shared context, without starting Redis.
 
 ## Manual execution
 
-Use the frozen 1.0 publication checkout with packages already prepared.
+Use the frozen candidate checkout with packages already prepared.
 Internal milestones do not satisfy this gate's contract. The evidence directory
 must contain the tar.gz and preliminary manifest, with no previous benchmark
 receipt or raw sample file.
 
-Set `SIDER_RELEASE_VERSION=1.0.0`, `SIDER_RELEASE_SHA`,
+Set `SIDER_RELEASE_VERSION` to the candidate's base version, plus `SIDER_RELEASE_SHA`,
 `SIDER_RELEASE_TARGET=x86_64-unknown-linux-gnu`, `SIDER_REFERENCE_IMAGE` to the
 exact value in `releases/plan.json`, and `SIDER_RELEASE_DIR` to the absolute
 evidence path. `SIDER_PACKAGE_DIR` points to the absolute extracted directory

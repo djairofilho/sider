@@ -1,9 +1,9 @@
 # Local packages and extracted-executable smoke test
 
-Before publishing the 1.0 candidate, build and test the exact SHA of the
+Before publishing a candidate, build and test the exact SHA of the
 preparation merge on the native system. Use new directories for staging, archive,
-and extraction. The RC and final use the same packages, already identified as
-`1.0.0`. Promotion verifies the same bytes; it does not rebuild or repackage.
+and extraction. The RC and final use the same packages, identified by the candidate's
+base version. Promotion verifies the same bytes; it does not rebuild or repackage.
 
 The [runtime requirements](runtime-requirements.md) describe Windows 11 x64,
 Ubuntu 24.04 GNU, and external dependencies. The text is the versioned source

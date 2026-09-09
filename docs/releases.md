@@ -42,9 +42,10 @@ cargo xtask sync --json
 cargo xtask sync --apply
 ```
 
-[releases/plan.json](../releases/plan.json), schema 2, preserves the 11 milestones,
-50 tasks, and their IDs. `publication: false` in R01–R10 defines internal checkpoints;
-only R11 is publishable. [ROADMAP.md](../ROADMAP.md) is generated.
+[releases/plan.json](../releases/plan.json), schema 2, preserves the milestones,
+tasks, and their IDs. `publication: false` in R01–R10 defines internal checkpoints;
+R11 and explicitly registered patch entries are publishable. [ROADMAP.md](../ROADMAP.md)
+is generated.
 Operational state lives in issues. Do not change the package version for each checkpoint.
 
 The DAG uses explicit technical dependencies, regardless of position in the JSON.
@@ -57,7 +58,7 @@ PRs through merge commits after local validation. Up to three workstreams may im
 in parallel, with one integrator responsible for shared contracts.
 Functional PRs may close several related issues. Internal checkpoints close after
 checking criteria and source evidence, without a candidate or publication.
-`R11-GATE` closes only after the final release is published and verified.
+A publishable gate closes only after its final release is published and verified.
 
 `validate` checks the plan, gates, and roadmap. Future runners with `command: null`
 are valid pending work, never passed results. Implement them alongside their features.
@@ -112,6 +113,17 @@ may be preserved.
 Packages, binaries, and receipts use `1.0.0` starting with the candidate. The RC
 number is a publication identity, not an executable version. Any change to the SHA
 or approved file set requires a new candidate.
+
+## Preparing a patch candidate
+
+Each patch release has its own manifest entry, task IDs, gate, notes, package version,
+candidate, and immutable asset set. For `1.0.1`, use branch
+`chore/release-v1.0.1`, set `Cargo.toml` and `Cargo.lock` to `1.0.1`, and update
+`CHANGELOG.md` plus `releases/notes/v1.0.1.md`. The candidate identifier is
+`1.0.1-rc.N`, while every binary, receipt, manifest, and asset name uses `1.0.1`.
+The patch inherits the cumulative gate matrix because it changes the executable and
+its human-readable protocol errors. Final promotion uses the candidate's exact SHA
+and downloaded files without rebuilding.
 
 ## Product gates
 

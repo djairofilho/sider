@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [1.0.1] - Candidate preparation
+
+- Translate runtime errors, diagnostics, tests, tooling output, release metadata,
+  and project documentation from Brazilian Portuguese to English.
+- Rename `PLANO.md` to `PLAN.md` and update every repository reference.
+- Make the repository and GitHub release artifacts explicitly public while keeping
+  crates.io publication disabled with `publish = false`.
+- Preserve command semantics, storage formats, RESP contracts, and supported targets.
+
 ## [1.0.0] - Candidate preparation
 
 The package identifies itself as `1.0.0`; the candidate and final release use the same build and files.

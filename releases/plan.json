@@ -499,6 +499,28 @@
         }
       ],
       "gate": {"id":"R11-GATE","title":"Validate and publish 1.0.0","acceptance":["Sorted sets, transactions, and replication included; complete matrix without known corruption or loss beyond declared guarantees.","All gates passed, including a 3600-second soak, migration from the internal R10 baseline identified by SHA and hashes, and benchmarks.","Candidate approved with an immutable SHA and bundle; the final release promotes the same files and SHA without rebuilding. Any bundle change requires another candidate; close the milestone after verifying final publication."]}
+    },
+    {
+      "id": "R12", "version": "1.0.1", "title": "English and public distribution patch", "publication": true,
+      "scope": ["Deliver all human-readable project text in English without changing command, storage, or wire semantics.", "Publish repository and release artifacts openly while keeping crates.io publication disabled."],
+      "required_gates": ["native", "compatibility", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions", "pubsub", "replication", "docker", "soak", "benchmarks"],
+      "tasks": [
+        {
+          "id": "R12-01", "title": "English project text", "area": "documentation", "depends_on": ["R11-GATE"],
+          "objective": "Ship English runtime messages, diagnostics, tests, tooling output, metadata, and documentation as a patch release.",
+          "deliverables": ["English human-readable text across runtime, tests, tools, metadata, and documentation.", "Rename PLAN.md and preserve identifiers, protocol literals, commands, URLs, and binary fixtures."],
+          "tests": ["Scan tracked text for unintended Portuguese and mojibake; retain intentional Unicode fixtures.", "Run native checks, tool checks, documentation, release build, and affected compatibility gates."],
+          "acceptance": ["No unintended Brazilian Portuguese remains and runtime behavior other than translated human-readable messages is unchanged."]
+        },
+        {
+          "id": "R12-02", "title": "Public release contract", "area": "distribution", "depends_on": ["R12-01"],
+          "objective": "Align the release policy, verifier, backlog synchronization, and documentation with the public GitHub repository.",
+          "deliverables": ["Public repository and GitHub release assets recorded consistently in the plan, manifests, tests, and guides.", "Keep publish = false and do not publish the crate or a container registry image."],
+          "tests": ["Validate the real public repository state before synchronization and publication.", "Reject private repository state, mismatched artifact visibility, mutable promotion, and crates.io publication."],
+          "acceptance": ["The public release contract validates end to end without weakening immutable candidate promotion or artifact provenance."]
+        }
+      ],
+      "gate": {"id":"R12-GATE","title":"Validate and publish 1.0.1","acceptance":["English text and public distribution contracts are complete, with no command, storage, or wire-format change.","All cumulative gates pass for the exact 1.0.1 candidate SHA and immutable bundle, including Linux, Windows, Docker, and the 3600-second soak.","The final release promotes the approved candidate files and SHA without rebuilding, and the published downloads match the candidate hashes."]}
     }
   ]
 }

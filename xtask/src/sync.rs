@@ -1012,7 +1012,7 @@ mod tests {
     fn technical_dependencies_do_not_inherit_other_milestone_gates() {
         let plan: Value = serde_json::from_str(include_str!("../../releases/plan.json")).unwrap();
         let items = descriptors(&plan).unwrap();
-        assert_eq!(items.len(), 62);
+        assert_eq!(items.len(), 65);
         let item = |id: &str| items.iter().find(|item| item.id == id).unwrap();
         for id in ["R04-01", "R08-01", "R10-01"] {
             assert_eq!(item(id).dependencies, ["R01-04"]);
@@ -1027,6 +1027,8 @@ mod tests {
         let rendered = render(item("R11-GATE"), &Index::new()).unwrap();
         assert!(rendered.contains("same SHA and assets"));
         assert!(rendered.contains("without rebuilding"));
+        assert_eq!(item("R12-GATE").kind, "release");
+        assert_eq!(item("R12-GATE").dependencies.len(), 12);
     }
 
     #[test]
