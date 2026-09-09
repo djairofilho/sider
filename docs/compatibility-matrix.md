@@ -110,7 +110,7 @@ Corpus X counts and reproduction commands are in [differential.md](differential.
 | Role/promotion | Replica rejects client writes; explicit local promotion; no election, distributed fencing, or automatic failover | [replication_persistence.rs](../tests/replication_persistence.rs), sider-replica CLI |
 | Backup | Export through internal listener, consistent cut, manifest/checksums, restoration into a new directory | [backup.rs](../tests/backup.rs), [backup_process.rs](../tests/backup_process.rs), [guide](backup.md) |
 | Shard changes | Offline migration to a new directory with verified quotas and replay | [aof_migration.rs](../tests/aof_migration.rs), [guide](aof-migration.md) |
-| Distribution | Linux/Windows packages with four binaries; private Docker contains the same Linux bytes | [package.rs](../tests/package.rs), [docker_distribution.rs](../tests/docker_distribution.rs) |
+| Distribution | Public Linux/Windows packages with four binaries; Docker contains the same Linux bytes | [package.rs](../tests/package.rs), [docker_distribution.rs](../tests/docker_distribution.rs) |
 | Observability | INFO and `--diagnose` describe state/configuration; no dataset content | [metrics.rs](../tests/metrics.rs), [metrics.md](metrics.md) |
 
 Without AOF, the process does not promise recovery after termination. Pub/Sub is

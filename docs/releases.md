@@ -2,8 +2,8 @@
 
 The database, tests, and project tools use Rust. CI and automatic publication are
 deferred until after 1.0. The `gh` CLI performs manual GitHub operations; there is
-no other publisher or scripting framework. The repository and artifacts remain
-private, with `publish = false`.
+no other publisher or scripting framework. The repository and release artifacts are
+public, with `publish = false` retaining the crates.io publication block.
 
 ## Short development cycle
 
@@ -173,10 +173,10 @@ retains `publication_authorized: false`.
 
 ## Publishing the candidate and promoting the final release
 
-1. Confirm the repository is private, the preparation PR is merged, the label and
+1. Confirm the repository is public, the preparation PR is merged, the label and
    SHA are correct, tasks are complete, and the full matrix passed on the frozen build.
 2. Check the local bundle with the RC identifier. Create tag `v1.0.0-rc.N` at the
-   approved SHA, respecting signing configuration, and create a private draft.
+   approved SHA, respecting signing configuration, and create a draft.
 3. Upload files without `--clobber`. Download everything into a new directory,
    verify the bundle, and compare hashes with the originals and GitHub's digests.
 4. Publish the candidate as a prerelease, never latest. Check the published release
@@ -195,6 +195,6 @@ A draft can be resumed. Failure to comment or close a milestone calls for backlo
 reconciliation, not rebuilding or republishing.
 
 The [MIT license](../LICENSE) does not make the repository or artifacts public.
-The crate is not published to crates.io; the image is a private asset, with no public
-registry. Future CI requires an explicit request and must reuse existing Rust
+The crate is not published to crates.io; the image is a public release asset, with no
+container registry publication. Future CI requires an explicit request and must reuse existing Rust
 commands, without automatic activation when 1.0 is released.

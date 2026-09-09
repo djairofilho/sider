@@ -44,7 +44,7 @@
     "sources": ["https://redis.io/docs/latest/develop/using-commands/transactions/", "https://redis.io/docs/latest/develop/reference/protocol-spec/"]
   },
   "release_policy": {
-    "private": true,
+    "private": false,
     "publish_crate": false,
     "ci_enabled": false,
     "automatic_publication": false,
@@ -416,7 +416,7 @@
     },
     {
       "id": "R10", "version": "0.10.0", "title": "Operations and distribution", "publication": false,
-      "scope": ["Metrics, diagnostics, and reproducible backup and restore procedures.", "Distribute a Linux amd64 Docker image as an archive attached to the private release; verify operation and shutdown."],
+      "scope": ["Metrics, diagnostics, and reproducible backup and restore procedures.", "Distribute a Linux amd64 Docker image as an archive attached to the public release; verify operation and shutdown."],
       "required_gates": ["native","compatibility","tcp_smoke","docker"],
       "tasks": [
         {
@@ -442,7 +442,7 @@
         },
         {
           "id": "R10-04", "title": "Docker image", "area": "distribution", "depends_on": ["R03-03"],
-          "objective": "Package Sider Linux amd64 in a runnable image and validate its archive export for the private 1.0 publication.",
+          "objective": "Package Sider Linux amd64 in a runnable image and validate its archive export for the public 1.0 publication.",
           "deliverables": ["Reproducible Dockerfile with version/SHA, unprivileged user, persistent directory, and correct stop signal.", "Build, compressed docker save, checksum, and release manifest inclusion; the docker runner tests the exported image after load."],
           "tests": ["--version, TCP smoke, volume persistence, restart, invalid configuration, and container shutdown."],
           "acceptance": ["Exported and reloaded image runs the tests; distribution neither depends on a public registry nor exposes the repository."]
@@ -455,7 +455,7 @@
           "acceptance": ["Documentation reproduces results; metrics, restore, and shutdown verified across distribution channels."]
         }
       ],
-      "gate": {"id":"R10-GATE","title":"Validate internal milestone 0.10.0","acceptance":["Metrics verified, restore reproducible, shutdown and limits documented.","docker gate and local checks passed; the exported runnable image accompanies the private packages and checksums.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
+      "gate": {"id":"R10-GATE","title":"Validate internal milestone 0.10.0","acceptance":["Metrics verified, restore reproducible, shutdown and limits documented.","docker gate and local checks passed; the exported runnable image accompanies the public packages and checksums.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
     },
     {
       "id": "R11", "version": "1.0.0", "title": "Stabilization", "publication": true,

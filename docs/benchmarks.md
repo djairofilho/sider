@@ -13,7 +13,7 @@ Do not run builds, tests, soak tests, or other workloads concurrently.
 
 The [input helper](../tests/common/release_input.rs) can be shared with other gates
 that run the package. It requires a clean checkout at the declared SHA, Cargo and
-artifact version `1.0.0`, a native target, and the private publication policy
+artifact version `1.0.0`, a native target, and the public publication policy
 from the [release contract](releases.md).
 
 Before and after the test, the helper checks:

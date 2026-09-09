@@ -31,7 +31,7 @@
   in the RC; the final release promotes the same SHA and all the same files, without rebuilding
   or rerunning gates. Any bundle change requires another candidate.
 - Manually publish the build from the exact preparation merge SHA. Merging publishes nothing.
-  Keep the repository and artifacts private and retain `publish = false`.
+  Keep the repository and release artifacts public and retain `publish = false`.
   Internal checkpoints close after technical validation; R11 closes after verifying the final release.
 - Preserve evidence by task/SHA at internal milestones and the R10 baseline for migration.
   Do not attribute old results to a different SHA or alter historical releases.

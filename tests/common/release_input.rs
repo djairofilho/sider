@@ -163,7 +163,7 @@ fn manifest_package(
         || manifest["schema_version"] != 2
         || manifest["artifact_version"] != version
         || manifest["sha"] != sha
-        || manifest["private"] != true
+        || manifest["private"] != false
         || manifest["crate_publication"] != false
         || manifest["provenance"]["frozen_checkout"] != sha
         || !manifest["targets"]
@@ -278,7 +278,7 @@ mod tests {
     use super::*;
     const SHA: &str = "0123456789012345678901234567890123456789";
     fn manifest() -> Value {
-        json!({"schema_version":2,"artifact_version":"1.0.0","sha":SHA,"private":true,"crate_publication":false,"targets":[TARGET],
+        json!({"schema_version":2,"artifact_version":"1.0.0","sha":SHA,"private":false,"crate_publication":false,"targets":[TARGET],
         "provenance":{"frozen_checkout":SHA},"artifacts":[{"name":format!("sider-v1.0.0-{TARGET}.tar.gz"),"size":10,"sha256":"a".repeat(64)}]})
     }
     #[test]

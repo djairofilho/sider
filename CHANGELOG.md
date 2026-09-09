@@ -21,7 +21,7 @@ this section does not declare publication or passing gates.
 - `INFO`, operational sections, and `sider --diagnose` for metrics, queues, persistence,
   replication, and configuration validation without starting listeners.
 - Windows/Linux packages with four executables: server, AOF migrator,
-  backup, and replica administration. The private Docker image uses the package binaries,
+  backup, and replica administration. The Docker image uses the package binaries,
   an unprivileged user, persistence, and an actual export/load test.
 - Complete compatibility matrix and differential audit of sequences across
   types, TTL, transactions, and Pub/Sub, with fixed seeds and separate counts.
@@ -91,7 +91,7 @@ this section does not declare publication or passing gates.
   literal fixtures, fragmentation, and property tests.
 - Binary fixtures and disposable Redis/CLI 8.10.1 infrastructure, tested
   in Rust without depending on the future Sider codec.
-- MIT license, keeping the repository and artifacts private.
+- MIT license, with the repository and release artifacts publicly available.
 - Versioned planning, synchronizable backlog, and optional release tools.
 - Manual validation and publication through and including 1.0; CI and automatic
   publication deferred until after 1.0.

@@ -547,8 +547,8 @@ fn sync_plan(plan: &Value, client: &mut impl GitHub, apply: bool) -> Result<Valu
         return Err("Manifest repository is not Sider".into());
     }
     let repository = client.request("GET", &repo_path(""), None)?;
-    if repository.get("private").and_then(Value::as_bool) != Some(true) {
-        return Err("The Sider backlog must remain private".into());
+    if repository.get("private").and_then(Value::as_bool) != Some(false) {
+        return Err("The Sider backlog must remain public".into());
     }
     if repository
         .get("full_name")
@@ -841,7 +841,7 @@ mod tests {
     impl Default for FakeGitHub {
         fn default() -> Self {
             Self {
-                private: json!(true),
+                private: json!(false),
                 milestones: vec![],
                 issues: vec![],
                 labels: vec![],
@@ -1179,13 +1179,13 @@ mod tests {
     }
 
     #[test]
-    fn generated_marker_injection_and_public_repository_fail_before_writes() {
+    fn generated_marker_injection_and_non_public_repository_fail_before_writes() {
         let mut plan = example_plan();
         let mut client = FakeGitHub::default();
         plan["releases"][1]["tasks"][0]["objective"] = json!(format!("Append {END}"));
         assert!(client.apply(&plan).is_err());
         assert_eq!(client.writes(), 0);
-        for private in [json!(false), json!("true"), Value::Null] {
+        for private in [json!(true), json!("false"), Value::Null] {
             let mut client = FakeGitHub {
                 private,
                 ..FakeGitHub::default()

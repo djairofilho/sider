@@ -285,7 +285,7 @@ pub fn validate(plan: &Value) -> Result<(), String> {
     let policy = &plan["release_policy"];
     object(policy, "release_policy")?;
     let expected = json!({
-        "private": true, "publish_crate": false, "candidate_required": true,
+        "private": false, "publish_crate": false, "candidate_required": true,
         "ci_enabled": false, "automatic_publication": false,
         "automation_resume_after": "1.0.0", "merge_strategy": "merge",
         "release_branch_prefix": "chore/release-v", "release_label": "type:release",
@@ -481,7 +481,7 @@ pub fn render(plan: &Value) -> Result<String, String> {
     append(
         &mut lines,
         &[
-            "The repository and artifacts remain private; the crate uses `publish = false`.",
+            "The repository and release artifacts are public; the crate uses `publish = false`.",
             "",
             "CI and automatic publication are disabled through and including 1.0.",
             "Resuming them later requires implementation and an explicit policy change.",
@@ -634,7 +634,7 @@ pub fn render(plan: &Value) -> Result<String, String> {
             "Migration uses fixtures and executables from internal baselines frozen by SHA and hashes; 1.0 migrates the R10 baseline.",
             "",
             "The packages are Linux GNU x86_64 (`.tar.gz`, Ubuntu 24.04) and Windows MSVC x86_64 (`.zip`).",
-            "R10 validates the exported Linux amd64 Docker image accompanying the private 1.0 publication.",
+            "R10 validates the exported Linux amd64 Docker image accompanying the public 1.0 publication.",
             "SHA-256 checksums, a build manifest, and notes accompany the binaries tested after extraction.",
             "",
             "Publishable patches, such as `1.0.1`, need their own manifest entry and a candidate.",
@@ -1125,8 +1125,12 @@ mod tests {
 
     #[test]
     fn fixed_policies_reject_value_and_type_drift() {
-        for field in [
+        invalid(|p| p["release_policy"]["private"] = json!(true), "private");
+        invalid(
+            |p| p["release_policy"]["private"] = json!("false"),
             "private",
+        );
+        for field in [
             "candidate_required",
             "patch_requires_manifest_entry",
             "bundle_change_requires_new_candidate",

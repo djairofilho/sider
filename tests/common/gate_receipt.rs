@@ -258,7 +258,7 @@ impl GateContext {
         let plan = &observed.plan;
         let policy = &plan["release_policy"];
         if plan["schema_version"] != 2
-            || policy["private"] != true
+            || policy["private"] != false
             || policy["publish_crate"] != false
             || policy["final_promotion"] != "same_sha_same_assets"
             || policy["bundle_change_requires_new_candidate"] != true
@@ -266,9 +266,7 @@ impl GateContext {
                 .as_array()
                 .is_some_and(|targets| targets.contains(&json!(expected.target)))
         {
-            return Err(
-                "invalid private release policy, immutable bundle policy, or target".into(),
-            );
+            return Err("invalid public release policy, immutable bundle policy, or target".into());
         }
         let releases = plan["releases"].as_array().ok_or("missing releases")?;
         let matches: Vec<_> = releases

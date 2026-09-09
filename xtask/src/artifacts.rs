@@ -190,12 +190,12 @@ fn number(value: &str) -> Result<u64, String> {
 fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bool), String> {
     let policy = &plan["release_policy"];
     if plan["schema_version"] != 2
-        || policy["private"] != true
+        || policy["private"] != false
         || policy["publish_crate"] != false
         || policy["final_promotion"] != "same_sha_same_assets"
         || policy["bundle_change_requires_new_candidate"] != true
     {
-        return Err("Plan must require private publication and immutable bundle promotion".into());
+        return Err("Plan must require public publication and immutable bundle promotion".into());
     }
     let targets = plan["release_policy"]["targets"]
         .as_array()
@@ -260,7 +260,7 @@ fn verify_identity(
     if manifest["schema_version"] != 2
         || manifest["artifact_version"] != artifact_version
         || manifest["sha"] != sha
-        || manifest["private"] != true
+        || manifest["private"] != false
         || manifest["crate_publication"] != false
         || manifest["license"] != "MIT"
         || manifest["repository"] != plan["repository"]
@@ -777,7 +777,7 @@ mod tests {
             };
             let plan = json!({"schema_version":2,"repository":"example/sider", "reference":{"image":"redis:fixed"},
             "release_policy":{"targets":[LINUX,WINDOWS], "docker_since":"0.10.0",
-                "private":true,"publish_crate":false,"final_promotion":"same_sha_same_assets",
+                "private":false,"publish_crate":false,"final_promotion":"same_sha_same_assets",
                 "bundle_change_requires_new_candidate":true,"stable_soak_seconds":3600},
             "releases":[
                 {"version":"0.1.0","publication":false,"required_gates":["native","tcp_smoke","compatibility"]},
@@ -819,7 +819,7 @@ mod tests {
                     ("nested/binary.log".into(), vec![0, 255, 13, 10]),
                 ])
                 .collect();
-            let manifest = json!({"schema_version":2,"repository":"example/sider","private":true,
+            let manifest = json!({"schema_version":2,"repository":"example/sider","private":false,
                 "artifact_version":version,"sha":SHA,
                 "provenance":{"kind":"manual-local","ci_enabled":false,"github_actions_run":null,"frozen_checkout":SHA},
                 "reference":plan["reference"],"targets":[LINUX,WINDOWS],
@@ -1275,7 +1275,7 @@ mod tests {
         for (pointer, value) in [
             ("/schema_version", json!(1)),
             ("/schema_version", json!(2.0)),
-            ("/release_policy/private", json!(false)),
+            ("/release_policy/private", json!(true)),
             ("/release_policy/publish_crate", json!(true)),
             ("/release_policy/final_promotion", json!("rebuild")),
             (

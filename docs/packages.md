@@ -72,7 +72,7 @@ The final reuses this evidence only for the same SHA and files.
 
 Record the build, packaging, extraction, and smoke commands; their output and
 exit code; file and package hashes; system, compiler, and checkout SHA. Include
-this evidence in the local manifest and attach the logs to the private release.
+this evidence in the local manifest and attach the logs to the public release.
 
 The [release procedure](releases.md) adds the cumulative gates, candidate,
 verification downloads, and milestone closure only after the final is published.

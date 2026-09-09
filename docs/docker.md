@@ -1,4 +1,4 @@
-# Private distribution image
+# Distribution image
 
 The Linux amd64 image contains `sider`, `sider-aof-migrate`, `sider-backup`,
 and `sider-replica` from the validated Linux package.

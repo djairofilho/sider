@@ -7,7 +7,7 @@ R11 combines stabilization and publication of 1.0, without removing features fro
 Operational task status lives in GitHub issues and is not duplicated in this file.
 
 There are 11 milestones and 62 issues: one bootstrap, functional tasks, and one gate per milestone.
-The repository and artifacts remain private; the crate uses `publish = false`.
+The repository and release artifacts are public; the crate uses `publish = false`.
 
 CI and automatic publication are disabled through and including 1.0.
 Resuming them later requires implementation and an explicit policy change.
@@ -269,7 +269,7 @@ Milestone completion criteria:
 ### 0.10.0: Operations and distribution
 
 - Metrics, diagnostics, and reproducible backup and restore procedures.
-- Distribute a Linux amd64 Docker image as an archive attached to the private release; verify operation and shutdown.
+- Distribute a Linux amd64 Docker image as an archive attached to the public release; verify operation and shutdown.
 
 | ID | Deliverable | Dependencies |
 | --- | --- | --- |
@@ -285,7 +285,7 @@ Required evidence: `native`, `compatibility`, `tcp_smoke`, `docker`.
 Milestone completion criteria:
 
 - Metrics verified, restore reproducible, shutdown and limits documented.
-- docker gate and local checks passed; the exported runnable image accompanies the private packages and checksums.
+- docker gate and local checks passed; the exported runnable image accompanies the public packages and checksums.
 - Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes.
 
 ### 1.0.0: Stabilization
@@ -327,7 +327,7 @@ A required test that is missing, ignored, cancelled, or lacks a report blocks mi
 Migration uses fixtures and executables from internal baselines frozen by SHA and hashes; 1.0 migrates the R10 baseline.
 
 The packages are Linux GNU x86_64 (`.tar.gz`, Ubuntu 24.04) and Windows MSVC x86_64 (`.zip`).
-R10 validates the exported Linux amd64 Docker image accompanying the private 1.0 publication.
+R10 validates the exported Linux amd64 Docker image accompanying the public 1.0 publication.
 SHA-256 checksums, a build manifest, and notes accompany the binaries tested after extraction.
 
 Publishable patches, such as `1.0.1`, need their own manifest entry and a candidate.
