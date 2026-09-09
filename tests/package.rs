@@ -23,7 +23,12 @@ use sider_process::SiderProcess;
 
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const BINARY_NAME: &str = if cfg!(windows) { "sider.exe" } else { "sider" };
-const PACKAGE_FILES: &[&str] = &[BINARY_NAME, "README.md", "LICENSE"];
+const MIGRATOR_NAME: &str = if cfg!(windows) {
+    "sider-aof-migrate.exe"
+} else {
+    "sider-aof-migrate"
+};
+const PACKAGE_FILES: &[&str] = &[BINARY_NAME, MIGRATOR_NAME, "README.md", "LICENSE"];
 const DISTRIBUTION_README: &[u8] = include_bytes!("../releases/README.md");
 const DISTRIBUTION_LICENSE: &[u8] = include_bytes!("../LICENSE");
 const PIPELINE_REQUEST: &[u8] = b"*3\r\n$3\r\nSET\r\n$4\r\n\x00\xff\r\n\r\n$5\r\n\x00\r\n\xffA\r\n\
@@ -37,6 +42,8 @@ struct ExtractedPackage {
     directory: PathBuf,
     binary: PathBuf,
     binary_bytes: u64,
+    migrator: PathBuf,
+    migrator_bytes: u64,
 }
 
 fn select_package(
@@ -59,6 +66,11 @@ fn select_package(
     if binary_bytes == 0 {
         return Err("executável do pacote está vazio".into());
     }
+    let migrator = directory.join(MIGRATOR_NAME);
+    let migrator_bytes = regular_file(&migrator)?.len();
+    if migrator_bytes == 0 {
+        return Err("migrador do pacote está vazio".into());
+    }
     for (name, expected) in [("README.md", readme), ("LICENSE", license)] {
         if expected.is_empty() {
             return Err(format!("{name} do checkout está vazio"));
@@ -69,6 +81,8 @@ fn select_package(
         directory,
         binary,
         binary_bytes,
+        migrator,
+        migrator_bytes,
     })
 }
 
@@ -188,6 +202,17 @@ fn smoke(
     version: &str,
 ) -> Result<Value, String> {
     let target = native_target()?;
+    let migrator = process::run(
+        std::process::Command::new(&package.migrator).arg("--help"),
+        IO_TIMEOUT,
+    )?;
+    if !migrator.status.success()
+        || !migrator
+            .stdout
+            .starts_with(b"Uso: sider-aof-migrate --source DIR")
+    {
+        return Err("migrador extraído não executou sua CLI".into());
+    }
     // Esta é a única origem do executável: não há fallback para um target local.
     let mut sider = SiderProcess::try_start(&package.binary, version)?;
     pipeline(sider.address())?;
@@ -199,7 +224,9 @@ fn smoke(
         readme,
         license,
     )?;
-    if verified.binary_bytes != package.binary_bytes {
+    if verified.binary_bytes != package.binary_bytes
+        || verified.migrator_bytes != package.migrator_bytes
+    {
         return Err("tamanho do executável mudou durante o smoke".into());
     }
     Ok(json!({
@@ -211,6 +238,9 @@ fn smoke(
         "package_directory": package.directory.to_string_lossy(),
         "binary": BINARY_NAME,
         "binary_bytes": package.binary_bytes,
+        "migrator": MIGRATOR_NAME,
+        "migrator_bytes": package.migrator_bytes,
+        "migrator_help_checked": true,
         "readme_matches_checkout": true,
         "readme_source": "releases/README.md",
         "license_matches_checkout": true,
@@ -274,11 +304,10 @@ mod tests {
                             fs::write(fixture.checkout().join(name), &contents).unwrap();
                             fs::write(fixture.package().join(name), contents).unwrap();
                         }
-                        fs::write(
-                            fixture.package().join(BINARY_NAME),
-                            b"fixture, not executable",
-                        )
-                        .unwrap();
+                        for name in [BINARY_NAME, MIGRATOR_NAME] {
+                            fs::write(fixture.package().join(name), b"fixture, not executable")
+                                .unwrap();
+                        }
                         return fixture;
                     }
                     Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
@@ -305,6 +334,11 @@ mod tests {
             fs::copy(
                 env!("CARGO_BIN_EXE_sider"),
                 self.package().join(BINARY_NAME),
+            )
+            .unwrap();
+            fs::copy(
+                env!("CARGO_BIN_EXE_sider-aof-migrate"),
+                self.package().join(MIGRATOR_NAME),
             )
             .unwrap();
             for (name, contents) in [

@@ -89,6 +89,7 @@ impl GateContext {
                 | "types"
                 | "sorted_sets"
                 | "transactions"
+                | "docker"
         ) {
             return Err("gate desconhecido ou sem runner implementado".into());
         }
