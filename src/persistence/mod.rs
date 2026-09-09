@@ -1,5 +1,6 @@
 //! AOF binário com lotes resolvidos e um único proprietário da escrita.
 
+pub mod backup;
 mod diagnostics;
 pub mod format;
 mod layout;
