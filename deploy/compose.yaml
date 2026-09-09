@@ -1,0 +1,20 @@
+services:
+  sider:
+    image: ${SIDER_IMAGE:?Defina a tag local registrada no relatório Docker após carregar o arquivo}
+    pull_policy: never
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 10s
+    ports:
+      - "127.0.0.1:${SIDER_PORT:-6379}:6379"
+    environment:
+      SIDER_SHARDS: ${SIDER_SHARDS:-1}
+      SIDER_MAX_DATASET_BYTES: ${SIDER_MAX_DATASET_BYTES:-67108864}
+      SIDER_AOF_SYNC: ${SIDER_AOF_SYNC:-always}
+    volumes:
+      - sider-data:/var/lib/sider
+
+volumes:
+  sider-data:

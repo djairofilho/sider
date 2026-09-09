@@ -66,6 +66,10 @@ Inclua essas evidências no manifesto local e anexe os logs junto da release pri
 O [procedimento de release](releases.md) acrescenta os gates cumulativos, candidata,
 downloads de conferência e fechamento do milestone somente após a final publicada.
 
+A [imagem Docker](docker.md) copia esses mesmos executáveis Linux, confere os
+hashes e testa o arquivo exportado após `docker load`. Não recompila o produto
+durante o build da imagem nem altera o formato do manifesto schema 2.
+
 ## Ensaio inicial registrado
 
 Em 8 de setembro de 2026, no commit `9768b1f`, o ensaio criou um ZIP Windows e um
