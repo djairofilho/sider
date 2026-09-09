@@ -28,7 +28,18 @@ const MIGRATOR_NAME: &str = if cfg!(windows) {
 } else {
     "sider-aof-migrate"
 };
-const PACKAGE_FILES: &[&str] = &[BINARY_NAME, MIGRATOR_NAME, "README.md", "LICENSE"];
+const BACKUP_NAME: &str = if cfg!(windows) {
+    "sider-backup.exe"
+} else {
+    "sider-backup"
+};
+const PACKAGE_FILES: &[&str] = &[
+    BINARY_NAME,
+    MIGRATOR_NAME,
+    BACKUP_NAME,
+    "README.md",
+    "LICENSE",
+];
 const DISTRIBUTION_README: &[u8] = include_bytes!("../releases/README.md");
 const DISTRIBUTION_LICENSE: &[u8] = include_bytes!("../LICENSE");
 const PIPELINE_REQUEST: &[u8] = b"*3\r\n$3\r\nSET\r\n$4\r\n\x00\xff\r\n\r\n$5\r\n\x00\r\n\xffA\r\n\
@@ -44,6 +55,8 @@ struct ExtractedPackage {
     binary_bytes: u64,
     migrator: PathBuf,
     migrator_bytes: u64,
+    backup: PathBuf,
+    backup_bytes: u64,
 }
 
 fn select_package(
@@ -71,6 +84,11 @@ fn select_package(
     if migrator_bytes == 0 {
         return Err("migrador do pacote está vazio".into());
     }
+    let backup = directory.join(BACKUP_NAME);
+    let backup_bytes = regular_file(&backup)?.len();
+    if backup_bytes == 0 {
+        return Err("CLI de backup do pacote está vazia".into());
+    }
     for (name, expected) in [("README.md", readme), ("LICENSE", license)] {
         if expected.is_empty() {
             return Err(format!("{name} do checkout está vazio"));
@@ -83,6 +101,8 @@ fn select_package(
         binary_bytes,
         migrator,
         migrator_bytes,
+        backup,
+        backup_bytes,
     })
 }
 
@@ -213,6 +233,13 @@ fn smoke(
     {
         return Err("migrador extraído não executou sua CLI".into());
     }
+    let backup = process::run(
+        std::process::Command::new(&package.backup).arg("--version"),
+        IO_TIMEOUT,
+    )?;
+    if !backup.status.success() || backup.stdout != format!("sider-backup {version}\n").as_bytes() {
+        return Err("versão da CLI de backup extraída diverge".into());
+    }
     // Esta é a única origem do executável: não há fallback para um target local.
     let mut sider = SiderProcess::try_start(&package.binary, version)?;
     pipeline(sider.address())?;
@@ -226,6 +253,7 @@ fn smoke(
     )?;
     if verified.binary_bytes != package.binary_bytes
         || verified.migrator_bytes != package.migrator_bytes
+        || verified.backup_bytes != package.backup_bytes
     {
         return Err("tamanho do executável mudou durante o smoke".into());
     }
@@ -241,6 +269,9 @@ fn smoke(
         "migrator": MIGRATOR_NAME,
         "migrator_bytes": package.migrator_bytes,
         "migrator_help_checked": true,
+        "backup": BACKUP_NAME,
+        "backup_bytes": package.backup_bytes,
+        "backup_version_checked": true,
         "readme_matches_checkout": true,
         "readme_source": "releases/README.md",
         "license_matches_checkout": true,
@@ -304,7 +335,7 @@ mod tests {
                             fs::write(fixture.checkout().join(name), &contents).unwrap();
                             fs::write(fixture.package().join(name), contents).unwrap();
                         }
-                        for name in [BINARY_NAME, MIGRATOR_NAME] {
+                        for name in [BINARY_NAME, MIGRATOR_NAME, BACKUP_NAME] {
                             fs::write(fixture.package().join(name), b"fixture, not executable")
                                 .unwrap();
                         }
@@ -339,6 +370,11 @@ mod tests {
             fs::copy(
                 env!("CARGO_BIN_EXE_sider-aof-migrate"),
                 self.package().join(MIGRATOR_NAME),
+            )
+            .unwrap();
+            fs::copy(
+                env!("CARGO_BIN_EXE_sider-backup"),
+                self.package().join(BACKUP_NAME),
             )
             .unwrap();
             for (name, contents) in [

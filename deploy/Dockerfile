@@ -6,19 +6,21 @@ ARG SIDER_VERSION
 ARG SIDER_SOURCE_SHA
 ARG SIDER_SHA256
 ARG SIDER_MIGRATOR_SHA256
+ARG SIDER_BACKUP_SHA256
 
-COPY sider sider-aof-migrate /usr/local/bin/
+COPY sider sider-aof-migrate sider-backup /usr/local/bin/
 COPY README.md LICENSE /usr/share/doc/sider/
 COPY licenses/ /usr/share/doc/sider/licenses/
 
-RUN chmod 0755 /usr/local/bin/sider /usr/local/bin/sider-aof-migrate \
+RUN chmod 0755 /usr/local/bin/sider /usr/local/bin/sider-aof-migrate /usr/local/bin/sider-backup \
     && test -n "$SIDER_VERSION" \
     && test "${#SIDER_SOURCE_SHA}" = 40 \
     && printf '%s\n' "$SIDER_SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$' \
-    && printf '%s  /usr/local/bin/sider\n%s  /usr/local/bin/sider-aof-migrate\n' \
-        "$SIDER_SHA256" "$SIDER_MIGRATOR_SHA256" | sha256sum --check --strict \
+    && printf '%s  /usr/local/bin/sider\n%s  /usr/local/bin/sider-aof-migrate\n%s  /usr/local/bin/sider-backup\n' \
+        "$SIDER_SHA256" "$SIDER_MIGRATOR_SHA256" "$SIDER_BACKUP_SHA256" | sha256sum --check --strict \
     && test "$(/usr/local/bin/sider --version)" = "sider $SIDER_VERSION" \
     && /usr/local/bin/sider-aof-migrate --help >/dev/null \
+    && test "$(/usr/local/bin/sider-backup --version)" = "sider-backup $SIDER_VERSION" \
     && install -d -m 0700 -o 10001 -g 10001 /var/lib/sider
 
 LABEL org.opencontainers.image.title="Sider" \
@@ -26,7 +28,8 @@ LABEL org.opencontainers.image.title="Sider" \
       org.opencontainers.image.revision="$SIDER_SOURCE_SHA" \
       org.opencontainers.image.licenses="MIT" \
       io.sider.binary.sha256="$SIDER_SHA256" \
-      io.sider.migrator.sha256="$SIDER_MIGRATOR_SHA256"
+      io.sider.migrator.sha256="$SIDER_MIGRATOR_SHA256" \
+      io.sider.backup.sha256="$SIDER_BACKUP_SHA256"
 
 ENV SIDER_ADDR=0.0.0.0:6379 \
     SIDER_AOF_DIR=/var/lib/sider \
