@@ -2,11 +2,13 @@
 
 mod collections;
 mod fpconv;
+mod info;
 mod parser;
 mod reply;
 mod score;
 mod sorted_set;
 pub use collections::{HashCommand, ListCommand, SetCommand};
+pub use info::InfoSections;
 pub use score::Score;
 pub use sorted_set::SortedSetCommand;
 
@@ -64,6 +66,8 @@ pub(crate) fn parse_decimal(value: &[u8]) -> Option<i64> {
 /// Comando validado, sem canais ou conhecimento do protocolo de transporte.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    /// Diagnóstico operacional próprio, com seleção limitada de seções.
+    Info(InfoSections),
     SortedSet {
         key: Bytes,
         operation: SortedSetCommand,
@@ -172,6 +176,7 @@ impl Command {
     pub fn visit_keys(&self, mut visit: impl FnMut(&Bytes)) {
         match self {
             Self::Ping(_)
+            | Self::Info(_)
             | Self::Echo(_)
             | Self::Subscribe { .. }
             | Self::Unsubscribe { .. }

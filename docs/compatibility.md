@@ -82,6 +82,11 @@ especial RESP2, persistência e reprodução das verificações.
 
 ## Subconjunto alvo
 
+`INFO [seção ...]` expõe um diagnóstico próprio do Sider por RESP2. As seções e
+os indicadores estão no [guia operacional](metrics.md); não há promessa de
+reproduzir todos os campos INFO do Redis. A consulta respeita o modo assinante
+e os limites de resposta, podendo ser enfileirada em `MULTI`.
+
 O Sider aceitará requisições RESP2 formadas por arrays não vazios de bulk strings
 não nulas. Os nomes dos comandos serão comparados sem distinguir maiúsculas de
 minúsculas ASCII. Chaves e valores serão binários, sem exigir UTF-8.

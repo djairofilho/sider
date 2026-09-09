@@ -10,6 +10,7 @@ use tokio::time::{Instant, sleep_until, timeout_at};
 
 use crate::ServerConfig;
 use crate::command::{Command, parse};
+use crate::metrics::Counter;
 use crate::pubsub::{Hub, Message, PubSubError, Subscription};
 use crate::resp::{Decoder, EncodeError, Frame, ProtocolError, RespLimits, encode};
 use crate::storage::worker::{DbError, DbHandle};
@@ -57,10 +58,45 @@ pub(crate) async fn run<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    run_with_pubsub(stream, config, database, shutdown, Hub::default()).await
+    let hub = Hub::with_metrics(database.metrics.clone());
+    run_with_pubsub(stream, config, database, shutdown, hub).await
 }
 
 pub(crate) async fn run_with_pubsub<S>(
+    stream: S,
+    config: ServerConfig,
+    database: DbHandle,
+    shutdown: watch::Receiver<bool>,
+    hub: Hub,
+) -> Result<(), ConnectionError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let metrics = database.metrics.clone();
+    let _connection = metrics.connection();
+    let result = run_inner(stream, config, database, shutdown, hub).await;
+    if let Err(error) = &result {
+        metrics.add(Counter::ConnectionFailures, 1);
+        match error {
+            ConnectionError::WriteTimeout => metrics.add(Counter::WriteTimeouts, 1),
+            ConnectionError::Encode(_) => metrics.add(Counter::ResponseLimitFailures, 1),
+            _ => {}
+        }
+        if matches!(
+            error,
+            ConnectionError::Protocol(_)
+                | ConnectionError::InvalidRequest
+                | ConnectionError::Truncated
+                | ConnectionError::InputLimit
+                | ConnectionError::FrameTimeout
+        ) {
+            metrics.add(Counter::ProtocolErrors, 1);
+        }
+    }
+    result
+}
+
+async fn run_inner<S>(
     mut stream: S,
     config: ServerConfig,
     database: DbHandle,
@@ -100,6 +136,7 @@ where
         }
         match decoder.decode(&mut input) {
             Ok(Some(frame)) => {
+                database.metrics.add(Counter::Requests, 1);
                 // Só lemos enquanto o frame anterior estava incompleto. Logo,
                 // qualquer sufixo novo veio necessariamente da última leitura.
                 frame_started = if input.is_empty() { None } else { last_read_at };
@@ -196,6 +233,7 @@ where
                                 "ERR Can't execute '{}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context",
                                 String::from_utf8_lossy(&command_name),
                             ))),
+                            Command::Info(sections) => Frame::Bulk(Some(database.info(sections))),
                             Command::Publish { channel, message } => {
                                 let message = Message {
                                     channel,
@@ -353,6 +391,7 @@ async fn write_subscriber_response<S: AsyncWrite + Unpin>(
     config: &ServerConfig,
     subscription: &mut Subscription,
 ) -> Result<(), ConnectionError> {
+    subscription.metrics().response(&response);
     tokio::select! {
         biased;
         _ = subscription.evicted() => Err(PubSubError::Closed.into()),

@@ -11,6 +11,7 @@ use thiserror::Error;
 use tokio::sync::{mpsc, watch};
 
 use crate::command::{Command, Reply};
+use crate::metrics::{Counter, Metrics};
 use crate::resp::{EncodeError, Frame, RespLimits, encode};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,13 +38,23 @@ pub(crate) enum PubSubError {
     Closed,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct Hub {
     state: Arc<Mutex<State>>,
+    metrics: Metrics,
+}
+
+impl Default for Hub {
+    fn default() -> Self {
+        Self::with_metrics(Metrics::default())
+    }
 }
 
 #[derive(Default)]
 struct State {
+    metrics: Metrics,
+    subscriptions: usize,
+    active_subscribers: usize,
     next_id: u64,
     subscribers: BTreeMap<u64, Entry>,
     channels: BTreeMap<Bytes, BTreeSet<u64>>,
@@ -56,6 +67,13 @@ struct Entry {
 }
 
 impl State {
+    fn gauges(&self) {
+        self.metrics.pubsub(
+            self.channels.len(),
+            self.active_subscribers,
+            self.subscriptions,
+        );
+    }
     fn publish(&mut self, message: Message) -> i64 {
         let members = self
             .channels
@@ -71,14 +89,18 @@ impl State {
             if sent {
                 accepted += 1;
             } else {
+                self.metrics.add(Counter::PubSubEvictions, 1);
                 self.remove(id);
             }
         }
+        self.metrics.add(Counter::PubSubDeliveries, accepted as u64);
         accepted
     }
 
     fn remove(&mut self, id: u64) {
         if let Some(entry) = self.subscribers.remove(&id) {
+            self.subscriptions -= entry.channels.len();
+            self.active_subscribers -= usize::from(!entry.channels.is_empty());
             entry.evicted.send_replace(true);
             for channel in entry.channels {
                 if let Some(members) = self.channels.get_mut(&channel) {
@@ -88,11 +110,21 @@ impl State {
                     }
                 }
             }
+            self.gauges();
         }
     }
 }
 
 impl Hub {
+    pub(crate) fn with_metrics(metrics: Metrics) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(State {
+                metrics: metrics.clone(),
+                ..State::default()
+            })),
+            metrics,
+        }
+    }
     /// O chamador valida os limites antes de criar o canal Tokio.
     pub(crate) fn connect(
         &self,
@@ -151,6 +183,9 @@ impl Drop for Subscription {
 }
 
 impl Subscription {
+    pub(crate) fn metrics(&self) -> &Metrics {
+        &self.hub.metrics
+    }
     pub(crate) fn active(&self) -> bool {
         self.hub
             .state
@@ -214,7 +249,10 @@ impl Subscription {
                 .subscribers
                 .get_mut(&self.id)
                 .ok_or(PubSubError::Closed)?;
-            entry.channels.insert(channel.clone());
+            if entry.channels.insert(channel.clone()) {
+                state.subscriptions += 1;
+                state.active_subscribers += usize::from(entry.channels.len() == 1);
+            }
             let count = entry.channels.len();
             state
                 .channels
@@ -223,6 +261,7 @@ impl Subscription {
                 .insert(self.id);
             responses.push(confirmation(b"subscribe", Some(channel), count));
         }
+        state.gauges();
         Ok(responses)
     }
 
@@ -257,7 +296,10 @@ impl Subscription {
                 .subscribers
                 .get_mut(&self.id)
                 .ok_or(PubSubError::Closed)?;
-            entry.channels.remove(&channel);
+            if entry.channels.remove(&channel) {
+                state.subscriptions -= 1;
+                state.active_subscribers -= usize::from(entry.channels.is_empty());
+            }
             let count = entry.channels.len();
             if let Some(members) = state.channels.get_mut(&channel) {
                 members.remove(&self.id);
@@ -267,6 +309,7 @@ impl Subscription {
             }
             responses.push(confirmation(b"unsubscribe", Some(channel), count));
         }
+        state.gauges();
         Ok(responses)
     }
 
@@ -286,6 +329,9 @@ impl Subscription {
         let mut frames = Vec::new();
         for (command, reply) in commands.into_iter().zip(replies) {
             match command {
+                Command::Info(sections) => {
+                    frames.push(Frame::Bulk(Some(hub.metrics.render(sections))))
+                }
                 Command::Subscribe { channels } => {
                     match self.subscribe_locked(&mut state, channels, false) {
                         Ok(acks) => frames.extend(acks),
@@ -329,6 +375,9 @@ impl Subscription {
         // Redis adia notificações à própria conexão até todas as respostas de EXEC.
         frames.extend(drain(&mut self.receiver));
         drop(state);
+        for frame in &frames {
+            hub.metrics.response(frame);
+        }
         encode_exec(command_count, frames, limits)
     }
 }

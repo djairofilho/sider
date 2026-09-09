@@ -9,6 +9,7 @@ use tokio::time::{Instant, MissedTickBehavior, interval, sleep_until};
 
 use crate::command::{Command, ExecutionError, Reply};
 use crate::error::ConfigError;
+use crate::metrics::{Counter, Metrics};
 use crate::pubsub::Subscription;
 use crate::resp::{EncodeError, Frame, RespLimits, encode};
 
@@ -74,6 +75,7 @@ fn encode_reply(reply: Reply, limits: RespLimits) -> Result<bytes::Bytes, Encode
 /// Acesso clonável ao mesmo armazenamento, sem compartilhar o mapa diretamente.
 #[derive(Clone)]
 pub struct DbHandle {
+    pub(crate) metrics: Metrics,
     requests: Vec<mpsc::Sender<Request>>,
     router: ShardRouter,
     pub(super) request_timeout: Duration,
@@ -84,6 +86,8 @@ pub struct DbHandle {
 
 /// Proprietário único do mapa e do lado receptor da fila.
 pub struct Worker {
+    metrics: Metrics,
+    shard: usize,
     store: Store,
     shard_count: usize,
     aof: Option<crate::persistence::AofHandle>,
@@ -153,12 +157,16 @@ pub fn channel_with_stores(
     let mut snapshots = Vec::with_capacity(stores.len());
     let barrier = Arc::new(RwLock::new(()));
     let shard_count = stores.len();
-    for store in stores {
+    let metrics = Metrics::new(stores.len(), capacity);
+    for (shard, store) in stores.into_iter().enumerate() {
+        metrics.dataset(shard, store.dataset_stats());
         let (sender, receiver) = mpsc::channel(capacity);
         let (snapshot_sender, snapshot_receiver) = mpsc::channel(1);
         snapshots.push(snapshot_sender);
         senders.push(sender);
         workers.push(Worker {
+            metrics: metrics.clone(),
+            shard,
             store,
             shard_count,
             aof: None,
@@ -172,6 +180,7 @@ pub fn channel_with_stores(
     }
     Ok((
         DbHandle {
+            metrics,
             requests: senders,
             router,
             request_timeout,
@@ -184,6 +193,16 @@ pub fn channel_with_stores(
 }
 
 impl DbHandle {
+    pub(crate) fn info(&self, sections: crate::command::InfoSections) -> bytes::Bytes {
+        for (shard, queue) in self.requests.iter().enumerate() {
+            self.metrics.queue(
+                shard,
+                queue.max_capacity() - queue.capacity(),
+                queue.max_capacity(),
+            );
+        }
+        self.metrics.render(sections)
+    }
     /// Envia um comando e espera sua resposta dentro de um único prazo total.
     ///
     /// A conclusão do envio à fila é a fronteira de aceitação. Cancelar antes
@@ -297,6 +316,20 @@ impl DbHandle {
         shard: usize,
         make: impl FnOnce(oneshot::Sender<Result<T, DbError>>, OwnedRwLockReadGuard<()>) -> Request,
     ) -> Result<T, DbError> {
+        let result = self.request_inner(shard, make).await;
+        match &result {
+            Err(DbError::Timeout) => self.metrics.add(Counter::WorkerTimeouts, 1),
+            Err(DbError::Unavailable) => self.metrics.add(Counter::WorkerFailures, 1),
+            _ => {}
+        }
+        result
+    }
+
+    async fn request_inner<T>(
+        &self,
+        shard: usize,
+        make: impl FnOnce(oneshot::Sender<Result<T, DbError>>, OwnedRwLockReadGuard<()>) -> Request,
+    ) -> Result<T, DbError> {
         let deadline = Instant::now()
             .checked_add(self.request_timeout)
             .ok_or(DbError::Timeout)?;
@@ -316,6 +349,9 @@ impl DbHandle {
             () = stopping(&mut shutdown) => return Err(DbError::ShuttingDown),
             sent = self.requests[shard].send(request) => {
                 sent.map_err(|_| DbError::Unavailable)?;
+                self.metrics.add(Counter::WorkerAccepted, 1);
+                let queue = &self.requests[shard];
+                self.metrics.queue(shard, queue.max_capacity() - queue.capacity(), queue.max_capacity());
             }
         }
 
@@ -337,6 +373,7 @@ impl Worker {
         aof: crate::persistence::AofHandle,
         compact_after_bytes: u64,
     ) -> Self {
+        self.metrics.aof(aof.diagnostics_handle());
         self.aof = Some(aof);
         // Compactação local só é válida quando este worker é o único shard.
         self.compact_after_bytes = if self.shard_count == 1 {
@@ -395,6 +432,11 @@ impl Worker {
     }
 
     async fn apply(&mut self, request: Request) -> bool {
+        self.metrics.queue(
+            self.shard,
+            self.requests.len(),
+            self.requests.max_capacity(),
+        );
         match request {
             Request::Transaction {
                 commands,
@@ -410,8 +452,11 @@ impl Worker {
                     let prepared = self.store.prepare_batch(commands.clone());
                     match self.persist(&prepared).await {
                         Ok(None) => subscription
-                            .complete_exec(commands, limits, || self.store.apply(prepared)),
-                        Ok(Some(rejection)) => encode_reply(rejection, limits),
+                            .complete_exec(commands, limits, || self.apply_prepared(prepared)),
+                        Ok(Some(rejection)) => {
+                            self.metrics.response(&Frame::from(rejection.clone()));
+                            encode_reply(rejection, limits)
+                        }
                         Err(error) => {
                             let _ = reply.send(Err(error));
                             return false;
@@ -475,8 +520,26 @@ impl Worker {
     async fn commit(&mut self, prepared: super::Prepared) -> Result<Reply, DbError> {
         match self.persist(&prepared).await? {
             Some(rejection) => Ok(rejection),
-            None => Ok(self.store.apply(prepared)),
+            None => Ok(self.apply_prepared(prepared)),
         }
+    }
+
+    fn apply_prepared(&mut self, prepared: super::Prepared) -> Reply {
+        let changed = !prepared.batch.mutations.is_empty();
+        let expired = if prepared.batch.origin == super::MutationOrigin::Expiration {
+            prepared.batch.mutations.len()
+        } else {
+            0
+        };
+        let reply = self.store.apply(prepared);
+        if changed {
+            self.metrics.dataset(self.shard, self.store.dataset_stats());
+        }
+        if expired != 0 {
+            self.metrics.add(Counter::ExpirationBatches, 1);
+            self.metrics.add(Counter::ExpirationKeys, expired as u64);
+        }
+        reply
     }
 
     async fn persist(&mut self, prepared: &super::Prepared) -> Result<Option<Reply>, DbError> {

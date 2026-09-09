@@ -85,6 +85,14 @@ impl Default for Store {
 }
 
 impl Store {
+    pub(crate) fn dataset_stats(&self) -> crate::metrics::DatasetStats {
+        crate::metrics::DatasetStats {
+            keys: self.values.len(),
+            expiring: self.expirations.len(),
+            used_bytes: self.used_bytes,
+            quota: self.config.max_dataset_bytes,
+        }
+    }
     /// Cria um armazenamento vazio, usando o hasher padrão de `HashMap`.
     pub fn new() -> Self {
         Self::default()
@@ -157,6 +165,7 @@ impl Store {
     fn execute_inner(&mut self, command: Command) -> Reply {
         let now = self.clock.now();
         match command {
+            Command::Info(_) => Reply::Error(ExecutionError::ConnectionOnly),
             Command::Hash { key, operation } => self.hash(key, operation, now),
             Command::List { key, operation } => self.list(key, operation, now),
             Command::SetCollection { key, operation } => self.set_collection(key, operation, now),

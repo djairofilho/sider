@@ -311,6 +311,48 @@ fn help_does_not_require_valid_server_configuration() {
 }
 
 #[test]
+fn metrics_diagnose_validates_without_binding_or_touching_aof_or_readiness() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let directory = TestDirectory::new();
+    let ready = directory.file("ready.json");
+    let missing_aof = directory.file("secret-aof-directory");
+    let mut command = sider();
+    command
+        .arg("--diagnose")
+        .env("SIDER_ADDR", listener.local_addr().unwrap().to_string())
+        .env("SIDER_AOF_DIR", &missing_aof)
+        .env("SIDER_READY_FILE", &ready);
+    let mut process = ChildProcess::start(&mut command, directory);
+    let output = process.wait();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("diagnostic_scope:configuration_only"));
+    assert!(stdout.contains("aof_configured:1"));
+    assert!(stdout.contains("ready_file_enabled:1"));
+    assert!(!stdout.contains("secret-aof-directory"));
+    assert!(!stdout.contains(&process.directory.0.to_string_lossy().to_string()));
+    assert!(!missing_aof.exists());
+    assert!(!ready.exists());
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn metrics_diagnose_errors_hide_invalid_environment_values() {
+    let mut command = sider();
+    command
+        .arg("--diagnose")
+        .env("SIDER_MAX_CONNECTIONS", "secret\nvalue");
+    let mut process = ChildProcess::start(&mut command, TestDirectory::new());
+    let output = process.wait();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("SIDER_MAX_CONNECTIONS"));
+    assert!(!stderr.contains("secret"));
+    assert!(!stderr.contains("value"));
+}
+
+#[test]
 fn version_matches_the_package_manifest() {
     let output = output(sider().arg("--version"));
 
