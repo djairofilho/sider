@@ -106,8 +106,11 @@ impl Runtime {
             .applied = cursor;
     }
 
-    pub fn connected(&self, upstream_sequence: u64, full: bool) {
+    pub fn connected(&self, generation: u64, upstream_sequence: u64, full: bool) {
         let mut state = self.inner.lock().expect("estado de replicação envenenado");
+        if state.status.generation != generation || state.status.role != Role::Replica {
+            return;
+        }
         state.status.connected = true;
         state.status.upstream_sequence = Some(upstream_sequence);
         if full {
@@ -117,12 +120,18 @@ impl Runtime {
         }
     }
 
-    pub fn upstream_head(&self, sequence: u64) {
-        self.inner
-            .lock()
-            .expect("estado de replicação envenenado")
-            .status
-            .upstream_sequence = Some(sequence);
+    pub fn upstream_head(&self, generation: u64, sequence: u64) {
+        let mut state = self.inner.lock().expect("estado de replicação envenenado");
+        if state.status.generation == generation && state.status.role == Role::Replica {
+            state.status.upstream_sequence = Some(sequence);
+        }
+    }
+
+    pub fn disconnected(&self, generation: u64) {
+        let mut state = self.inner.lock().expect("estado de replicação envenenado");
+        if state.status.generation == generation {
+            state.status.connected = false;
+        }
     }
 
     /// Chamado sob a barreira depois de persistir papel/época e vincular o journal.

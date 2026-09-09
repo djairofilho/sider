@@ -115,6 +115,7 @@ impl Harness {
                 max_batches: 128,
                 max_frame_bytes: 32768,
             },
+            aof_limits: persistence::format::Limits::default(),
         };
         if role == Role::Primary {
             database

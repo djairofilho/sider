@@ -54,6 +54,8 @@ pub struct ServerConfig {
     pub ready_file: Option<PathBuf>,
     /// Persistência opcional; ausência mantém o modo em memória.
     pub aof: Option<crate::persistence::AofConfig>,
+    /// Listener Sider interno; configuração exige AOF nos dois lados.
+    pub replication: Option<crate::replication::config::Config>,
 }
 
 impl Default for ServerConfig {
@@ -78,6 +80,7 @@ impl Default for ServerConfig {
             shutdown_timeout: Duration::from_secs(5),
             ready_file: None,
             aof: None,
+            replication: None,
         }
     }
 }
@@ -180,6 +183,7 @@ impl ServerConfig {
             read_size!(aof.compact_after_bytes, "SIDER_AOF_COMPACT_AFTER_BYTES");
             config.aof = Some(aof);
         }
+        config.replication = crate::replication::config::Config::from_lookup(&mut lookup)?;
         config.validate()?;
         Ok(config)
     }
@@ -190,6 +194,12 @@ impl ServerConfig {
     /// bulk configurado com seu framing. Limites de linha de entrada não limitam
     /// mensagens internas de saída. A porta zero continua válida para bind efêmero.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if let Some(replication) = &self.replication {
+            let aof = self.aof.as_ref().ok_or(ConfigError::InvalidServerLimits {
+                reason: "replicação exige SIDER_AOF_DIR",
+            })?;
+            replication.validate(aof)?;
+        }
         if let Some(aof) = &self.aof {
             aof.validate()?;
             if aof.layout.shard_count as usize != self.shards {
@@ -332,7 +342,10 @@ impl ServerConfig {
     }
 }
 
-fn parse_integer<T: FromStr>(name: &'static str, value: OsString) -> Result<T, ConfigError> {
+pub(crate) fn parse_integer<T: FromStr>(
+    name: &'static str,
+    value: OsString,
+) -> Result<T, ConfigError> {
     let value = value
         .into_string()
         .map_err(|_| ConfigError::NonUnicodeValue { name })?;

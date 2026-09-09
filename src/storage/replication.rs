@@ -23,6 +23,7 @@ pub struct Context {
     pub store_config: StoreConfig,
     pub clock: Arc<dyn Clock>,
     pub journal_limits: Limits,
+    pub aof_limits: crate::persistence::format::Limits,
 }
 
 pub(super) enum Control {

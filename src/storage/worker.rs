@@ -225,6 +225,11 @@ impl DbHandle {
             .as_ref()
             .is_some_and(|runtime| runtime.readonly())
     }
+
+    /// Observador sem canais de requisição, disco ou referências fortes ao AOF.
+    pub fn replication_observer(&self) -> Option<crate::replication::state::Runtime> {
+        self.replication.clone()
+    }
     /// Envia um comando e espera sua resposta dentro de um único prazo total.
     ///
     /// A conclusão do envio à fila é a fronteira de aceitação. Cancelar antes

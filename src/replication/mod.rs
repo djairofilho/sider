@@ -2,8 +2,10 @@
 //!
 //! A integração com papéis, snapshot e AOF pertence ao coordenador de replicação.
 
+pub mod config;
 pub mod journal;
 pub mod protocol;
+pub mod session;
 pub mod state;
 
 /// Uma posição só identifica estado dentro da mesma época do primário.
@@ -11,6 +13,16 @@ pub mod state;
 pub struct Cursor {
     pub epoch: [u8; 16],
     pub sequence: u64,
+}
+
+/// Época independente a cada inicialização de primário ou promoção explícita.
+pub fn new_epoch() -> Result<[u8; 16], std::io::Error> {
+    let mut epoch = [0; 16];
+    getrandom::fill(&mut epoch).map_err(std::io::Error::other)?;
+    if epoch == [0; 16] {
+        return Err(std::io::Error::other("época aleatória inválida"));
+    }
+    Ok(epoch)
 }
 
 #[derive(Debug, thiserror::Error)]

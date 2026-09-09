@@ -30,6 +30,8 @@ pub enum ServerError {
     ShutdownTimeout,
     #[error("persistência indisponível: {0}")]
     Persistence(#[from] crate::persistence::AofError),
+    #[error("replicação indisponível: {0}")]
+    Replication(#[from] crate::replication::Error),
 }
 
 /// Estado recuperado antes de abrir o listener do binário.
@@ -37,6 +39,7 @@ pub struct PreparedServer {
     stores: Vec<Store>,
     recovered: Option<crate::persistence::Recovered>,
     config: ServerConfig,
+    replication_listener: Option<TcpListener>,
 }
 
 pub async fn prepare(config: &ServerConfig) -> Result<PreparedServer, ServerError> {
@@ -76,10 +79,27 @@ pub async fn prepare(config: &ServerConfig) -> Result<PreparedServer, ServerErro
     } else {
         None
     };
+    if recovered
+        .as_ref()
+        .and_then(|state| state.metadata.replication)
+        .is_some_and(|metadata| metadata.role == crate::persistence::Role::Replica)
+        && config
+            .replication
+            .as_ref()
+            .and_then(|replication| replication.upstream)
+            .is_none()
+    {
+        return Err(ConfigError::InvalidServerLimits { reason: "réplica persistida exige upstream configurado; use promoção local para trocar o papel" }.into());
+    }
+    let replication_listener = match &config.replication {
+        Some(replication) => Some(TcpListener::bind(replication.listen).await?),
+        None => None,
+    };
     Ok(PreparedServer {
         stores,
         recovered,
         config: config.clone(),
+        replication_listener,
     })
 }
 
@@ -112,6 +132,31 @@ pub async fn serve_prepared(
         .into());
     }
     let (stop, receiver) = watch::channel(false);
+    let metadata = prepared
+        .recovered
+        .as_ref()
+        .and_then(|recovered| recovered.metadata.replication);
+    let recovered_sequence = prepared
+        .recovered
+        .as_ref()
+        .map_or(0, |recovered| recovered.metadata.sequence);
+    let runtime = config.replication.as_ref().map(|replication| {
+        let role = if metadata
+            .is_some_and(|metadata| metadata.role == crate::persistence::Role::Primary)
+            || replication.upstream.is_none()
+        {
+            crate::persistence::Role::Primary
+        } else {
+            crate::persistence::Role::Replica
+        };
+        crate::replication::state::Runtime::new(
+            role,
+            crate::replication::Cursor {
+                epoch: metadata.map_or([0; 16], |metadata| metadata.epoch),
+                sequence: recovered_sequence,
+            },
+        )
+    });
     let persistence = match prepared.recovered {
         Some(recovered) => {
             let (_, handle, task) = recovered.start();
@@ -119,19 +164,108 @@ pub async fn serve_prepared(
         }
         None => None,
     };
-    let (database, shard_workers) = worker::channel_with_stores(
+    let (mut database, shard_workers) = worker::channel_with_stores(
         config.worker_queue_capacity,
         config.request_timeout,
-        receiver,
+        receiver.clone(),
         prepared.stores,
     )?;
+    if let Some(runtime) = &runtime {
+        database = database.with_replication(runtime.clone());
+    }
     let mut workers = JoinSet::new();
     for worker in shard_workers {
         let worker = match &persistence {
             Some((handle, _)) => worker.with_aof(handle.clone(), 0),
             None => worker,
         };
+        let worker = match &runtime {
+            Some(runtime) => worker.with_replication(runtime.clone()),
+            None => worker,
+        };
         workers.spawn(worker.run());
+    }
+    let replication_addr = prepared
+        .replication_listener
+        .as_ref()
+        .map(TcpListener::local_addr)
+        .transpose()?;
+    if let (Some(listener), Some(replication), Some(runtime), Some((aof, _))) = (
+        prepared.replication_listener,
+        config.replication.as_ref(),
+        runtime.as_ref(),
+        persistence.as_ref(),
+    ) {
+        let aof_config = config.aof.as_ref().expect("AOF validada para replicação");
+        let context = crate::storage::replication::Context {
+            aof: aof.clone(),
+            runtime: runtime.clone(),
+            layout: aof_config.layout,
+            store_config: StoreConfig {
+                max_dataset_bytes: config.max_dataset_bytes,
+            },
+            clock: Arc::new(SystemClock),
+            journal_limits: crate::replication::journal::Limits {
+                max_bytes: replication.backlog_bytes,
+                max_batches: replication.backlog_batches,
+                max_frame_bytes: aof_config.limits.max_record_bytes
+                    + crate::replication::protocol::HEADER_BYTES
+                    + 12,
+            },
+            aof_limits: aof_config.limits,
+        };
+        if !runtime.readonly() {
+            database
+                .promote_replica(context.clone(), crate::replication::new_epoch()?)
+                .await?;
+        } else if metadata.is_none() {
+            let image = database
+                .snapshot(Some(aof))
+                .await
+                .map_err(crate::replication::Error::from)?;
+            database
+                .install_replica(
+                    context.clone(),
+                    0,
+                    runtime.status().applied,
+                    image.mutations,
+                )
+                .await?;
+        }
+        let source_db = database.clone();
+        let source_context = context.clone();
+        let source_config = replication.clone();
+        let source_shutdown = receiver.clone();
+        workers.spawn(async move {
+            if let Err(error) = crate::replication::session::serve(
+                listener,
+                source_db,
+                source_context,
+                source_config,
+                source_shutdown,
+            )
+            .await
+            {
+                tracing::error!(%error, "listener interno encerrou com falha");
+            }
+        });
+        if runtime.readonly() {
+            let replica_db = database.clone();
+            let replica_config = replication.clone();
+            let replica_shutdown = receiver.clone();
+            workers.spawn(async move {
+                if let Err(error) = crate::replication::session::follow(
+                    replica_db,
+                    context,
+                    replica_config,
+                    replica_shutdown,
+                )
+                .await
+                {
+                    tracing::error!(%error, "réplica encerrou com falha");
+                }
+            });
+        }
     }
     if let Some((handle, _)) = &persistence {
         workers.spawn(database.clone().run_compaction(
@@ -140,6 +274,18 @@ pub async fn serve_prepared(
         ));
     }
     let timeout = config.shutdown_timeout;
+    let _replication_ready = config
+        .replication
+        .as_ref()
+        .and_then(|replication| replication.ready_file.as_ref())
+        .zip(replication_addr)
+        .map(|(path, address)| crate::readiness::ReadyFile::create(path, address))
+        .transpose()?;
+    let _ready = config
+        .ready_file
+        .as_ref()
+        .map(|path| crate::readiness::ReadyFile::create(path, listener.local_addr()?))
+        .transpose()?;
     let mut shutdown_deadline = None;
     let result = supervise_workers(
         listener,
