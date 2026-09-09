@@ -1,5 +1,14 @@
 # Persistência de coleções e sorted sets
 
+O teste `typed_migration_from_frozen_r04_binary_output_preserves_shards_and_elapsed_ttl`
+lê `tests/fixtures/aof-r04-four-shards.hex`, cópia exata do AOF produzido pelo
+migrador `4739d596f8d80d0038a9a97838395c90be60ceff` a partir da baseline real R03
+`c7b148abeff43fd354d29b1bbce36aea43ea8f3f`. SHA256 dos bytes:
+`b6be7a45ad5e57eb7957d10136afddec6488c60f7aa59bb1c5522388ba4a246f`.
+Com relógio injetado, confere quatro shards, sequência dois, dados antigos e TTL;
+acrescenta cada tipo, compacta e recupera após o deadline. É evidência do arquivo
+congelado e do leitor atual; não atribui os resultados ao executável histórico.
+
 Hashes, listas, sets e sorted sets usam o mesmo writer AOF das strings. A gravação
 recebe a pós-imagem tipada completa e o prazo absoluto resolvido. Em `always`, o
 armazenamento aplica essa imagem depois de o writer confirmar o sync do lote.

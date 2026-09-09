@@ -1172,6 +1172,55 @@ fn typed_migration_preserves_legacy_string_fixture_and_new_values() {
 }
 
 #[test]
+fn typed_migration_from_frozen_r04_binary_output_preserves_shards_and_elapsed_ttl() {
+    // Bytes produzidos pelo migrador 4739d596 a partir da baseline real R03.
+    // SHA256 b6be7a45ad5e57eb7957d10136afddec6488c60f7aa59bb1c5522388ba4a246f.
+    for family in 0..4 {
+        let directory = Directory::new();
+        let bytes: Vec<_> = include_str!("fixtures/aof-r04-four-shards.hex")
+            .trim()
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+            .collect();
+        fs::write(
+            directory.0.join("generation-00000000000000000000.aof"),
+            bytes,
+        )
+        .unwrap();
+        let mut config = directory.config();
+        config.layout.shard_count = 4;
+        let clock = TypedClock::at(1789524588000);
+        let expected = runtime().block_on(async {
+            let recovered = persistence::recover(config.clone(), StoreConfig::default(), clock.clone()).unwrap();
+            assert_eq!(recovered.metadata.sequence, 2);
+            assert_eq!(recovered.metadata.layout.shard_count, 4);
+            let (mut store, aof, writer) = recovered.start();
+            assert_eq!(get(&mut store, b"r03:a"), Reply::Bulk(Some(Bytes::from_static(b"alpha"))));
+            assert_eq!(get(&mut store, b"r03:b"), Reply::Bulk(Some(Bytes::from_static(b"42"))));
+            assert_eq!(get(&mut store, b"r03:ttl"), Reply::Bulk(Some(Bytes::from_static(b"durable"))));
+            assert!(matches!(store.execute(typed_command(&[b"PTTL", b"r03:ttl"])), Reply::Integer(ttl) if (536..=545).contains(&ttl)));
+            persist_command(&mut store, &aof, typed_create(family)).await;
+            persist_command(&mut store, &aof, typed_update(family, b"new")).await;
+            let expected = store.execute(typed_read(family));
+            aof.compact(store.snapshot()).await.unwrap();
+            drop(aof);
+            writer.await.unwrap().unwrap();
+            expected
+        });
+        clock.elapsed.store(2000, Ordering::SeqCst);
+        let mut recovered = persistence::recover(config, StoreConfig::default(), clock).unwrap();
+        assert_eq!(recovered.store.execute(typed_read(family)), expected);
+        assert_eq!(get(&mut recovered.store, b"r03:ttl"), Reply::Bulk(None));
+        assert_eq!(
+            get(&mut recovered.store, b"r03:a"),
+            Reply::Bulk(Some(Bytes::from_static(b"alpha")))
+        );
+        assert_eq!(recovered.store.len(), 3);
+    }
+}
+
+#[test]
 fn typed_quota_type_and_record_rejections_preserve_writer_and_dataset() {
     for family in 0..4 {
         let directory = Directory::new();
