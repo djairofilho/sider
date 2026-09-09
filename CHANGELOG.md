@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- SUBSCRIBE, UNSUBSCRIBE, PUBLISH e PING no modo assinante, com canais binários,
+  filas limitadas e cleanup em fila cheia, timeout, EOF, cancelamento e shutdown.
+  Mensagens efêmeras permanecem separadas do dataset e do AOF.
 - Shards fixos com workers e filas independentes, hash binário estável e hash tags.
   Comandos multichave entre shards são rejeitados antes do enqueue; quota total
   é dividida entre workers. Integração durável permanece na tarefa R04-04.

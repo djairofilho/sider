@@ -124,10 +124,17 @@ ou um teste ignorado deve permanecer registrado como pendente.
 
 ## Evolução planejada
 
+Pub/Sub está implementado em R08: `SUBSCRIBE canal [canal ...]`,
+`UNSUBSCRIBE [canal ...]`, `PUBLISH canal mensagem` e `PING [mensagem]` no modo
+assinante. O diferencial específico contra Redis 8.10.1 registrou 245 comparações,
+64 mensagens e 16 reconexões com cleanup, além dos testes nativos de backpressure.
+O [guia Pub/Sub](pubsub.md) descreve entrega efêmera, limites, comandos permitidos
+e divergências. Transações e sua interação com Pub/Sub permanecem em R07.
+
 O [ROADMAP](../ROADMAP.md) é a sequência oficial. Strings, opções de `SET`, TTL e
 quota de R02 estão implementadas, assim como shards fixos em memória (R04-01 a
 R04-03). AOF e integração durável permanecem pendentes; hashes, listas e sets ficam na 0.5;
-sorted sets na 0.6; transações de um shard na 0.7; Pub/Sub na 0.8; replicação
+sorted sets na 0.6; transações de um shard na 0.7; replicação
 Sider→Sider na 0.9; operação e imagem Docker na 0.10. A 1.0 estabiliza esse subconjunto.
 
 Com `SIDER_SHARDS` maior que um, operações multichave precisam do mesmo shard,
