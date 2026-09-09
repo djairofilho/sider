@@ -1,5 +1,8 @@
 //! AOF com papel/época atômicos e journal alimentado pelo escritor real.
 
+#[path = "common/process.rs"]
+mod process;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -279,6 +282,155 @@ async fn install_failure_before_publish_keeps_old_generation_after_publish_requi
             assert_eq!(recovered.store.len(), 1);
             assert_eq!(recovered.metadata.replication, None);
             assert_eq!(recovered.metadata.sequence, 1);
+        }
+    }
+}
+
+struct PauseInstall {
+    point: String,
+    directory: PathBuf,
+}
+impl FaultInjector for PauseInstall {
+    fn hit(&self, point: &'static str) -> std::io::Result<()> {
+        if point == self.point {
+            use std::io::Write;
+            let mut marker = std::fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(self.directory.join("paused"))?;
+            marker.write_all(point.as_bytes())?;
+            marker.sync_all()?;
+            loop {
+                std::thread::park_timeout(std::time::Duration::from_secs(1));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[test]
+#[ignore = "helper de crash chamado exclusivamente pelo teste pai"]
+fn replication_install_process_child() {
+    let directory = PathBuf::from(std::env::var_os("SIDER_TEST_REPLICATION_DIRECTORY").unwrap());
+    let point = std::env::var("SIDER_TEST_REPLICATION_POINT").unwrap();
+    let role = match std::env::var("SIDER_TEST_REPLICATION_ROLE")
+        .unwrap()
+        .as_str()
+    {
+        "primary" => Role::Primary,
+        "replica" => Role::Replica,
+        _ => panic!("papel do teste"),
+    };
+    let mut config = AofConfig::new(directory.clone());
+    config.layout.shard_count = 4;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let recovered = persistence::recover_with_faults(
+            config,
+            StoreConfig::default(),
+            clock(),
+            Arc::new(PauseInstall { point, directory }),
+        )
+        .unwrap();
+        let (_, aof, writer) = recovered.start();
+        aof.install_snapshot(
+            dataset(),
+            30,
+            ReplicationMetadata {
+                role,
+                epoch: [8; 16],
+            },
+        )
+        .await
+        .unwrap();
+        drop(aof);
+        writer.await.unwrap().unwrap();
+    });
+}
+
+#[test]
+fn replication_real_process_kill_installs_data_and_role_as_one_generation() {
+    let timeout = std::time::Duration::from_secs(10);
+    for role in [Role::Replica, Role::Primary] {
+        for point in [
+            "replication_before_install",
+            "replication_before_publish",
+            "replication_after_publish",
+        ] {
+            let directory = Directory::new();
+            let mut config = directory.config();
+            config.layout.shard_count = 4;
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let mut old = Store::with_clock(clock());
+            old.execute(set(b"old"));
+            let old = old.snapshot();
+            let before = ReplicationMetadata {
+                role: Role::Replica,
+                epoch: [3; 16],
+            };
+            runtime.block_on(async {
+                let recovered =
+                    persistence::recover(config.clone(), StoreConfig::default(), clock()).unwrap();
+                let (_, aof, writer) = recovered.start();
+                aof.install_snapshot(old.clone(), 1, before).await.unwrap();
+                drop(aof);
+                writer.await.unwrap().unwrap();
+            });
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "replication_install_process_child",
+                    "--nocapture",
+                ])
+                .env("SIDER_TEST_REPLICATION_DIRECTORY", &directory.0)
+                .env("SIDER_TEST_REPLICATION_POINT", point)
+                .env(
+                    "SIDER_TEST_REPLICATION_ROLE",
+                    if role == Role::Primary {
+                        "primary"
+                    } else {
+                        "replica"
+                    },
+                );
+            let mut child = process::OwnedChild::spawn(&mut command).unwrap();
+            let deadline = std::time::Instant::now() + timeout;
+            while !directory.0.join("paused").is_file() {
+                child.assert_alive().unwrap();
+                assert!(std::time::Instant::now() < deadline, "crash em {point}");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            child.terminate(timeout).unwrap();
+            let recovered = persistence::recover(config, StoreConfig::default(), clock()).unwrap();
+            if point == "replication_after_publish" {
+                assert_eq!(recovered.store.snapshot(), dataset());
+                assert_eq!(recovered.metadata.sequence, 30);
+                assert_eq!(
+                    recovered.metadata.replication,
+                    Some(ReplicationMetadata {
+                        role,
+                        epoch: [8; 16]
+                    })
+                );
+            } else {
+                assert_eq!(recovered.store.snapshot(), old);
+                assert_eq!(recovered.metadata.sequence, 1);
+                assert_eq!(recovered.metadata.replication, Some(before));
+            }
+            assert!(!std::fs::read_dir(&directory.0).unwrap().any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("replication-install-")
+            }));
         }
     }
 }
