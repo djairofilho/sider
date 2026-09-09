@@ -61,6 +61,12 @@ impl Transaction {
         if subscribed {
             return Ok(Action::Execute(command));
         }
+        if database.readonly() && command.writes_dataset() {
+            self.poison();
+            return Ok(Action::Reply(
+                crate::command::Reply::Error(crate::command::ExecutionError::ReadOnly).into(),
+            ));
+        }
         let result = match command {
             Command::Multi => {
                 if self.queue.is_some() {

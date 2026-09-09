@@ -124,6 +124,13 @@ tarefas pertencentes ao servidor se a future de supervisão for cancelada.
 
 ## Evolução
 
+A [replicação R09](replication.md) observa o escritor AOF global para numerar o
+histórico. Captura e assinatura usam a barreira de admissão no mesmo ponto; a rede
+transmite fora dela. A réplica publica uma geração AOF completa e troca os mapas
+sob exclusão global antes do ACK. `Runtime` expõe apenas papel, posição e estado
+da sessão por uma leitura curta, sem esperar por disco/rede e sem reter workers.
+Snapshots, lotes e canais continuam transportando `Bytes` e valores imutáveis.
+
 A base mantém dados em memória com workers independentes por shard. TTL, quota e
 strings adicionais estão implementados em R02; roteamento, filas e restrição
 multichave estão em R04. O escritor AOF global confirma o lote antes de aplicar

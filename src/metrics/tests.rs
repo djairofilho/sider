@@ -161,6 +161,7 @@ fn metrics_info_parser_filters_sections_without_retaining_binary_labels() {
         sections
     };
     assert_eq!(decode(&[b"INFO"]), InfoSections::ALL);
+    assert!(decode(&[b"INFO", b"RePlIcAtIoN"]).contains(InfoSections::REPLICATION));
     assert_eq!(decode(&[b"info", b"all", b"everything"]), InfoSections::ALL);
     let selected = decode(&[b"iNfO", b"MeMoRy", b"memory", b"\xff\0secret"]);
     let output = Metrics::default().render(selected);
@@ -176,6 +177,86 @@ fn metrics_info_parser_filters_sections_without_retaining_binary_labels() {
         Store::new().execute(Command::Info(selected)),
         Reply::Error(command::ExecutionError::ConnectionOnly)
     );
+}
+
+#[test]
+fn metrics_replication_reports_only_observed_positions_and_guards_stale_sessions() {
+    use crate::replication::{Cursor, journal};
+    let metrics = Metrics::default();
+    let read = || fields(&metrics.render(InfoSections::from_names([b"replication".as_slice()])));
+    assert_eq!(
+        read(),
+        BTreeMap::from([("replication_enabled".into(), "0".into())])
+    );
+    let runtime = Runtime::new(
+        Role::Replica,
+        Cursor {
+            epoch: [0; 16],
+            sequence: 0,
+        },
+    );
+    metrics.replication(runtime.clone());
+    assert_eq!(read()["replication_epoch_known"], "0");
+    assert!(!read().contains_key("replication_applied_sequence"));
+    assert!(!read().contains_key("replication_lag_batches"));
+    let generation = runtime.begin_session();
+    runtime.applied(Cursor {
+        epoch: [1; 16],
+        sequence: 7,
+    });
+    runtime.connected(generation, 10, true);
+    assert_eq!(read()["replication_lag_batches"], "3");
+    assert_eq!(read()["replication_full_syncs_total"], "1");
+    runtime.applied(Cursor {
+        epoch: [1; 16],
+        sequence: 11,
+    });
+    assert_eq!(read()["replication_lag_known"], "0");
+    assert!(
+        !read().contains_key("replication_lag_batches"),
+        "não saturar uma observação defasada em zero"
+    );
+    runtime.disconnected(generation);
+    assert_eq!(read()["replication_connected"], "0");
+    assert_eq!(read()["replication_upstream_sequence"], "10");
+    let next = runtime.begin_session();
+    runtime.connected(next, 11, false);
+    runtime.disconnected(generation);
+    runtime.upstream_head(generation, 999);
+    assert_eq!(read()["replication_connected"], "1");
+    assert_eq!(read()["replication_lag_batches"], "0");
+    assert_eq!(read()["replication_partial_syncs_total"], "1");
+    assert_eq!(read()["replication_reconnects_total"], "2");
+    let cursor = Cursor {
+        epoch: [2; 16],
+        sequence: 11,
+    };
+    let journal = journal::Journal::new(
+        cursor,
+        journal::Limits {
+            max_bytes: 100,
+            max_batches: 2,
+            max_frame_bytes: 100,
+        },
+    )
+    .unwrap();
+    runtime.primary(cursor, journal.clone());
+    journal
+        .publish(12, Bytes::from_static(b"resolved-frame"))
+        .unwrap();
+    let primary = read();
+    assert_eq!(primary["replication_role"], "primary");
+    assert_eq!(primary["replication_head_sequence"], "12");
+    assert_eq!(primary["replication_backlog_bytes"], "14");
+    assert_eq!(primary["replication_backlog_batches"], "1");
+    assert_eq!(primary["replication_oldest_sequence"], "12");
+    for absent in [
+        "replication_applied_sequence",
+        "replication_upstream_sequence",
+        "replication_lag_batches",
+    ] {
+        assert!(!primary.contains_key(absent));
+    }
 }
 
 #[tokio::test(start_paused = true)]

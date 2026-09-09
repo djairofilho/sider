@@ -321,6 +321,12 @@ fn metrics_diagnose_validates_without_binding_or_touching_aof_or_readiness() {
         .arg("--diagnose")
         .env("SIDER_ADDR", listener.local_addr().unwrap().to_string())
         .env("SIDER_AOF_DIR", &missing_aof)
+        .env(
+            "SIDER_REPLICATION_ADDR",
+            listener.local_addr().unwrap().to_string(),
+        )
+        .env("SIDER_REPLICA_OF", "127.0.0.1:1")
+        .env("SIDER_REPLICATION_READY_FILE", &ready)
         .env("SIDER_READY_FILE", &ready);
     let mut process = ChildProcess::start(&mut command, directory);
     let output = process.wait();
@@ -329,6 +335,11 @@ fn metrics_diagnose_validates_without_binding_or_touching_aof_or_readiness() {
     assert!(stdout.contains("diagnostic_scope:configuration_only"));
     assert!(stdout.contains("aof_configured:1"));
     assert!(stdout.contains("ready_file_enabled:1"));
+    assert!(stdout.contains("replication_configured:1"));
+    assert!(stdout.contains("replication_upstream_configured:1"));
+    assert!(stdout.contains("replication_ready_file_enabled:1"));
+    assert!(stdout.contains("replication_backlog_limit_batches:4096"));
+    assert!(!stdout.contains("127.0.0.1:1\r\n"));
     assert!(!stdout.contains("secret-aof-directory"));
     assert!(!stdout.contains(&process.directory.0.to_string_lossy().to_string()));
     assert!(!missing_aof.exists());

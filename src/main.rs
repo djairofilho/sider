@@ -3,7 +3,6 @@
 use std::process::ExitCode;
 
 use sider::ServerConfig;
-use sider::readiness::ReadyFile;
 use sider::server;
 
 fn main() -> ExitCode {
@@ -103,11 +102,6 @@ async fn run(config: ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
     if !address.ip().is_loopback() {
         tracing::warn!("endereço fora de loopback; servidor sem autenticação ou TLS");
     }
-    let _ready = config
-        .ready_file
-        .as_ref()
-        .map(|path| ReadyFile::create(path, address))
-        .transpose()?;
     server::serve_prepared(listener, config, shutdown, prepared).await?;
     Ok(())
 }

@@ -293,6 +293,12 @@ o uso desse contrato para os binários realmente extraídos dos pacotes.
 
 ## Código e validação
 
+O listener interno de [replicação](replication.md) possui limites e prazos próprios.
+`SIDER_REPLICATION_READY_FILE` publica seu endereço real em um JSON separado com
+os mesmos campos `pid`, `host` e `port`. O arquivo RESP mantém exatamente os três
+campos originais. Ambos usam `ReadyFile`, após configurar o papel durável e iniciar
+os workers; o consumidor da porta interna consulta status pelo protocolo próprio.
+
 | Arquivo | Responsabilidade |
 | --- | --- |
 | [src/config.rs](../src/config.rs) | Padrões, parse injetável e validação |

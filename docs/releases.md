@@ -137,7 +137,7 @@ O smoke executa o binário extraído com `SIDER_ADDR=127.0.0.1:0` e
 `SIDER_READY_FILE`; confere PID, loopback, porta, `--version`, PING e operações TCP.
 O servidor publica prontidão atomicamente. A [imagem Docker](docker.md) precisa
 executar, ser exportada e restaurada; nenhum arquivo fictício conta como imagem
-testada. O runner copia os dois executáveis do pacote Linux validado e preserva
+testada. O runner copia os quatro executáveis do pacote Linux validado e preserva
 hashes e Image ID antes e depois de `docker load`.
 
 ## Conjunto imutável de arquivos

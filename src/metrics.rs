@@ -14,7 +14,8 @@ use bytes::Bytes;
 use crate::{
     ServerConfig,
     command::InfoSections,
-    persistence::{AofDiagnosticsHandle, SyncPolicy},
+    persistence::{AofDiagnosticsHandle, Role, SyncPolicy},
+    replication::state::Runtime,
     resp::Frame,
 };
 
@@ -64,6 +65,7 @@ struct Inner {
     config: Mutex<Option<ServerConfig>>,
     bound_port: AtomicU64,
     aof: Mutex<Option<AofDiagnosticsHandle>>,
+    replication: Mutex<Option<Runtime>>,
 }
 struct QueueStats {
     used: AtomicUsize,
@@ -95,6 +97,7 @@ impl Metrics {
             config: Mutex::new(None),
             bound_port: AtomicU64::new(0),
             aof: Mutex::new(None),
+            replication: Mutex::new(None),
         }))
     }
     pub(crate) fn add(&self, counter: Counter, count: u64) {
@@ -131,6 +134,13 @@ impl Metrics {
     }
     pub(crate) fn aof(&self, source: AofDiagnosticsHandle) {
         *self.0.aof.lock().expect("observador AOF envenenado") = Some(source);
+    }
+    pub(crate) fn replication(&self, source: Runtime) {
+        *self
+            .0
+            .replication
+            .lock()
+            .expect("observador de replicação envenenado") = Some(source);
     }
     pub(crate) fn pubsub(&self, channels: usize, subscribers: usize, subscriptions: usize) {
         self.0
@@ -311,6 +321,68 @@ impl Metrics {
                 number!("aof_last_error", state.last_error.unwrap_or("none"));
             }
         }
+        if sections.contains(InfoSections::REPLICATION) {
+            let source = self
+                .0
+                .replication
+                .lock()
+                .expect("observador de replicação envenenado")
+                .clone();
+            text.push_str("# Replication\r\n");
+            number!("replication_enabled", u8::from(source.is_some()));
+            if let Some(source) = source {
+                let state = source.status();
+                let replica = state.role == Role::Replica;
+                let epoch_known = state.applied.epoch != [0; 16];
+                number!(
+                    "replication_role",
+                    if replica { "replica" } else { "primary" }
+                );
+                number!("replication_connected", u8::from(state.connected));
+                number!("replication_epoch_known", u8::from(epoch_known));
+                if epoch_known {
+                    text.push_str("replication_epoch:");
+                    for byte in state.applied.epoch {
+                        write!(text, "{byte:02x}").unwrap();
+                    }
+                    text.push_str("\r\n");
+                    if replica {
+                        number!("replication_applied_sequence", state.applied.sequence);
+                    } else {
+                        // O journal avança no append, antes de aplicar no Store.
+                        number!("replication_head_sequence", state.applied.sequence);
+                    }
+                }
+                let lag = if replica && state.connected && epoch_known {
+                    state
+                        .upstream_sequence
+                        .and_then(|head| head.checked_sub(state.applied.sequence))
+                } else {
+                    None
+                };
+                number!("replication_lag_known", u8::from(lag.is_some()));
+                if let Some(lag) = lag {
+                    number!("replication_lag_batches", lag);
+                }
+                if replica && let Some(sequence) = state.upstream_sequence {
+                    number!("replication_upstream_sequence", sequence);
+                }
+                number!("replication_full_syncs_total", state.full_syncs);
+                number!("replication_partial_syncs_total", state.partial_syncs);
+                number!("replication_reconnects_total", state.reconnects);
+                if !replica
+                    && let Some(journal) = source.journal()
+                    && let Ok(backlog) = journal.status()
+                    && backlog.head.epoch == state.applied.epoch
+                {
+                    number!("replication_backlog_bytes", backlog.bytes);
+                    number!("replication_backlog_batches", backlog.batches);
+                    if let Some(sequence) = backlog.oldest_sequence {
+                        number!("replication_oldest_sequence", sequence);
+                    }
+                }
+            }
+        }
         if sections.contains(InfoSections::CONFIG)
             && let Some(config) = self
                 .0
@@ -413,6 +485,39 @@ pub(crate) fn configuration(config: &ServerConfig) -> String {
             aof.limits.max_record_bytes, aof.max_delta_bytes, aof.compact_after_bytes
         )
         .unwrap();
+    }
+    writeln!(
+        text,
+        "replication_configured:{}\r",
+        u8::from(config.replication.is_some())
+    )
+    .unwrap();
+    if let Some(replication) = &config.replication {
+        writeln!(
+            text,
+            "replication_upstream_configured:{}\r\nreplication_ready_file_enabled:{}\r",
+            u8::from(replication.upstream.is_some()),
+            u8::from(replication.ready_file.is_some())
+        )
+        .unwrap();
+        for (name, value) in [
+            ("replication_backlog_limit_bytes", replication.backlog_bytes),
+            (
+                "replication_backlog_limit_batches",
+                replication.backlog_batches,
+            ),
+            ("replication_max_connections", replication.max_connections),
+        ] {
+            writeln!(text, "{name}:{value}\r").unwrap();
+        }
+        for (name, value) in [
+            ("replication_frame_timeout_ms", replication.frame_timeout),
+            ("replication_sync_timeout_ms", replication.sync_timeout),
+            ("replication_reconnect_min_ms", replication.reconnect_min),
+            ("replication_reconnect_max_ms", replication.reconnect_max),
+        ] {
+            writeln!(text, "{name}:{}\r", value.as_millis()).unwrap();
+        }
     }
     text
 }

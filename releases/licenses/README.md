@@ -9,8 +9,8 @@ Distribua este diretório completo junto do `LICENSE` próprio do Sider.
 
 ## Conteúdo
 
-- 27 pacotes do grafo `normal` de Cargo, incluindo dependências de proc-macros.
-  A união dos alvos Windows MSVC e Linux GNU contém 19 pacotes sem essas arestas.
+- 40 pacotes do grafo `normal` de Cargo, incluindo dependências de proc-macros.
+  A união dos alvos Windows MSVC e Linux GNU contém 32 pacotes sem essas arestas.
 - Textos integrais `LICENSE`, `LICENSE-*` e equivalentes de cada pacote em `crates/`.
   Alternativas MIT/Apache e o texto Unicode de `unicode-ident` foram preservados.
 - Aviso aninhado `tracing-core-0.1.36/src/spin/LICENSE`, preservado por precaução,
@@ -36,7 +36,7 @@ All rights reserved.
 
 ## Integridade e atualização
 
-Os 54 arquivos somam 514.396 bytes. Em 53 deles, origem e cópia são idênticas.
+Os 79 arquivos somam 633.554 bytes. Em 78 deles, origem e cópia são idênticas.
 Somente `COPYRIGHT-library.html` recebeu um LF final: a cópia equivale exatamente
 à origem mais esse byte. `source_sha256`/`source_bytes` registram a origem;
 `sha256`/`bytes` registram a cópia. Os seis arquivos Rust tiveram hashes de origem

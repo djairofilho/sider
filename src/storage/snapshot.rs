@@ -26,7 +26,9 @@ pub enum SnapshotError {
 }
 
 impl DbHandle {
-    async fn freeze(&self) -> Result<(OwnedRwLockWriteGuard<()>, Vec<Mutation>), DbError> {
+    pub(super) async fn freeze(
+        &self,
+    ) -> Result<(OwnedRwLockWriteGuard<()>, Vec<Mutation>), DbError> {
         if *self.shutdown.borrow() {
             return Err(DbError::ShuttingDown);
         }

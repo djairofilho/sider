@@ -111,7 +111,7 @@ Cada conexão processa os comandos em sequência, com um único pedido em voo.
 | Handshake e autenticação | Sem `AUTH`, `HELLO`, `COMMAND` ou `CLIENT`; clientes que exigem esses comandos não estarão cobertos |
 | Tipos de dados | Strings, hashes, listas, sets e sorted sets no subconjunto documentado; todos usam payloads binários |
 | Expiração | EXPIRE e PEXPIRE básicos; sem NX, XX, GT ou LT; monotônico durante execução |
-| Persistência e replicação | AOF binário próprio e snapshots globais; sem replicação ou Redis Cluster nesta etapa |
+| Persistência e replicação | AOF binário próprio e snapshots globais; replicação assíncrona Sider → Sider da mesma versão/configuração, sem replicação Redis ou Redis Cluster |
 | Memória do dataset | Quota lógica própria com rejeição atômica, sem eviction; não reproduz o maxmemory/RSS do Redis |
 | Uso operacional | Protótipo para desenvolvimento local e testes, com endereço padrão em loopback |
 
@@ -167,8 +167,10 @@ Com `SIDER_SHARDS` maior que um, operações multichave precisam do mesmo shard,
 com rejeição `CROSSSLOT` antes de qualquer efeito. Essa divergência intencional
 do Redis standalone é verificada em testes nativos/TCP; hash tags permitem
 colocalizar chaves, conforme o [guia de shards](sharding.md).
-Replicação será assíncrona entre instâncias
-Sider da mesma versão/configuração, sem compatibilidade com replicação Redis.
+Replicação R09 usa sincronização completa e incremental, réplicas somente leitura
+e promoção manual durável. Os testes com processos reais cobrem tipos, TTL, lotes,
+reconexão, perda de histórico, crash e promoção atrasada. O
+[guia de replicação](replication.md) detalha os limites e a possível perda assíncrona.
 
 Para coleções sem ordem garantida, como `SMEMBERS`, a suíte compara conteúdo
 normalizado. Respostas ordenadas, como `LRANGE` e `ZRANGE`, preservam a ordem na

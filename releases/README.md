@@ -1,6 +1,8 @@
 # Executar o Sider
 
-Este pacote contém o servidor Sider, este README, a licença MIT do código próprio
+Este pacote contém o servidor Sider, as CLIs `sider-backup`, `sider-aof-migrate`
+e `sider-replica`,
+este README, a licença MIT do código próprio
 e os avisos de terceiros no diretório `licenses/`, com seu inventário de hashes.
 Confira a versão com `--version`. A release também fornece `SHA256SUMS`,
 `release-manifest.json`, notas e evidências de validação.
@@ -49,6 +51,33 @@ Também atende [hashes, listas e sets](../docs/collections.md),
 [sorted sets](../docs/sorted-sets.md) e [Pub/Sub](../docs/pubsub.md).
 Chaves e valores preservam bytes arbitrários. Não há modo inline ou RESP3.
 Clientes que enviam comandos de inicialização adicionais podem ser incompatíveis.
+
+## Backup e administração
+
+As CLIs operacionais estão no pacote e não exigem Cargo ou checkout. Consulte
+`./sider-backup --help`, `./sider-aof-migrate --help` e `./sider-replica --help`.
+No Windows, use `.\` e acrescente `.exe` ao nome do executável.
+
+O primário precisa de `SIDER_AOF_DIR` e do listener interno em
+`SIDER_REPLICATION_ADDR`, separado do endereço RESP. Mantenha-o em loopback ou
+rede privada controlada. Com o listener em `127.0.0.1:6381`:
+
+```sh
+./sider-replica --addr 127.0.0.1:6381 --status
+./sider-backup export --source 127.0.0.1:6381 --destination backup-novo --source-sha SHA_COMPLETO
+./sider-backup verify --source backup-novo --shards 1 --routing 1
+./sider-backup restore --source backup-novo --destination dados-novos --shards 1 --routing 1
+```
+
+Informe o SHA de 40 dígitos do manifesto de origem e o número real de shards.
+Backup e restauração recusam destino existente; a restauração confere checksums,
+formato, layout e quota. TTL mantém o vencimento absoluto, consumindo o tempo
+transcorrido. Inicie os dados restaurados em uma instância isolada com a mesma
+configuração e confira o resultado antes de utilizá-la.
+
+`sider-replica --addr IP:PORTA --promote` exige loopback e promove explicitamente
+a réplica após interromper a sessão upstream. Não há eleição ou failover automático.
+O [guia de backup](../docs/backup.md) detalha limites e evidências.
 
 ## Limites e segurança
 

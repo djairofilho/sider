@@ -1,6 +1,7 @@
 # Imagem privada de distribuição
 
-A imagem Linux amd64 contém os mesmos executáveis `sider` e `sider-aof-migrate`
+A imagem Linux amd64 contém os executáveis `sider`, `sider-aof-migrate`,
+`sider-backup` e `sider-replica`
 do pacote Linux validado. O [Dockerfile](../deploy/Dockerfile) copia os binários;
 não executa Cargo nem instala pacotes. A base Ubuntu 24.04 é fixada por digest,
 compatível com o ambiente usado para compilar o pacote GNU.
@@ -14,11 +15,12 @@ O número de shards persistido precisa coincidir com os próximos inícios.
 
 Siga o [guia de pacotes](packages.md) e preserve evidências do SHA limpo, build,
 hashes, empacotamento, extração e smoke. A imagem recebe o diretório **extraído**
-com os dois executáveis, `README.md`, `LICENSE` e a árvore `licenses/`.
+com os quatro executáveis, `README.md`, `LICENSE` e a árvore `licenses/`.
 
-As labels OCI registram versão e SHA de origem; `io.sider.binary.sha256` e
-`io.sider.migrator.sha256` registram os hashes dos executáveis. O build confere
-hashes, `--version` e ajuda do migrador. SHA é uma declaração do empacotador,
+As labels OCI registram versão e SHA de origem; `io.sider.binary.sha256`,
+`io.sider.migrator.sha256`, `io.sider.backup.sha256` e `io.sider.replica.sha256`
+registram os hashes dos executáveis. O build confere hashes, versões e ajuda
+das CLIs. SHA é uma declaração do empacotador,
 comprovada pelo procedimento de build; o runner não deduz o commit dos bytes
 de um executável sem essa informação embutida.
 
@@ -39,6 +41,8 @@ export SIDER_DOCKER_OUTPUT_DIR=/dados/ensaio-docker-novo
 export SIDER_DOCKER_SOURCE_SHA=SHA_COMPLETO_DO_BUILD
 export SIDER_DOCKER_BINARY_SHA256=SHA256_REGISTRADO_DO_SIDER
 export SIDER_DOCKER_MIGRATOR_SHA256=SHA256_REGISTRADO_DO_MIGRADOR
+export SIDER_DOCKER_BACKUP_SHA256=SHA256_REGISTRADO_DO_BACKUP
+export SIDER_DOCKER_REPLICA_SHA256=SHA256_REGISTRADO_DA_CLI_REPLICA
 cargo test --locked --test docker_distribution -- --ignored --exact exported_image_runs_after_load --nocapture
 ```
 
@@ -47,7 +51,7 @@ os binários, recusa links e constrói a imagem. Executa `docker save`, compacta
 com `gzip -n -6`, remove sua tag temporária e carrega o `.tar.gz`. Compara Image
 ID, plataforma, usuário, sinal, labels e hashes dentro da imagem recarregada.
 
-Os oito cenários verificam exportação/recarga, hashes, versão/migrador, UID/PID 1,
+Os oito cenários verificam exportação/recarga, hashes, versões/CLIs, UID/PID 1,
 TCP binário, AOF/TTL em volume reutilizado por outro contêiner, SIGTERM e
 configuração inválida. O rootfs é somente leitura e o contêiner não recebe
 capabilities adicionais. O teste confirma término normal e remove apenas seus

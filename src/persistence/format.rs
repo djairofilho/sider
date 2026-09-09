@@ -5,7 +5,7 @@ use std::io::{self, Read, Write};
 use bytes::Bytes;
 use thiserror::Error;
 
-use super::DurableLayout;
+use super::{DurableLayout, ReplicationMetadata, Role};
 use crate::storage::{Mutation, MutationOrigin, ResolvedBatch, Value};
 
 pub const MAGIC: &[u8; 8] = b"SIDERAOF";
@@ -13,6 +13,8 @@ pub const VERSION: u32 = 1;
 pub const HEADER_BYTES: usize = 24;
 pub const LAYOUT_VERSION: u32 = 2;
 pub const LAYOUT_HEADER_BYTES: usize = 32;
+pub const REPLICATION_VERSION: u32 = 3;
+pub const REPLICATION_HEADER_BYTES: usize = 52;
 pub const MAX_RECORD_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +51,7 @@ pub struct Header {
     pub layout: DurableLayout,
     pub format_version: u32,
     pub bytes: usize,
+    pub replication: Option<ReplicationMetadata>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,19 +91,42 @@ pub fn read_header(mut input: impl Read) -> Result<u64, FormatError> {
 
 /// Novos arquivos registram a configuração; `write_header` conserva o encoder legado v1.
 pub fn write_header_with_layout(
+    output: impl Write,
+    sequence: u64,
+    layout: DurableLayout,
+) -> Result<(), FormatError> {
+    write_header_with_replication(output, sequence, layout, None)
+}
+
+/// Metadados de papel pertencem à mesma publicação atômica que o dataset.
+pub fn write_header_with_replication(
     mut output: impl Write,
     sequence: u64,
     layout: DurableLayout,
+    replication: Option<ReplicationMetadata>,
 ) -> Result<(), FormatError> {
     layout
         .validate()
         .map_err(|_| FormatError::Corrupt("configuração de shards"))?;
     let mut header = Vec::with_capacity(LAYOUT_HEADER_BYTES);
     header.extend_from_slice(MAGIC);
-    header.extend_from_slice(&LAYOUT_VERSION.to_le_bytes());
+    let version = if replication.is_some() {
+        REPLICATION_VERSION
+    } else {
+        LAYOUT_VERSION
+    };
+    header.extend_from_slice(&version.to_le_bytes());
     header.extend_from_slice(&sequence.to_le_bytes());
     header.extend_from_slice(&layout.shard_count.to_le_bytes());
     header.extend_from_slice(&layout.routing_version.to_le_bytes());
+    if let Some(replication) = replication {
+        header.push(match replication.role {
+            Role::Primary => 1,
+            Role::Replica => 2,
+        });
+        header.extend_from_slice(&[0; 3]);
+        header.extend_from_slice(&replication.epoch);
+    }
     header.extend_from_slice(&checksum(&header).to_le_bytes());
     output.write_all(&header)?;
     Ok(())
@@ -121,6 +147,7 @@ pub fn read_header_with_layout(mut input: impl Read) -> Result<Header, FormatErr
     let bytes = match version {
         VERSION => HEADER_BYTES,
         LAYOUT_VERSION => LAYOUT_HEADER_BYTES,
+        REPLICATION_VERSION => REPLICATION_HEADER_BYTES,
         _ => return Err(FormatError::Version(version)),
     };
     let mut header = vec![0; bytes];
@@ -146,11 +173,27 @@ pub fn read_header_with_layout(mut input: impl Read) -> Result<Header, FormatErr
     layout
         .validate()
         .map_err(|_| FormatError::Corrupt("configuração de shards"))?;
+    let replication = if version == REPLICATION_VERSION {
+        if header[29..32] != [0; 3] {
+            return Err(FormatError::Corrupt("reservado da replicação"));
+        }
+        Some(ReplicationMetadata {
+            role: match header[28] {
+                1 => Role::Primary,
+                2 => Role::Replica,
+                _ => return Err(FormatError::Corrupt("papel da replicação")),
+            },
+            epoch: header[32..48].try_into().unwrap(),
+        })
+    } else {
+        None
+    };
     Ok(Header {
         sequence: u64::from_le_bytes(header[12..20].try_into().unwrap()),
         layout,
         format_version: version,
         bytes,
+        replication,
     })
 }
 
