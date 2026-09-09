@@ -61,6 +61,8 @@ fn family_receipt_requires_its_gate_in_the_plan() {
         "transactions",
         "docker",
         "replication",
+        "soak",
+        "benchmarks",
     ] {
         let fixture = Fixture::new();
         assert!(fixture.context(gate).is_err());

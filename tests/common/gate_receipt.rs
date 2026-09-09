@@ -91,6 +91,8 @@ impl GateContext {
                 | "transactions"
                 | "docker"
                 | "replication"
+                | "soak"
+                | "benchmarks"
         ) {
             return Err("gate desconhecido ou sem runner implementado".into());
         }
