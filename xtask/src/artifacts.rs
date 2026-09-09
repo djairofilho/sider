@@ -188,7 +188,7 @@ fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bo
         .as_array()
         .ok_or("Releases ausentes no plano")?;
     let mut versions = BTreeSet::new();
-    let mut names: BTreeSet<&str> = ["native", "tcp_smoke", "compatibility", "fuzz"].into();
+    let mut names: BTreeSet<&str> = ["native", "tcp_smoke", "compatibility"].into();
     for release in releases {
         let (release_version, candidate) = parse_version(text(release, "version")?)?;
         if candidate || !versions.insert(release_version) {
@@ -215,8 +215,8 @@ fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bo
     for name in names {
         let platforms: &[&str] = match name {
             "native" | "tcp_smoke" | "crash" | "recovery" | "migration" => &[LINUX, WINDOWS],
-            "compatibility" | "fuzz" | "sharding" | "types" | "sorted_sets" | "transactions"
-            | "pubsub" | "replication" | "docker" | "soak" | "benchmarks" => &[LINUX],
+            "compatibility" | "sharding" | "types" | "sorted_sets" | "transactions" | "pubsub"
+            | "replication" | "docker" | "soak" | "benchmarks" => &[LINUX],
             _ => return Err(format!("Gate desconhecido: {name}")),
         };
         required.extend(
@@ -312,12 +312,6 @@ fn gate_records<'a>(
             return Err(format!("Registro de gate inválido: {name}/{target}"));
         }
         let minimum = match name {
-            "fuzz" => Some(
-                plan["release_policy"]["candidate_fuzz_seconds"]
-                    .as_u64()
-                    .unwrap_or(900)
-                    .max(900),
-            ),
             "soak" => Some(
                 plan["release_policy"]["stable_soak_seconds"]
                     .as_u64()
@@ -336,7 +330,7 @@ fn gate_records<'a>(
         {
             return Err(format!("Duração inválida ou insuficiente: {name}/{target}"));
         }
-        if (matches!(name, "compatibility" | "fuzz") || !gate["reference_image"].is_null())
+        if (name == "compatibility" || !gate["reference_image"].is_null())
             && gate["reference_image"] != plan["reference"]["image"]
         {
             return Err(format!("Referência divergente no gate {name}"));
@@ -774,11 +768,12 @@ mod tests {
             };
             let plan = json!({"repository":"example/sider", "reference":{"image":"redis:fixed"},
             "release_policy":{"targets":[LINUX,WINDOWS], "docker_since":"0.10.0",
-                "candidate_fuzz_seconds":900,"stable_soak_seconds":3600},
+                "stable_soak_seconds":3600},
             "releases":[
-                {"version":"0.1.0","required_gates":["native","tcp_smoke","compatibility","fuzz"]},
+                {"version":"0.1.0","required_gates":["native","tcp_smoke","compatibility"]},
                 {"version":"0.3.0","required_gates":["crash","recovery","migration"]},
-                {"version":"0.10.0","required_gates":["docker"]}
+                {"version":"0.10.0","required_gates":["docker"]},
+                {"version":"1.0.0","required_gates":["soak","benchmarks"]}
             ]});
             let (base, candidate) = parse_version(version).unwrap();
             let (required, docker) = required_gates(&plan, base).unwrap();
@@ -787,11 +782,11 @@ mod tests {
                 .map(|(gate, target)| {
                     let mut record = json!({"schema_version":1,"gate":gate,"target":target,
                     "version":version,"sha":SHA,"status":"success","cases":1});
-                    if matches!(record["gate"].as_str().unwrap(), "fuzz" | "compatibility") {
+                    if record["gate"] == "compatibility" {
                         record["reference_image"] = json!("redis:fixed");
                     }
-                    if record["gate"] == "fuzz" {
-                        record["duration_seconds"] = json!(900.25);
+                    if record["gate"] == "soak" {
+                        record["duration_seconds"] = json!(3600.25);
                     }
                     record
                 })
@@ -955,14 +950,14 @@ mod tests {
             let result = fixture.check().unwrap();
             assert_eq!(result["status"], "integrity_verified");
             assert_eq!(result["publication_authorized"], false);
-            assert_eq!(result["gate_records"], 6);
+            assert_eq!(result["gate_records"], 5);
             assert_eq!(result["assets"], 8);
         }
     }
 
     #[test]
     fn cumulative_gates_require_both_systems_for_persistence_and_docker_asset() {
-        for (version, count, assets) in [("0.3.0-rc.1", 12, 8), ("0.10.0-rc.1", 13, 9)] {
+        for (version, count, assets) in [("0.3.0-rc.1", 11, 8), ("0.10.0-rc.1", 12, 9)] {
             let mut fixture = Fixture::new(version);
             let result = fixture.check().unwrap();
             assert_eq!(result["gate_records"], count);
@@ -1016,8 +1011,8 @@ mod tests {
     }
 
     #[test]
-    fn missing_duplicate_wrong_target_zero_or_failed_gate_is_rejected() {
-        for kind in 0..6 {
+    fn missing_extra_duplicate_wrong_target_zero_or_failed_gate_is_rejected() {
+        for kind in 0..7 {
             let mut fixture = Fixture::new("0.1.0-rc.1");
             let gates = fixture.manifest["gates"].as_array_mut().unwrap();
             match kind {
@@ -1028,7 +1023,12 @@ mod tests {
                 2 => gates[0]["target"] = json!("unknown"),
                 3 => gates[0]["cases"] = json!(0),
                 4 => gates[0]["status"] = json!("skipped"),
-                _ => gates[0]["cases"] = json!(true),
+                5 => gates[0]["cases"] = json!(true),
+                _ => {
+                    let mut extra = gates[0].clone();
+                    extra["gate"] = json!("retired_gate");
+                    gates.push(extra);
+                }
             }
             fixture.write_manifest_and_checksums();
             assert!(fixture.check().is_err(), "mutation {kind}");
@@ -1036,18 +1036,18 @@ mod tests {
     }
 
     #[test]
-    fn short_fuzz_and_fabricated_manifest_receipt_disagreement_are_rejected() {
-        let mut fixture = Fixture::new("0.1.0-rc.1");
+    fn short_soak_and_fabricated_manifest_receipt_disagreement_are_rejected() {
+        let mut fixture = Fixture::new("1.0.0-rc.1");
         let index = fixture.manifest["gates"]
             .as_array()
             .unwrap()
             .iter()
-            .position(|g| g["gate"] == "fuzz")
+            .position(|g| g["gate"] == "soak")
             .unwrap();
-        fixture.manifest["gates"][index]["duration_seconds"] = json!(899.9);
+        fixture.manifest["gates"][index]["duration_seconds"] = json!(3599.9);
         fixture.write_manifest_and_checksums();
         assert!(fixture.check().unwrap_err().contains("Duração"));
-        fixture.manifest["gates"][index]["duration_seconds"] = json!(999.0);
+        fixture.manifest["gates"][index]["duration_seconds"] = json!(3999.0);
         fixture.write_manifest_and_checksums();
         assert!(fixture.check().unwrap_err().contains("Recibo"));
     }

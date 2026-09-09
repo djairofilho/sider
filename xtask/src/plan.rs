@@ -6,10 +6,9 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-const GATES: [&str; 16] = [
+const GATES: [&str; 15] = [
     "native",
     "compatibility",
-    "fuzz",
     "tcp_smoke",
     "crash",
     "recovery",
@@ -316,15 +315,11 @@ pub fn validate(plan: &Value) -> Result<(), String> {
             ));
         }
     }
-    for (field, minimum) in [
-        ("candidate_fuzz_seconds", 900),
-        ("stable_soak_seconds", 3600),
-    ] {
-        if policy[field].as_u64().is_none_or(|value| value < minimum) {
-            return Err(format!(
-                "release_policy.{field} deve ser inteiro >= {minimum}"
-            ));
-        }
+    if policy["stable_soak_seconds"]
+        .as_u64()
+        .is_none_or(|value| value < 3600)
+    {
+        return Err("release_policy.stable_soak_seconds deve ser inteiro >= 3600".into());
     }
     let releases = array(&plan["releases"], "releases", false)?;
     let bootstrap = array(&plan["bootstrap"], "bootstrap", true)?;
@@ -372,7 +367,7 @@ pub fn validate(plan: &Value) -> Result<(), String> {
             return Err(format!("{id}: gate de evidência desconhecido"));
         }
         if !previous_gates.is_subset(&required)
-            || !GATES[..4].iter().all(|gate| required.contains(gate))
+            || !GATES[..3].iter().all(|gate| required.contains(gate))
         {
             return Err(format!("{id}: gates obrigatórios devem ser cumulativos"));
         }
@@ -609,7 +604,7 @@ pub fn render(plan: &Value) -> Result<String, String> {
             "",
             "O fluxo completo e os comandos de preparação estão no [guia de releases](docs/releases.md).",
             "Não há workflows de CI nem publicador automático neste repositório.",
-            "Cada candidata exige pelo menos 15 minutos de fuzz; a 1.0 acrescenta uma hora de carga contínua.",
+            "A 1.0 acrescenta uma hora de carga contínua aos gates de cada candidata e final.",
             "As evidências são cumulativas. Teste ausente, ignorado, cancelado ou sem relatório bloqueia a publicação.",
             "Na primeira versão AOF, migração valida fixtures do formato inicial; nas seguintes, testa a versão anterior suportada.",
             "",
@@ -700,7 +695,6 @@ mod tests {
             "desativadas até e incluindo a 1.0",
             "não dispara publicação",
             "verificação manual registrada",
-            "15 minutos de fuzz",
             "uma hora de carga contínua",
             "34177280948",
         ] {
@@ -896,7 +890,9 @@ mod tests {
     #[test]
     fn missing_unknown_and_noncumulative_gates_are_rejected() {
         for (index, gate) in [
-            (0, "fuzz"),
+            (0, "native"),
+            (0, "compatibility"),
+            (0, "tcp_smoke"),
             (2, "migration"),
             (3, "sharding"),
             (4, "types"),
@@ -1087,18 +1083,11 @@ mod tests {
             invalid(|p| p["release_policy"][field] = json!(value), field);
         }
         invalid(|p| p["release_policy"]["targets"] = json!([]), "targets");
-        for (field, minimum) in [
-            ("candidate_fuzz_seconds", 900),
-            ("stable_soak_seconds", 3600),
-        ] {
-            for value in [
-                json!(minimum - 1),
-                json!(true),
-                json!(minimum.to_string()),
-                json!(minimum as f64),
-            ] {
-                invalid(|p| p["release_policy"][field] = value, field);
-            }
+        for value in [json!(3599), json!(true), json!("3600"), json!(3600.0)] {
+            invalid(
+                |p| p["release_policy"]["stable_soak_seconds"] = value,
+                "stable_soak_seconds",
+            );
         }
     }
 

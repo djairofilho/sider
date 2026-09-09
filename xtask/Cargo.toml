@@ -11,7 +11,7 @@ serde_json = "1"
 sha2 = "0.10"
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 
-# Tooling stays outside the product and fuzz dependency graphs.
+# Tooling stays outside the product dependency graph.
 [workspace]
 members = ["."]
 

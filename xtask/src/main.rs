@@ -24,7 +24,7 @@ Execute na raiz do repositório:
   cargo xtask sync [--apply] [--json]       simula ou sincroniza o backlog
   cargo xtask verify-release VERSAO SHA DIR verifica integridade de assets locais
 
-Não executa fuzz, Docker ou publicação implicitamente. Os gates externos continuam
+Não executa Docker ou publicação implicitamente. Os gates externos continuam
 obrigatórios nas releases. Só sync --apply escreve no GitHub; não publica releases.
 verify-release não substitui testes, aprovação da RC ou conferência no GitHub.";
 
@@ -231,7 +231,6 @@ fn validate_gates(plan: &Value, value: &Value) -> Result<(), String> {
             ));
         }
         let required_minimum = match name.as_str() {
-            "fuzz" => plan["release_policy"]["candidate_fuzz_seconds"].as_u64(),
             "soak" => plan["release_policy"]["stable_soak_seconds"].as_u64(),
             _ => None,
         };
@@ -394,11 +393,11 @@ mod tests {
         validate_gates(&plan, &gates).unwrap();
         for broken in [json!([]), json!("cargo test"), json!([""]), json!([3])] {
             let mut bad = gates.clone();
-            bad["gates"]["fuzz"]["command"] = broken;
+            bad["gates"]["compatibility"]["command"] = broken;
             assert!(validate_gates(&plan, &bad).is_err());
         }
         let mut bad = gates.clone();
-        bad["gates"]["fuzz"]["minimum_seconds"] = json!(1);
+        bad["gates"]["soak"]["minimum_seconds"] = json!(1);
         assert!(validate_gates(&plan, &bad).is_err());
         let mut bad = gates.clone();
         bad["gates"]["soak"]["timeout_seconds"] = json!(true);

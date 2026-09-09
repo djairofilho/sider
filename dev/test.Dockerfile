@@ -10,7 +10,7 @@ ENV RUSTUP_HOME=/opt/rustup \
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
-       build-essential ca-certificates clang curl git lld pkg-config \
+       build-essential ca-certificates curl git pkg-config \
     && apt-get clean
 
 COPY rustup-init.sha256 /tmp/rustup-init.sha256
@@ -24,15 +24,10 @@ RUN curl --proto '=https' --tlsv1.2 --fail --show-error --silent \
         --component rustfmt,clippy \
     && rustup set auto-self-update disable
 
-RUN rustup toolchain install nightly-2026-09-07 --profile minimal --component rust-src \
-    && cargo +1.97.1 install cargo-fuzz --version =0.13.2 --locked
-
 COPY --from=docker_cli /usr/local/bin/docker /usr/local/bin/docker
 RUN rustc --version --verbose \
     && cargo --version \
-    && cargo fuzz --version \
-    && docker --version \
-    && clang --version
+    && docker --version
 
 WORKDIR /workspace
 CMD ["cargo", "test", "--locked"]

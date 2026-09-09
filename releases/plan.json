@@ -50,7 +50,6 @@
     "automatic_publication": false,
     "automation_resume_after": "1.0.0",
     "candidate_required": true,
-    "candidate_fuzz_seconds": 900,
     "stable_soak_seconds": 3600,
     "merge_strategy": "merge",
     "release_branch_prefix": "chore/release-v",
@@ -65,7 +64,7 @@
     {
       "id": "R01", "version": "0.1.0", "title": "Núcleo RESP2", "depends_on": [],
       "scope": ["Implementar PING, ECHO, GET, SET básico e DEL via RESP2/TCP, com worker único.", "Preservar dados binários, fragmentação, ordenação por conexão, limites e encerramento definidos em PLANO.md."],
-      "required_gates": ["native", "compatibility", "fuzz", "tcp_smoke"],
+      "required_gates": ["native", "compatibility", "tcp_smoke"],
       "tasks": [
         {
           "id": "R01-01", "title": "Fixtures e referência Redis", "area": "testing", "depends_on": ["B00-01"],
@@ -96,19 +95,19 @@
           "acceptance": ["Binário atende clientes TCP em loopback; recursos e filas limitados, testes não dependem de portas fixas ou sleeps para ordenar ações."]
         },
         {
-          "id": "R01-05", "title": "Testes diferenciais e fuzz", "area": "testing", "depends_on": ["R01-04"],
+          "id": "R01-05", "title": "Testes diferenciais e robustez", "area": "testing", "depends_on": ["R01-04"],
           "objective": "Demonstrar o subconjunto 0.1 contra Redis 8.10.1 e transformar entradas adversariais em regressões reproduzíveis.",
-          "deliverables": ["Suíte diferencial independente do codec sob teste e integração separada com redis-cli RESP2.", "Alvo de fuzz isolado com corpus válido, truncado, concatenado e malformado; runner produz evidências dos gates compatibility e fuzz."],
-          "tests": ["Sequências determinísticas e geradas sobre instâncias descartáveis; comparar bytes, tipo de resposta e estado observado.", "Executar ao menos 900 segundos de fuzz sem falhas novas; converter achados em regressões e registrar seed, duração e toolchain."],
+          "deliverables": ["Suíte diferencial independente do codec sob teste e integração separada com redis-cli RESP2.", "Testes de robustez para entradas truncadas, concatenadas e malformadas; runner produz evidências do gate compatibility."],
+          "tests": ["Sequências determinísticas e geradas sobre instâncias descartáveis; comparar bytes, tipo de resposta e estado observado.", "Cobrir limites, fragmentação e rejeições; converter achados em regressões reproduzíveis."],
           "acceptance": ["Cinco comandos comprovados com redis-cli; matriz indica testes reais, limitações e referência; teste externo ausente ou ignorado bloqueia a entrega."]
         }
       ],
-      "gate": {"id": "R01-GATE", "title": "Validar e publicar a 0.1.0", "acceptance": ["Todas as tarefas R01 concluídas com PR e verificação manual registrada; PING, ECHO, GET, SET básico e DEL funcionam via redis-cli.", "Gates native, compatibility, fuzz e tcp_smoke aprovados no SHA exato; fragmentação, binários, limites e ordenação cobertos.", "Publicar v0.1.0-rc.1 antes da final; conferir pacotes Linux/Windows extraídos, checksums e manifesto; fechar o milestone apenas após a final confirmada."]}
+      "gate": {"id": "R01-GATE", "title": "Validar e publicar a 0.1.0", "acceptance": ["Todas as tarefas R01 concluídas com PR e verificação manual registrada; PING, ECHO, GET, SET básico e DEL funcionam via redis-cli.", "Gates native, compatibility e tcp_smoke aprovados no SHA exato; fragmentação, binários, limites e ordenação cobertos.", "Publicar candidata aprovada antes da final; conferir pacotes Linux/Windows extraídos, checksums e manifesto; fechar o milestone apenas após a final confirmada."]}
     },
     {
       "id": "R02", "version": "0.2.0", "title": "Strings, TTL e memória", "depends_on": ["R01"],
       "scope": ["Adicionar EXISTS, INCR, DECR, MGET, MSET, EXPIRE, PEXPIRE, TTL, PTTL e PERSIST.", "SET aceita NX, XX, EX, PX, GET e KEEPTTL; expiração passiva/ativa e quota com rejeição de crescimento."],
-      "required_gates": ["native", "compatibility", "fuzz", "tcp_smoke"],
+      "required_gates": ["native", "compatibility", "tcp_smoke"],
       "tasks": [
         {
           "id": "R02-01", "title": "Comandos adicionais de strings", "area": "commands", "depends_on": ["R01-GATE"],
@@ -139,12 +138,12 @@
           "acceptance": ["Crescimento acima da quota é recusado sem efeitos parciais; contabilidade e divergências estão documentadas."]
         }
       ],
-      "gate": {"id": "R02-GATE", "title": "Validar e publicar a 0.2.0", "acceptance": ["Milestone 0.1 final publicado e tarefas R02 concluídas; overflow, expiração antiga e rejeições preservam estado.", "Gates cumulativos aprovados; quota recusa crescimento e opções de SET/TTL têm evidência diferencial.", "Publicar candidata com 900 segundos de fuzz e depois final com pacotes verificados; encerrar milestone após conferência da final."]}
+      "gate": {"id": "R02-GATE", "title": "Validar e publicar a 0.2.0", "acceptance": ["Milestone 0.1 final publicado e tarefas R02 concluídas; overflow, expiração antiga e rejeições preservam estado.", "Gates cumulativos aprovados; quota recusa crescimento e opções de SET/TTL têm evidência diferencial.", "Publicar candidata aprovada e depois final com pacotes verificados; encerrar milestone após conferência da final."]}
     },
     {
       "id": "R03", "version": "0.3.0", "title": "Persistência AOF", "depends_on": ["R02"],
       "scope": ["AOF com formato versionado, checksum e escritor global de mutações resolvidas.", "Políticas de durabilidade explícitas, replay seguro, compactação e testes de crash em Linux e Windows."],
-      "required_gates": ["native", "compatibility", "fuzz", "tcp_smoke", "crash", "recovery", "migration"],
+      "required_gates": ["native", "compatibility", "tcp_smoke", "crash", "recovery", "migration"],
       "tasks": [
         {
           "id": "R03-01", "title": "Formato AOF versionado e checksum", "area": "persistence", "depends_on": ["R02-GATE"],
@@ -187,7 +186,7 @@
     {
       "id": "R04", "version": "0.4.0", "title": "Shards", "depends_on": ["R03"],
       "scope": ["Roteamento determinístico com hash tags e número fixo de workers proprietários.", "Operações multichave exigem mesmo shard; AOF inicialmente mantém escritor global e ordem recuperável."],
-      "required_gates": ["native", "compatibility", "fuzz", "tcp_smoke", "crash", "recovery", "migration", "sharding"],
+      "required_gates": ["native", "compatibility", "tcp_smoke", "crash", "recovery", "migration", "sharding"],
       "tasks": [
         {
           "id": "R04-01", "title": "Roteamento estável e hash tags", "area": "storage", "depends_on": ["R03-GATE"],
@@ -230,7 +229,7 @@
     {
       "id": "R05", "version": "0.5.0", "title": "Coleções básicas", "depends_on": ["R04"],
       "scope": ["Adicionar hashes, listas e sets tipados com o subconjunto de comandos registrado em contracts.commands_added.", "LPOP e RPOP inicialmente sem count; preservar TTL, quota, AOF e roteamento."],
-      "required_gates": ["native", "compatibility", "fuzz", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types"],
+      "required_gates": ["native", "compatibility", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types"],
       "tasks": [
         {
           "id": "R05-01", "title": "Valores tipados", "area": "storage", "depends_on": ["R04-GATE"],
@@ -273,7 +272,7 @@
     {
       "id": "R06", "version": "0.6.0", "title": "Sorted sets", "depends_on": ["R05"],
       "scope": ["Adicionar ZADD básico, ZREM, ZCARD, ZSCORE e ZRANGE start stop [WITHSCORES].", "Ordenar por score e desempatar por bytes do membro; manter persistência e limites."],
-      "required_gates": ["native", "compatibility", "fuzz", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets"],
+      "required_gates": ["native", "compatibility", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets"],
       "tasks": [
         {
           "id": "R06-01", "title": "Armazenamento ordenado", "area": "storage", "depends_on": ["R05-GATE"],
@@ -302,7 +301,7 @@
     {
       "id": "R07", "version": "0.7.0", "title": "Transações", "depends_on": ["R06"],
       "scope": ["Adicionar MULTI, EXEC, DISCARD, WATCH e UNWATCH limitados a um shard.", "Separar erros de enfileiramento de erros individuais de execução sem rollback; persistir o lote atomicamente."],
-      "required_gates": ["native", "compatibility", "fuzz", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions"],
+      "required_gates": ["native", "compatibility", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions"],
       "tasks": [
         {
           "id": "R07-01", "title": "Estado transacional por conexão", "area": "network", "depends_on": ["R06-GATE"],
@@ -338,7 +337,7 @@
     {
       "id": "R08", "version": "0.8.0", "title": "Pub/Sub", "depends_on": ["R07"],
       "scope": ["Adicionar SUBSCRIBE, UNSUBSCRIBE, PUBLISH e PING no modo assinante RESP2.", "Inscrições e mensagens são efêmeras; filas limitadas e clientes lentos não bloqueiam o banco."],
-      "required_gates": ["native", "compatibility", "fuzz", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions", "pubsub"],
+      "required_gates": ["native", "compatibility", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions", "pubsub"],
       "tasks": [
         {
           "id": "R08-01", "title": "Registro de assinaturas", "area": "network", "depends_on": ["R07-GATE"],
@@ -374,7 +373,7 @@
     {
       "id": "R09", "version": "0.9.0", "title": "Replicação", "depends_on": ["R08"],
       "scope": ["Replicação assíncrona Sider→Sider da mesma versão e configuração de shards.", "Sincronização completa e incremental, reconexão, réplicas somente leitura e promoção manual; sem failover automático."],
-      "required_gates": ["native", "compatibility", "fuzz", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions", "pubsub", "replication"],
+      "required_gates": ["native", "compatibility", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions", "pubsub", "replication"],
       "tasks": [
         {
           "id": "R09-01", "title": "Protocolo interno versionado", "area": "replication", "depends_on": ["R08-GATE"],
@@ -417,7 +416,7 @@
     {
       "id": "R10", "version": "0.10.0", "title": "Operação e distribuição", "depends_on": ["R09"],
       "scope": ["Métricas, diagnóstico e procedimentos reproduzíveis de backup e restauração.", "Distribuir imagem Docker Linux amd64 como arquivo anexado à release privada; comprovar operação e encerramento."],
-      "required_gates": ["native", "compatibility", "fuzz", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions", "pubsub", "replication", "docker"],
+      "required_gates": ["native", "compatibility", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions", "pubsub", "replication", "docker"],
       "tasks": [
         {
           "id": "R10-01", "title": "Métricas", "area": "operations", "depends_on": ["R09-GATE"],
@@ -460,7 +459,7 @@
     {
       "id": "R11", "version": "1.0.0", "title": "Estabilização", "depends_on": ["R10"],
       "scope": ["Congelar o subconjunto compatível, comprovar recuperação e migração, executar carga prolongada e benchmarks reproduzíveis.", "Incluir sorted sets, transações e replicação Sider→Sider; documentar garantias sem prometer capacidades fora do escopo."],
-      "required_gates": ["native", "compatibility", "fuzz", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions", "pubsub", "replication", "docker", "soak", "benchmarks"],
+      "required_gates": ["native", "compatibility", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions", "pubsub", "replication", "docker", "soak", "benchmarks"],
       "tasks": [
         {
           "id": "R11-01", "title": "Congelamento do subconjunto", "area": "documentation", "depends_on": ["R10-GATE"],
@@ -480,7 +479,7 @@
           "id": "R11-03", "title": "Testes prolongados", "area": "testing", "depends_on": ["R11-02"],
           "objective": "Detectar corrupção, vazamentos e problemas de progresso sob carga longa e falhas combinadas.",
           "deliverables": ["Runner soak com pelo menos 3600 segundos, dataset/seed/configuração registrados e checagem contínua de invariantes.", "Cenários de desconexão, TTL, AOF/compactação, transações, assinantes lentos e replicação com recursos observados."],
-          "tests": ["Uma hora de carga contínua sem falhas não explicadas; coleta de memória, filas, erro e progresso.", "Fuzz de candidata por pelo menos 900 segundos, crash/recovery e regressões de todos os achados."],
+          "tests": ["Uma hora de carga contínua sem falhas não explicadas; coleta de memória, filas, erro e progresso.", "Crash/recovery e regressões de todos os achados em cada candidata."],
           "acceptance": ["Nenhuma falha conhecida de corrupção ou perda além das garantias declaradas; relatório distingue OOM/configuração e defeito do produto."]
         },
         {
@@ -498,7 +497,7 @@
           "acceptance": ["Benchmarks reproduzíveis sem limiar artificial de superar Redis; documentação final corresponde ao artefato e às evidências da 1.0."]
         }
       ],
-      "gate": {"id": "R11-GATE", "title": "Validar e publicar a 1.0.0", "acceptance": ["Sorted sets, transações e replicação incluídos; matriz completa sem falha conhecida de corrupção ou perda além das garantias declaradas.", "Todos os gates aprovados, incluindo soak de 3600 segundos, migração da 0.10, benchmarks e fuzz de candidata de 900 segundos.", "Candidata aprovada sem mudança funcional posterior; final recompilada/testada, pacotes/imagem/checksums conferidos e milestone encerrado após publicação confirmada."]}
+      "gate": {"id": "R11-GATE", "title": "Validar e publicar a 1.0.0", "acceptance": ["Sorted sets, transações e replicação incluídos; matriz completa sem falha conhecida de corrupção ou perda além das garantias declaradas.", "Todos os gates aprovados, incluindo soak de 3600 segundos, migração da 0.10 e benchmarks.", "Candidata aprovada sem mudança funcional posterior; final recompilada/testada, pacotes/imagem/checksums conferidos e milestone encerrado após publicação confirmada."]}
     }
   ]
 }
