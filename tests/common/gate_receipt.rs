@@ -88,6 +88,7 @@ impl GateContext {
                 | "sharding"
                 | "types"
                 | "sorted_sets"
+                | "transactions"
         ) {
             return Err("gate desconhecido ou sem runner implementado".into());
         }

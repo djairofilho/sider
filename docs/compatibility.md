@@ -70,6 +70,16 @@ substituir qualquer tipo. A [validação do writer AOF completo](types-persisten
 permanece separada da comparação de comandos e distingue evolução do formato de
 migração entre executáveis congelados.
 
+## Transações implementadas em R07
+
+`MULTI`, `EXEC`, `DISCARD`, `WATCH` e `UNWATCH` estão implementados para um shard,
+incluindo conflitos por expiração e erros individuais sem rollback. Os limites
+de fila e observações são próprios do Sider. O diferencial com Redis 8.10.1 passou
+em 91 comparações binárias, incluindo `WRONGTYPE`, coleções, inscrições dentro de
+`EXEC` e mensagens para a própria conexão. O
+[guia de transações](transactions.md) registra comandos, restrições, formato
+especial RESP2, persistência e reprodução das verificações.
+
 ## Subconjunto alvo
 
 O Sider aceitará requisições RESP2 formadas por arrays não vazios de bulk strings

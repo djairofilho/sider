@@ -209,6 +209,31 @@ pub fn parse(frame: Frame) -> Result<Command, RequestError> {
         } else {
             Command::Ttl { key, milliseconds }
         })
+    } else if name.eq_ignore_ascii_case(b"MULTI")
+        || name.eq_ignore_ascii_case(b"EXEC")
+        || name.eq_ignore_ascii_case(b"DISCARD")
+        || name.eq_ignore_ascii_case(b"UNWATCH")
+    {
+        let (canonical, command) = if name.eq_ignore_ascii_case(b"MULTI") {
+            ("multi", Command::Multi)
+        } else if name.eq_ignore_ascii_case(b"EXEC") {
+            ("exec", Command::Exec)
+        } else if name.eq_ignore_ascii_case(b"DISCARD") {
+            ("discard", Command::Discard)
+        } else {
+            ("unwatch", Command::Unwatch)
+        };
+        if count != 0 {
+            return Err(RequestError::WrongArity(canonical));
+        }
+        Ok(command)
+    } else if name.eq_ignore_ascii_case(b"WATCH") {
+        if count == 0 {
+            return Err(RequestError::WrongArity("watch"));
+        }
+        Ok(Command::Watch {
+            keys: arguments.collect(),
+        })
     } else if name.eq_ignore_ascii_case(b"SUBSCRIBE") {
         if count == 0 {
             return Err(RequestError::WrongArity("subscribe"));
@@ -422,5 +447,31 @@ mod tests {
         ] {
             assert!(parse(request(&args)).is_err());
         }
+    }
+
+    #[test]
+    fn transactions_control_arity_and_binary_watch_keys() {
+        for (name, command) in [
+            (b"mUlTi".as_slice(), Command::Multi),
+            (b"EXEC", Command::Exec),
+            (b"DISCARD", Command::Discard),
+            (b"UNWATCH", Command::Unwatch),
+        ] {
+            assert_eq!(parse(request(&[name])).unwrap(), command);
+            assert!(matches!(
+                parse(request(&[name, b"extra"])),
+                Err(RequestError::WrongArity(_))
+            ));
+        }
+        assert_eq!(
+            parse(request(&[b"WATCH", b"", b"\xff\0"])).unwrap(),
+            Command::Watch {
+                keys: vec![Bytes::new(), Bytes::from_static(b"\xff\0")]
+            }
+        );
+        assert!(matches!(
+            parse(request(&[b"WATCH"])),
+            Err(RequestError::WrongArity(_))
+        ));
     }
 }

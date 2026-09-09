@@ -22,11 +22,11 @@ pub enum ExecutionError {
     InvalidExpiry(&'static str),
     #[error("OOM dataset memory quota exceeded")]
     OutOfMemory,
+    #[error("ERR AOF record limit exceeded")]
+    AofRecordLimit,
     /// Pub/Sub depende do contexto da conexão e não executa no mapa.
     #[error("ERR command requires connection context")]
     ConnectionOnly,
-    #[error("ERR AOF record limit exceeded")]
-    AofRecordLimit,
 }
 
 /// Resultado da execução síncrona no armazenamento.
@@ -42,6 +42,8 @@ pub enum Reply {
     Integer(i64),
     /// Respostas ordenadas de comandos multichave.
     Array(Vec<Reply>),
+    /// EXEC invalidado por alteração ou expiração de chave observada.
+    NullArray,
     /// Rejeição sem efeitos no armazenamento.
     Error(ExecutionError),
 }
@@ -54,6 +56,7 @@ impl From<Reply> for Frame {
             Reply::Bulk(value) => Self::Bulk(value),
             Reply::Integer(value) => Self::Integer(value),
             Reply::Array(values) => Self::Array(Some(values.into_iter().map(Self::from).collect())),
+            Reply::NullArray => Self::Array(None),
             Reply::Error(error) => Self::Error(Bytes::from(error.to_string())),
         }
     }

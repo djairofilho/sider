@@ -26,6 +26,9 @@ candidata e final com o mesmo SHA e os mesmos arquivos aprovados.
 O [plano de execução até a v1](docs/execution-to-v1.md) resume o ponto atual,
 a próxima entrega e os critérios de cada versão.
 
+O desenvolvimento de R07 acrescenta [transações de um shard](docs/transactions.md),
+com fila limitada, WATCH, um append AOF por lote e integração com Pub/Sub.
+
 CI e publicação automática estão adiadas para depois da 1.0. Até a 1.0 inclusive,
 o desenvolvimento usa validação local e as releases são publicadas manualmente.
 

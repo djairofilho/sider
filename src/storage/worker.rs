@@ -7,10 +7,16 @@ use thiserror::Error;
 use tokio::sync::{OwnedRwLockReadGuard, RwLock, Semaphore, mpsc, oneshot, watch};
 use tokio::time::{Instant, MissedTickBehavior, interval, sleep_until};
 
-use crate::command::{Command, Reply};
+use crate::command::{Command, ExecutionError, Reply};
 use crate::error::ConfigError;
+use crate::pubsub::Subscription;
+use crate::resp::{EncodeError, Frame, RespLimits, encode};
 
-use super::{Store, routing::ShardRouter};
+use super::{Store, WatchToken, routing::ShardRouter};
+
+#[cfg(test)]
+#[path = "transaction_tests.rs"]
+mod transaction_tests;
 
 /// Falha de transporte ou de ciclo de vida, distinta de uma resposta do banco.
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
@@ -27,11 +33,42 @@ pub enum DbError {
 }
 
 /// Envelope interno; o enum de comandos continua independente dos canais.
-pub(crate) struct Request {
-    pub(crate) command: Command,
-    pub(crate) reply: oneshot::Sender<Result<Reply, DbError>>,
-    // Mantido desde a admissão até o apply e a resposta, mesmo se o cliente sair.
-    pub(crate) _admission: OwnedRwLockReadGuard<()>,
+pub(crate) enum Request {
+    Execute {
+        command: Command,
+        reply: oneshot::Sender<Result<Reply, DbError>>,
+        _admission: OwnedRwLockReadGuard<()>,
+    },
+    Batch {
+        commands: Vec<Command>,
+        watched: Vec<WatchToken>,
+        reply: oneshot::Sender<Result<Reply, DbError>>,
+        _admission: OwnedRwLockReadGuard<()>,
+    },
+    Watch {
+        keys: Vec<bytes::Bytes>,
+        reply: oneshot::Sender<Result<(Reply, Vec<WatchToken>), DbError>>,
+        _admission: OwnedRwLockReadGuard<()>,
+    },
+    Transaction {
+        commands: Vec<Command>,
+        watched: Vec<WatchToken>,
+        subscription: Subscription,
+        limits: RespLimits,
+        reply: oneshot::Sender<Result<TransactionReply, DbError>>,
+        _admission: OwnedRwLockReadGuard<()>,
+    },
+}
+
+pub(crate) struct TransactionReply {
+    pub subscription: Subscription,
+    pub output: Result<bytes::Bytes, EncodeError>,
+}
+
+fn encode_reply(reply: Reply, limits: RespLimits) -> Result<bytes::Bytes, EncodeError> {
+    let mut bytes = bytes::BytesMut::new();
+    encode(&Frame::from(reply), &mut bytes, limits)?;
+    Ok(bytes.freeze())
 }
 
 /// Acesso clonável ao mesmo armazenamento, sem compartilhar o mapa diretamente.
@@ -164,6 +201,102 @@ impl DbHandle {
             Ok(shard) => shard,
             Err(error) => return Ok(Reply::Error(error)),
         };
+        self.request(shard, |reply, _admission| Request::Execute {
+            command,
+            reply,
+            _admission,
+        })
+        .await
+    }
+
+    /// Roteador imutável para validar a fila antes de reter um comando.
+    pub fn router(&self) -> ShardRouter {
+        self.router
+    }
+
+    /// Executa o lote em um shard e libera as observações em todos os resultados.
+    pub async fn execute_batch(
+        &self,
+        commands: Vec<Command>,
+        watched: Vec<WatchToken>,
+    ) -> Result<Reply, DbError> {
+        let shard = match self.batch_shard(&commands, &watched) {
+            Ok(shard) => shard,
+            Err(error) => return Ok(Reply::Error(error)),
+        };
+        self.request(shard, |reply, _admission| Request::Batch {
+            commands,
+            watched,
+            reply,
+            _admission,
+        })
+        .await
+    }
+
+    fn batch_shard(
+        &self,
+        commands: &[Command],
+        watched: &[WatchToken],
+    ) -> Result<usize, ExecutionError> {
+        let mut selected = None;
+        for token in watched {
+            self.router.select_key(token.key(), &mut selected)?;
+        }
+        for command in commands {
+            self.router.select_command(command, &mut selected)?;
+        }
+        Ok(selected.unwrap_or(0))
+    }
+
+    pub(crate) async fn execute_transaction(
+        &self,
+        commands: Vec<Command>,
+        watched: Vec<WatchToken>,
+        subscription: Subscription,
+        limits: RespLimits,
+    ) -> Result<TransactionReply, DbError> {
+        let shard = match self.batch_shard(&commands, &watched) {
+            Ok(shard) => shard,
+            Err(error) => {
+                return Ok(TransactionReply {
+                    subscription,
+                    output: encode_reply(Reply::Error(error), limits),
+                });
+            }
+        };
+        self.request(shard, |reply, _admission| Request::Transaction {
+            commands,
+            watched,
+            subscription,
+            limits,
+            reply,
+            _admission,
+        })
+        .await
+    }
+
+    /// O chamador valida as chaves no roteador antes de enviar WATCH.
+    pub(crate) async fn watch(
+        &self,
+        keys: Vec<bytes::Bytes>,
+    ) -> Result<(Reply, Vec<WatchToken>), DbError> {
+        let shard = self
+            .router
+            .route(&Command::Watch { keys: keys.clone() })
+            .map_err(|_| DbError::Unavailable)?;
+        self.request(shard, |reply, _admission| Request::Watch {
+            keys,
+            reply,
+            _admission,
+        })
+        .await
+    }
+
+    async fn request<T>(
+        &self,
+        shard: usize,
+        make: impl FnOnce(oneshot::Sender<Result<T, DbError>>, OwnedRwLockReadGuard<()>) -> Request,
+    ) -> Result<T, DbError> {
         let deadline = Instant::now()
             .checked_add(self.request_timeout)
             .ok_or(DbError::Timeout)?;
@@ -175,11 +308,7 @@ impl DbHandle {
             guard = self.barrier.clone().read_owned() => guard,
         };
         let (reply, response) = oneshot::channel();
-        let request = Request {
-            command,
-            reply,
-            _admission: admission,
-        };
+        let request = make(reply, admission);
 
         tokio::select! {
             biased;
@@ -266,14 +395,91 @@ impl Worker {
     }
 
     async fn apply(&mut self, request: Request) -> bool {
-        let prepared = self.store.prepare(request.command);
-        let result = self.commit(prepared).await;
-        let healthy = result.is_ok();
-        let _ = request.reply.send(result);
-        healthy
+        match request {
+            Request::Transaction {
+                commands,
+                watched,
+                mut subscription,
+                limits,
+                reply,
+                _admission,
+            } => {
+                let valid = self.store.watches_valid(&watched);
+                drop(watched);
+                let output = if valid {
+                    let prepared = self.store.prepare_batch(commands.clone());
+                    match self.persist(&prepared).await {
+                        Ok(None) => subscription
+                            .complete_exec(commands, limits, || self.store.apply(prepared)),
+                        Ok(Some(rejection)) => encode_reply(rejection, limits),
+                        Err(error) => {
+                            let _ = reply.send(Err(error));
+                            return false;
+                        }
+                    }
+                } else {
+                    encode_reply(Reply::NullArray, limits)
+                };
+                let _ = reply.send(Ok(TransactionReply {
+                    subscription,
+                    output,
+                }));
+                true
+            }
+            Request::Execute {
+                command,
+                reply,
+                _admission,
+            } => {
+                let prepared = self.store.prepare(command);
+                let result = self.commit(prepared).await;
+                let healthy = result.is_ok();
+                let _ = reply.send(result);
+                healthy
+            }
+            Request::Batch {
+                commands,
+                watched,
+                reply,
+                _admission,
+            } => {
+                let valid = self.store.watches_valid(&watched);
+                drop(watched);
+                let result = if valid {
+                    let prepared = self.store.prepare_batch(commands);
+                    self.commit(prepared).await
+                } else {
+                    Ok(Reply::NullArray)
+                };
+                let healthy = result.is_ok();
+                let _ = reply.send(result);
+                healthy
+            }
+            Request::Watch {
+                keys,
+                reply,
+                _admission,
+            } => {
+                let prepared = self.store.prepare(Command::Exists { keys: keys.clone() });
+                let result = self.commit(prepared).await.map(|reply| match reply {
+                    Reply::Error(_) => (reply, Vec::new()),
+                    _ => (Reply::Ok, self.store.watch(keys)),
+                });
+                let healthy = result.is_ok();
+                let _ = reply.send(result);
+                healthy
+            }
+        }
     }
 
     async fn commit(&mut self, prepared: super::Prepared) -> Result<Reply, DbError> {
+        match self.persist(&prepared).await? {
+            Some(rejection) => Ok(rejection),
+            None => Ok(self.store.apply(prepared)),
+        }
+    }
+
+    async fn persist(&mut self, prepared: &super::Prepared) -> Result<Option<Reply>, DbError> {
         if let Some(aof) = &self.aof
             && !prepared.batch.mutations.is_empty()
             && let Err(error) = aof.append(prepared.batch.clone()).await
@@ -284,13 +490,13 @@ impl Worker {
                     crate::persistence::format::FormatError::Limit
                 )
             ) {
-                return Ok(Reply::Error(crate::command::ExecutionError::AofRecordLimit));
+                return Ok(Some(Reply::Error(ExecutionError::AofRecordLimit)));
             }
             tracing::error!(%error, "mutação não aplicada por falha do AOF");
             self.requests.close();
             return Err(DbError::Unavailable);
         }
-        Ok(self.store.apply(prepared))
+        Ok(None)
     }
 
     async fn expire(&mut self) -> Result<(), DbError> {
@@ -298,9 +504,7 @@ impl Worker {
         loop {
             let prepared = self.store.prepare_expiration(budget);
             match self.commit(prepared).await? {
-                Reply::Error(crate::command::ExecutionError::AofRecordLimit) if budget > 1 => {
-                    budget /= 2
-                }
+                Reply::Error(ExecutionError::AofRecordLimit) if budget > 1 => budget /= 2,
                 _ => return Ok(()),
             }
         }
@@ -394,7 +598,7 @@ mod tests {
         let (reply, response) = oneshot::channel();
         assert!(
             handle.requests[0]
-                .try_send(Request {
+                .try_send(Request::Execute {
                     command,
                     reply,
                     _admission: handle.barrier.clone().try_read_owned().unwrap()
@@ -543,13 +747,17 @@ mod tests {
         assert_eq!(worker.requests.len(), 1);
 
         let request = worker.requests.try_recv().unwrap();
-        assert_eq!(request.command, set(b"key", b"first"));
+        assert!(
+            matches!(&request, Request::Execute { command, .. } if *command == set(b"key", b"first"))
+        );
         worker.apply(request).await;
         assert_eq!(first.await, Ok(Reply::Ok));
         assert_pending(second.as_mut()).await;
         assert_eq!(worker.requests.len(), 1);
         let request = worker.requests.try_recv().unwrap();
-        assert_eq!(request.command, set(b"key", b"second"));
+        assert!(
+            matches!(&request, Request::Execute { command, .. } if *command == set(b"key", b"second"))
+        );
         worker.apply(request).await;
         assert_eq!(second.await, Ok(Reply::Ok));
         assert_eq!(worker.store.execute(get(b"key")), bulk(b"second"));
@@ -656,7 +864,7 @@ mod tests {
         assert_eq!(Instant::now() - began, Duration::from_secs(5));
 
         let request = worker.requests.try_recv().unwrap();
-        assert!(request.reply.is_closed());
+        assert!(matches!(&request, Request::Execute { reply, .. } if reply.is_closed()));
         worker.apply(request).await;
         assert_eq!(worker.store.execute(get(b"key")), bulk(b"accepted"));
     }

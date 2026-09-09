@@ -14,6 +14,8 @@ use crate::pubsub::{Hub, Message, PubSubError, Subscription};
 use crate::resp::{Decoder, EncodeError, Frame, ProtocolError, RespLimits, encode};
 use crate::storage::worker::{DbError, DbHandle};
 
+mod transaction;
+
 #[derive(Debug, Error)]
 pub(crate) enum ConnectionError {
     #[error("falha de I/O da conexão: {0}")]
@@ -70,6 +72,7 @@ where
 {
     config.validate()?;
     let mut subscription = hub.connect(config.pubsub_max_channels, config.pubsub_queue_capacity)?;
+    let mut transaction = transaction::Transaction::default();
     let mut decoder = Decoder::new(config.resp_limits)?;
     let mut input = BytesMut::new();
     let mut output = BytesMut::new();
@@ -107,11 +110,71 @@ where
                     },
                     _ => Vec::new(),
                 };
+                let request_bytes = transaction::request_bytes(&frame);
                 let response = match parse(frame) {
-                    Ok(command) => match command {
-                        Command::Subscribe { channels } => match subscription.subscribe(channels) {
-                            Ok(frames) => {
-                                for frame in frames {
+                    Ok(command) => {
+                        let command = match transaction
+                            .handle(
+                                command,
+                                request_bytes,
+                                &config,
+                                &database,
+                                subscription.active(),
+                            )
+                            .await?
+                        {
+                            transaction::Action::Exec { commands, watched } => {
+                                let result = database
+                                    .execute_transaction(
+                                        commands,
+                                        watched,
+                                        subscription,
+                                        response_limits(&config),
+                                    )
+                                    .await?;
+                                subscription = result.subscription;
+                                let bytes = result.output?;
+                                tokio::select! {
+                                    biased;
+                                    _ = subscription.evicted() => return Err(PubSubError::Closed.into()),
+                                    result = write_buffer(&mut stream, &bytes, &config) => result?,
+                                }
+                                continue;
+                            }
+                            transaction::Action::Execute(command) => command,
+                            transaction::Action::Reply(frame) => {
+                                write_subscriber_response(
+                                    &mut stream,
+                                    &mut output,
+                                    frame,
+                                    &config,
+                                    &mut subscription,
+                                )
+                                .await?;
+                                continue;
+                            }
+                        };
+                        match command {
+                            Command::Subscribe { channels } => {
+                                match subscription.subscribe(channels) {
+                                    Ok(frames) => {
+                                        for frame in frames {
+                                            write_subscriber_response(
+                                                &mut stream,
+                                                &mut output,
+                                                frame,
+                                                &config,
+                                                &mut subscription,
+                                            )
+                                            .await?;
+                                        }
+                                        continue;
+                                    }
+                                    Err(error) => Frame::Error(Bytes::from(error.to_string())),
+                                }
+                            }
+                            Command::Unsubscribe { channels } => {
+                                for frame in subscription.unsubscribe(channels)? {
                                     write_subscriber_response(
                                         &mut stream,
                                         &mut output,
@@ -123,58 +186,45 @@ where
                                 }
                                 continue;
                             }
-                            Err(error) => Frame::Error(Bytes::from(error.to_string())),
-                        },
-                        Command::Unsubscribe { channels } => {
-                            for frame in subscription.unsubscribe(channels)? {
-                                write_subscriber_response(
-                                    &mut stream,
+                            Command::Ping(payload) if subscription.active() => {
+                                Frame::Array(Some(vec![
+                                    Frame::Bulk(Some(Bytes::from_static(b"pong"))),
+                                    Frame::Bulk(Some(payload.unwrap_or_default())),
+                                ]))
+                            }
+                            _ if subscription.active() => Frame::Error(Bytes::from(format!(
+                                "ERR Can't execute '{}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context",
+                                String::from_utf8_lossy(&command_name),
+                            ))),
+                            Command::Publish { channel, message } => {
+                                let message = Message {
+                                    channel,
+                                    payload: message,
+                                };
+                                output.clear();
+                                if encode(
+                                    &message.clone().into_frame(),
                                     &mut output,
-                                    frame,
-                                    &config,
-                                    &mut subscription,
+                                    response_limits(&config),
                                 )
-                                .await?;
+                                .is_err()
+                                {
+                                    Frame::Error(Bytes::from_static(
+                                        b"ERR pubsub message exceeds response limit",
+                                    ))
+                                } else {
+                                    Frame::Integer(hub.publish(message))
+                                }
                             }
-                            continue;
+                            command => match database.execute(command).await {
+                                Ok(reply) => Frame::from(reply),
+                                Err(DbError::ShuttingDown) => return Ok(()),
+                                Err(error) => return Err(error.into()),
+                            },
                         }
-                        Command::Ping(payload) if subscription.active() => {
-                            Frame::Array(Some(vec![
-                                Frame::Bulk(Some(Bytes::from_static(b"pong"))),
-                                Frame::Bulk(Some(payload.unwrap_or_default())),
-                            ]))
-                        }
-                        _ if subscription.active() => Frame::Error(Bytes::from(format!(
-                            "ERR Can't execute '{}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context",
-                            String::from_utf8_lossy(&command_name),
-                        ))),
-                        Command::Publish { channel, message } => {
-                            let message = Message {
-                                channel,
-                                payload: message,
-                            };
-                            output.clear();
-                            if encode(
-                                &message.clone().into_frame(),
-                                &mut output,
-                                response_limits(&config),
-                            )
-                            .is_err()
-                            {
-                                Frame::Error(Bytes::from_static(
-                                    b"ERR pubsub message exceeds response limit",
-                                ))
-                            } else {
-                                Frame::Integer(hub.publish(message))
-                            }
-                        }
-                        command => match database.execute(command).await {
-                            Ok(reply) => Frame::from(reply),
-                            Err(DbError::ShuttingDown) => return Ok(()),
-                            Err(error) => return Err(error.into()),
-                        },
-                    },
+                    }
                     Err(error) => {
+                        transaction.poison();
                         let fatal = error.is_fatal();
                         write_subscriber_response(
                             &mut stream,
@@ -270,6 +320,14 @@ async fn write_response<S: AsyncWrite + Unpin>(
 ) -> Result<(), ConnectionError> {
     output.clear();
     encode(&response, output, response_limits(config))?;
+    write_buffer(stream, output, config).await
+}
+
+async fn write_buffer<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    output: &[u8],
+    config: &ServerConfig,
+) -> Result<(), ConnectionError> {
     let deadline = Instant::now()
         .checked_add(config.write_timeout)
         .ok_or(ConnectionError::WriteTimeout)?;
