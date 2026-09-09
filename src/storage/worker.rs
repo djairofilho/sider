@@ -48,6 +48,7 @@ pub struct DbHandle {
 /// Proprietário único do mapa e do lado receptor da fila.
 pub struct Worker {
     store: Store,
+    shard_count: usize,
     aof: Option<crate::persistence::AofHandle>,
     compact_after_bytes: u64,
     compaction: Option<oneshot::Receiver<Result<(), crate::persistence::AofError>>>,
@@ -114,6 +115,7 @@ pub fn channel_with_stores(
     let mut workers = Vec::with_capacity(stores.len());
     let mut snapshots = Vec::with_capacity(stores.len());
     let barrier = Arc::new(RwLock::new(()));
+    let shard_count = stores.len();
     for store in stores {
         let (sender, receiver) = mpsc::channel(capacity);
         let (snapshot_sender, snapshot_receiver) = mpsc::channel(1);
@@ -121,6 +123,7 @@ pub fn channel_with_stores(
         senders.push(sender);
         workers.push(Worker {
             store,
+            shard_count,
             aof: None,
             compact_after_bytes: 0,
             compaction: None,
@@ -198,6 +201,8 @@ impl DbHandle {
 }
 
 impl Worker {
+    /// Compactação local só existe com um shard. Com vários, o limiar local é
+    /// desabilitado e [`DbHandle::run_compaction`] coordena o snapshot completo.
     pub fn with_aof(
         mut self,
         aof: crate::persistence::AofHandle,
@@ -205,7 +210,11 @@ impl Worker {
     ) -> Self {
         self.aof = Some(aof);
         // Compactação local só é válida quando este worker é o único shard.
-        self.compact_after_bytes = compact_after_bytes;
+        self.compact_after_bytes = if self.shard_count == 1 {
+            compact_after_bytes
+        } else {
+            0
+        };
         self
     }
     /// Processa comandos em ordem de recepção, sem suspender uma mutação.

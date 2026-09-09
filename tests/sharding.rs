@@ -62,6 +62,14 @@ struct Rig {
 }
 impl Rig {
     fn start(directory: &Directory, count: usize, faults: Arc<dyn FaultInjector>) -> Self {
+        Self::start_with_local_threshold(directory, count, faults, 0)
+    }
+    fn start_with_local_threshold(
+        directory: &Directory,
+        count: usize,
+        faults: Arc<dyn FaultInjector>,
+        threshold: u64,
+    ) -> Self {
         assert_eq!(directory.config().layout.shard_count as usize, count);
         let recovered = persistence::recover_with_faults(
             directory.config(),
@@ -82,7 +90,7 @@ impl Rig {
         .unwrap();
         let mut running = JoinSet::new();
         for worker in workers {
-            running.spawn(worker.with_aof(aof.clone(), 0).run());
+            running.spawn(worker.with_aof(aof.clone(), threshold).run());
         }
         Self {
             database,
@@ -115,6 +123,44 @@ fn mset(tag: usize, value: usize) -> Command {
             (Bytes::from(format!("{{{tag}}}:b")), value),
         ],
     }
+}
+
+#[tokio::test]
+async fn local_compaction_is_disabled_for_multi_shard_public_api() {
+    let directory = Directory::new();
+    let rig = Rig::start_with_local_threshold(&directory, 4, Arc::new(NoFaults), 1);
+    for tag in 0..4 {
+        assert_eq!(rig.database.execute(mset(tag, 7)).await.unwrap(), Reply::Ok);
+    }
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_millis(200)).await;
+    tokio::time::resume();
+    // Cada GET passa pelo worker depois do tick prioritário, sem espera arbitrária.
+    for tag in 0..4 {
+        assert_eq!(
+            rig.database
+                .execute(Command::Get {
+                    key: Bytes::from(format!("{{{tag}}}:a"))
+                })
+                .await
+                .unwrap(),
+            Reply::Bulk(Some(Bytes::from_static(b"7")))
+        );
+    }
+    rig.finish().await;
+    assert!(
+        !directory
+            .0
+            .join("generation-00000000000000000001.aof")
+            .exists()
+    );
+    let recovered = persistence::recover(
+        directory.config(),
+        StoreConfig::default(),
+        Arc::new(SystemClock),
+    )
+    .unwrap();
+    assert_eq!(recovered.store.len(), 8);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

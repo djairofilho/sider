@@ -8,7 +8,7 @@ use thiserror::Error;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
 use tokio::task::JoinSet;
-use tokio::time::{Instant, sleep_until};
+use tokio::time::{Instant, sleep_until, timeout_at};
 
 use crate::connection::{self, ConnectionError};
 use crate::storage::worker::{self, DbHandle};
@@ -140,10 +140,21 @@ pub async fn serve_prepared(
         ));
     }
     let timeout = config.shutdown_timeout;
-    let result = supervise_workers(listener, config, shutdown, database, workers, stop).await;
+    let mut shutdown_deadline = None;
+    let result = supervise_workers(
+        listener,
+        config,
+        shutdown,
+        database,
+        workers,
+        stop,
+        &mut shutdown_deadline,
+    )
+    .await;
     if let Some((handle, writer)) = persistence {
         drop(handle);
-        tokio::time::timeout(timeout, writer)
+        let deadline = shutdown_deadline.unwrap_or_else(|| Instant::now() + timeout);
+        timeout_at(deadline, writer)
             .await
             .map_err(|_| ServerError::ShutdownTimeout)?
             .map_err(ServerError::WorkerFailed)??;
@@ -162,7 +173,10 @@ async fn supervise(
 ) -> Result<(), ServerError> {
     let mut workers = JoinSet::new();
     workers.spawn(worker);
-    supervise_workers(listener, config, shutdown, database, workers, stop).await
+    supervise_workers(
+        listener, config, shutdown, database, workers, stop, &mut None,
+    )
+    .await
 }
 
 async fn supervise_workers(
@@ -172,6 +186,7 @@ async fn supervise_workers(
     database: DbHandle,
     mut workers: JoinSet<()>,
     stop: watch::Sender<bool>,
+    shutdown_deadline: &mut Option<Instant>,
 ) -> Result<(), ServerError> {
     let mut connections = JoinSet::new();
     let slots = Arc::new(Semaphore::new(config.max_connections));
@@ -222,6 +237,7 @@ async fn supervise_workers(
     let deadline = Instant::now()
         .checked_add(config.shutdown_timeout)
         .ok_or(ServerError::ShutdownTimeout)?;
+    *shutdown_deadline = Some(deadline);
     let mut failure = failure;
     while !workers.is_empty() || !connections.is_empty() {
         tokio::select! {
