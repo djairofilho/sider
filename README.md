@@ -4,8 +4,8 @@ Sider is an in-memory database server project written in Rust.
 Its goal is to provide an explicit subset of Redis compatibility over RESP2.
 The name is Redis spelled backward.
 
-This checkout prepares package `1.0.0`. Publication depends on validating the
-candidate build and its files; the [release notes](releases/notes/v1.0.0.md)
+This checkout prepares package `1.0.1`. Publication depends on validating the
+candidate build and its files; the [release notes](releases/notes/v1.0.1.md)
 describe the scope without replacing gate receipts.
 
 The binary serves strings, multikey operations, `SET` options, and TTL over RESP2/TCP.
@@ -31,11 +31,11 @@ The [complete matrix](docs/compatibility-matrix.md) brings together supported fo
 restrictions, and evidence, including transactions and sequences across families.
 The differential reference uses Redis and `redis-cli` 8.10.1, pinned in the plan. The
 [0.1.0-rc.1 candidate](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1)
-was published in the private repository and remains a historical record.
+was published in the public repository and remains a historical record.
 
-Deliverables through 1.0 are organized in the [ROADMAP](ROADMAP.md), with 11 milestones
-and 50 implementation tasks. Milestones 0.1–0.10 have technical checkpoints;
-only 1.0 will have a candidate and final release. The
+Deliverables through 1.0 and the 1.0.1 patch are organized in the [ROADMAP](ROADMAP.md),
+with 12 milestones and 52 implementation tasks. Milestones 0.1–0.10 have technical
+checkpoints; 1.0 and explicitly registered patches have candidate and final releases. The
 [release guide](docs/releases.md) describes synchronizing the backlog and preparing
 a candidate and final release with the same SHA and approved files.
 The [execution plan through v1](docs/execution-to-v1.md) summarizes the current state,
@@ -48,7 +48,7 @@ development uses local validation and releases are published manually.
 without starting the server. The [operations guide](docs/metrics.md) defines fields,
 limits, and procedures for full queues, slow clients, and AOF failures.
 The [packages](docs/packages.md) include `sider`, `sider-aof-migrate`, `sider-backup`,
-and `sider-replica`. The [private Docker image](docs/docker.md) copies these same
+and `sider-replica`. The [Docker image](docs/docker.md) copies these same
 Linux executables without rebuilding the server.
 See the [runtime requirements](docs/runtime-requirements.md) to run the packages
 on Windows 11 x64 or Ubuntu 24.04 GNU without installing Rust or Cargo.
@@ -67,8 +67,7 @@ cargo run --locked -- --version
 cargo run --locked
 ```
 
-The repository is private. Cloning requires account access or Git authentication
-authorized for the project.
+The repository is public and can be cloned without authentication.
 
 Without arguments, the program validates configuration and opens the TCP listener.
 Use Ctrl+C to shut down. In another terminal, a RESP2 client can send the supported
@@ -164,7 +163,7 @@ with manual execution and evidence on the required platforms.
 | `xtask/` and `.cargo/config.toml` | Local Rust tools, isolated from database dependencies |
 | `AGENTS.md` | Local instructions for coding agents |
 | [PLAN.md](PLAN.md) | Historical record of the initial 0.1 design and stages |
-| [ROADMAP.md](ROADMAP.md) | Release sequence and dependencies through 1.0 |
+| [ROADMAP.md](ROADMAP.md) | Release sequence and dependencies through 1.0.1 |
 | [releases/plan.json](releases/plan.json) | Versioned source for milestones, tasks, and criteria |
 | [docs/releases.md](docs/releases.md) | Backlog execution, candidates, publication, and recovery |
 | [docs/architecture.md](docs/architecture.md) | Current boundaries and planned architecture |
@@ -185,7 +184,7 @@ executables, the compatibility audit, [soak testing](docs/soak.md), and
 [benchmarks](docs/benchmarks.md). Development results remain tied to their SHAs;
 the presence of runners does not mean gates have passed.
 
-The preparation PR sets the package version to `1.0.0`.
+The preparation PR sets the package version to `1.0.1`.
 The exact merge SHA will be built, packaged, and validated on both platforms
 to publish the candidate. The final release will promote the same approved files.
 The [0.1 plan](PLAN.md) preserves the historical design; the
@@ -211,5 +210,5 @@ Sider's own code uses the [MIT license](LICENSE), with the standard text from th
 [Open Source Initiative](https://opensource.org/license/mit).
 Dependencies retain their own licenses.
 
-Distributed packages include the `LICENSE` file. Adopting this license does not change
-the repository's private visibility or enable publication to crates.io.
+Distributed packages include the `LICENSE` file. The repository and release artifacts
+are public, while publication to crates.io remains disabled.

@@ -44,7 +44,7 @@
     "sources": ["https://redis.io/docs/latest/develop/using-commands/transactions/", "https://redis.io/docs/latest/develop/reference/protocol-spec/"]
   },
   "release_policy": {
-    "private": true,
+    "private": false,
     "publish_crate": false,
     "ci_enabled": false,
     "automatic_publication": false,
@@ -416,7 +416,7 @@
     },
     {
       "id": "R10", "version": "0.10.0", "title": "Operations and distribution", "publication": false,
-      "scope": ["Metrics, diagnostics, and reproducible backup and restore procedures.", "Distribute a Linux amd64 Docker image as an archive attached to the private release; verify operation and shutdown."],
+      "scope": ["Metrics, diagnostics, and reproducible backup and restore procedures.", "Distribute a Linux amd64 Docker image as an archive attached to the public release; verify operation and shutdown."],
       "required_gates": ["native","compatibility","tcp_smoke","docker"],
       "tasks": [
         {
@@ -442,7 +442,7 @@
         },
         {
           "id": "R10-04", "title": "Docker image", "area": "distribution", "depends_on": ["R03-03"],
-          "objective": "Package Sider Linux amd64 in a runnable image and validate its archive export for the private 1.0 publication.",
+          "objective": "Package Sider Linux amd64 in a runnable image and validate its archive export for the public 1.0 publication.",
           "deliverables": ["Reproducible Dockerfile with version/SHA, unprivileged user, persistent directory, and correct stop signal.", "Build, compressed docker save, checksum, and release manifest inclusion; the docker runner tests the exported image after load."],
           "tests": ["--version, TCP smoke, volume persistence, restart, invalid configuration, and container shutdown."],
           "acceptance": ["Exported and reloaded image runs the tests; distribution neither depends on a public registry nor exposes the repository."]
@@ -455,7 +455,7 @@
           "acceptance": ["Documentation reproduces results; metrics, restore, and shutdown verified across distribution channels."]
         }
       ],
-      "gate": {"id":"R10-GATE","title":"Validate internal milestone 0.10.0","acceptance":["Metrics verified, restore reproducible, shutdown and limits documented.","docker gate and local checks passed; the exported runnable image accompanies the private packages and checksums.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
+      "gate": {"id":"R10-GATE","title":"Validate internal milestone 0.10.0","acceptance":["Metrics verified, restore reproducible, shutdown and limits documented.","docker gate and local checks passed; the exported runnable image accompanies the public packages and checksums.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
     },
     {
       "id": "R11", "version": "1.0.0", "title": "Stabilization", "publication": true,
@@ -499,6 +499,28 @@
         }
       ],
       "gate": {"id":"R11-GATE","title":"Validate and publish 1.0.0","acceptance":["Sorted sets, transactions, and replication included; complete matrix without known corruption or loss beyond declared guarantees.","All gates passed, including a 3600-second soak, migration from the internal R10 baseline identified by SHA and hashes, and benchmarks.","Candidate approved with an immutable SHA and bundle; the final release promotes the same files and SHA without rebuilding. Any bundle change requires another candidate; close the milestone after verifying final publication."]}
+    },
+    {
+      "id": "R12", "version": "1.0.1", "title": "English and public distribution patch", "publication": true,
+      "scope": ["Deliver all human-readable project text in English without changing command, storage, or wire semantics.", "Publish repository and release artifacts openly while keeping crates.io publication disabled."],
+      "required_gates": ["native", "compatibility", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions", "pubsub", "replication", "docker", "soak", "benchmarks"],
+      "tasks": [
+        {
+          "id": "R12-01", "title": "English project text", "area": "documentation", "depends_on": ["R11-GATE"],
+          "objective": "Ship English runtime messages, diagnostics, tests, tooling output, metadata, and documentation as a patch release.",
+          "deliverables": ["English human-readable text across runtime, tests, tools, metadata, and documentation.", "Rename PLAN.md and preserve identifiers, protocol literals, commands, URLs, and binary fixtures."],
+          "tests": ["Scan tracked text for unintended Portuguese and mojibake; retain intentional Unicode fixtures.", "Run native checks, tool checks, documentation, release build, and affected compatibility gates."],
+          "acceptance": ["No unintended Brazilian Portuguese remains and runtime behavior other than translated human-readable messages is unchanged."]
+        },
+        {
+          "id": "R12-02", "title": "Public release contract", "area": "distribution", "depends_on": ["R12-01"],
+          "objective": "Align the release policy, verifier, backlog synchronization, and documentation with the public GitHub repository.",
+          "deliverables": ["Public repository and GitHub release assets recorded consistently in the plan, manifests, tests, and guides.", "Keep publish = false and do not publish the crate or a container registry image."],
+          "tests": ["Validate the real public repository state before synchronization and publication.", "Reject private repository state, mismatched artifact visibility, mutable promotion, and crates.io publication."],
+          "acceptance": ["The public release contract validates end to end without weakening immutable candidate promotion or artifact provenance."]
+        }
+      ],
+      "gate": {"id":"R12-GATE","title":"Validate and publish 1.0.1","acceptance":["English text and public distribution contracts are complete, with no command, storage, or wire-format change.","All cumulative gates pass for the exact 1.0.1 candidate SHA and immutable bundle, including Linux, Windows, Docker, and the 3600-second soak.","The final release promotes the approved candidate files and SHA without rebuilding, and the published downloads match the candidate hashes."]}
     }
   ]
 }

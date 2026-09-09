@@ -18,7 +18,7 @@ Differential tests have separate instructions and must be run explicitly.
 
 Development, tests, and project tools use Rust. The `xtask/` utility has its own
 manifest and lockfile, without adding dependencies to the server.
-GitHub operations use `gh` authenticated with an account that can access the private repository.
+GitHub operations use `gh` authenticated with an account that can manage the public repository.
 
 CI and automatic publication are deferred until after 1.0. The workflows and Python
 helpers were removed. Future CI must call the existing Rust commands.
@@ -137,5 +137,5 @@ without rebuilding, repackaging, or rerunning gates. A bundle change requires a 
 A required test that is missing, skipped, canceled, or lacks evidence blocks the release.
 No functional release is created for the bootstrap. Internal milestones close after
 their technical criteria have been validated. The 1.0 milestone closes after verifying
-the final publication, private Linux/Windows packages, and exported Docker image.
+the final publication, public Linux/Windows packages, and exported Docker image.
 Crate publication remains disabled.

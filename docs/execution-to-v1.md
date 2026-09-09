@@ -91,7 +91,7 @@ the same machine. A missing, skipped, or failed gate remains pending.
    preparation PR. Build and validate its exact SHA.
 3. Produce packages and receipts with version `1.0.0`. Artifact manifest v2 uses
    `artifact_version: "1.0.0"`; the GitHub tag and status identify `v1.0.0-rc.N`.
-4. Publish the private candidate, verify downloads, and record approval.
+4. Publish the public candidate, verify downloads, and record approval.
 5. Create the final tag at the same SHA and publish the same files, including
    manifest, evidence, and checksums. Do not rebuild, repackage, or repeat the soak.
 6. Record promotion verification outside the immutable set. Any change to that
@@ -102,7 +102,7 @@ SHA, and hash mismatches. Checking byte provenance and remote approval remains
 part of manual publication, not authorization inferred from the local verifier.
 
 Execution ends when all capabilities are demonstrated, final 1.0 is published,
-and its files are verified. Repository and artifacts remain private;
+and its files are verified. Repository and release artifacts are public;
 `publish = false`, Rust, binary RESP2, owning workers, bounded channels,
 and Linux/Windows support remain mandatory.
 

@@ -167,7 +167,7 @@ There is no election or automatic failover.
 
 ## Version documentation
 
-The [private repository](https://github.com/djairofilho/sider) contains configuration,
+The [public repository](https://github.com/djairofilho/sider) contains configuration,
 networking, compatibility, and testing guides in `docs/`. Use the manifest SHA or
 publication tag to consult the same code as the package. See `docs/replication.md`,
 `docs/backup.md`, `docs/persistence.md`, `docs/metrics.md`, and
@@ -175,4 +175,4 @@ publication tag to consult the same code as the package. See `docs/replication.m
 in this archive.
 
 The package does not include Redis or redis-cli. Sider dependencies retain their
-own licenses. The MIT license does not change the artifacts' private visibility.
+own licenses. The repository and release artifacts are publicly available.

@@ -1,9 +1,9 @@
 # Local packages and extracted-executable smoke test
 
-Before publishing the 1.0 candidate, build and test the exact SHA of the
+Before publishing a candidate, build and test the exact SHA of the
 preparation merge on the native system. Use new directories for staging, archive,
-and extraction. The RC and final use the same packages, already identified as
-`1.0.0`. Promotion verifies the same bytes; it does not rebuild or repackage.
+and extraction. The RC and final use the same packages, identified by the candidate's
+base version. Promotion verifies the same bytes; it does not rebuild or repackage.
 
 The [runtime requirements](runtime-requirements.md) describe Windows 11 x64,
 Ubuntu 24.04 GNU, and external dependencies. The text is the versioned source
@@ -72,7 +72,7 @@ The final reuses this evidence only for the same SHA and files.
 
 Record the build, packaging, extraction, and smoke commands; their output and
 exit code; file and package hashes; system, compiler, and checkout SHA. Include
-this evidence in the local manifest and attach the logs to the private release.
+this evidence in the local manifest and attach the logs to the public release.
 
 The [release procedure](releases.md) adds the cumulative gates, candidate,
 verification downloads, and milestone closure only after the final is published.

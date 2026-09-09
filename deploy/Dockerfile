@@ -1,4 +1,4 @@
-# Private distribution image: the context contains only the validated Linux package.
+# Distribution image: the context contains only the validated Linux package.
 # It does not rebuild the product or query package repositories during the build.
 FROM ubuntu:24.04@sha256:1e0a86e57d247923571b75e0aaf48a1449cf8c543d51fb3e07a4a7d7bfa79316
 

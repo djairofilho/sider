@@ -41,7 +41,7 @@ Initial inspection on September 7, 2026, before the bootstrap:
 
 The implementation uses a package and binary named `sider`, version `0.1.0`,
 and Edition 2024. The current folder keeps its name without affecting the program
-name. The bootstrap includes the private `djairofilho/sider` repository, requested
+name. The bootstrap includes the public `djairofilho/sider` repository, requested
 after planning. Crate publication is disabled with `publish = false`.
 
 ## Version 0.1 scope

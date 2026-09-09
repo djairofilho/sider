@@ -149,7 +149,7 @@ impl Fixture {
                 "schema_version": 2,
                 "repository": "djairofilho/sider",
                 "reference": {"image": IMAGE, "platform": "linux/amd64", "redis_version": "8.10.1", "redis_cli_version": "8.10.1"},
-                "release_policy": {"private": true, "publish_crate": false, "targets": [TARGET],
+                "release_policy": {"private": false, "publish_crate": false, "targets": [TARGET],
                     "final_promotion": "same_sha_same_assets", "bundle_change_requires_new_candidate": true},
                 "releases": [{"version": "1.0.0", "publication": true, "required_gates": ["compatibility"]}]
             }),
@@ -409,11 +409,11 @@ fn rejects_non_native_or_mislabeled_target() {
 }
 
 #[test]
-fn requires_private_policy_registered_gate_and_exact_reference() {
+fn requires_public_policy_registered_gate_and_exact_reference() {
     for (pointer, invalid) in [
         ("/schema_version", json!(1)),
         ("/schema_version", json!(2.0)),
-        ("/release_policy/private", json!(false)),
+        ("/release_policy/private", json!(true)),
         ("/release_policy/publish_crate", json!(true)),
         ("/release_policy/final_promotion", json!("rebuild")),
         (

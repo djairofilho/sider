@@ -2,8 +2,8 @@
 
 The database, tests, and project tools use Rust. CI and automatic publication are
 deferred until after 1.0. The `gh` CLI performs manual GitHub operations; there is
-no other publisher or scripting framework. The repository and artifacts remain
-private, with `publish = false`.
+no other publisher or scripting framework. The repository and release artifacts are
+public, with `publish = false` retaining the crates.io publication block.
 
 ## Short development cycle
 
@@ -42,9 +42,10 @@ cargo xtask sync --json
 cargo xtask sync --apply
 ```
 
-[releases/plan.json](../releases/plan.json), schema 2, preserves the 11 milestones,
-50 tasks, and their IDs. `publication: false` in R01–R10 defines internal checkpoints;
-only R11 is publishable. [ROADMAP.md](../ROADMAP.md) is generated.
+[releases/plan.json](../releases/plan.json), schema 2, preserves the milestones,
+tasks, and their IDs. `publication: false` in R01–R10 defines internal checkpoints;
+R11 and explicitly registered patch entries are publishable. [ROADMAP.md](../ROADMAP.md)
+is generated.
 Operational state lives in issues. Do not change the package version for each checkpoint.
 
 The DAG uses explicit technical dependencies, regardless of position in the JSON.
@@ -57,7 +58,7 @@ PRs through merge commits after local validation. Up to three workstreams may im
 in parallel, with one integrator responsible for shared contracts.
 Functional PRs may close several related issues. Internal checkpoints close after
 checking criteria and source evidence, without a candidate or publication.
-`R11-GATE` closes only after the final release is published and verified.
+A publishable gate closes only after its final release is published and verified.
 
 `validate` checks the plan, gates, and roadmap. Future runners with `command: null`
 are valid pending work, never passed results. Implement them alongside their features.
@@ -112,6 +113,17 @@ may be preserved.
 Packages, binaries, and receipts use `1.0.0` starting with the candidate. The RC
 number is a publication identity, not an executable version. Any change to the SHA
 or approved file set requires a new candidate.
+
+## Preparing a patch candidate
+
+Each patch release has its own manifest entry, task IDs, gate, notes, package version,
+candidate, and immutable asset set. For `1.0.1`, use branch
+`chore/release-v1.0.1`, set `Cargo.toml` and `Cargo.lock` to `1.0.1`, and update
+`CHANGELOG.md` plus `releases/notes/v1.0.1.md`. The candidate identifier is
+`1.0.1-rc.N`, while every binary, receipt, manifest, and asset name uses `1.0.1`.
+The patch inherits the cumulative gate matrix because it changes the executable and
+its human-readable protocol errors. Final promotion uses the candidate's exact SHA
+and downloaded files without rebuilding.
 
 ## Product gates
 
@@ -173,10 +185,10 @@ retains `publication_authorized: false`.
 
 ## Publishing the candidate and promoting the final release
 
-1. Confirm the repository is private, the preparation PR is merged, the label and
+1. Confirm the repository is public, the preparation PR is merged, the label and
    SHA are correct, tasks are complete, and the full matrix passed on the frozen build.
 2. Check the local bundle with the RC identifier. Create tag `v1.0.0-rc.N` at the
-   approved SHA, respecting signing configuration, and create a private draft.
+   approved SHA, respecting signing configuration, and create a draft.
 3. Upload files without `--clobber`. Download everything into a new directory,
    verify the bundle, and compare hashes with the originals and GitHub's digests.
 4. Publish the candidate as a prerelease, never latest. Check the published release
@@ -195,6 +207,6 @@ A draft can be resumed. Failure to comment or close a milestone calls for backlo
 reconciliation, not rebuilding or republishing.
 
 The [MIT license](../LICENSE) does not make the repository or artifacts public.
-The crate is not published to crates.io; the image is a private asset, with no public
-registry. Future CI requires an explicit request and must reuse existing Rust
+The crate is not published to crates.io; the image is a public release asset, with no
+container registry publication. Future CI requires an explicit request and must reuse existing Rust
 commands, without automatic activation when 1.0 is released.
