@@ -25,6 +25,39 @@ const IMAGE: &str =
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+#[cfg(any(
+    all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"),
+    all(target_os = "windows", target_arch = "x86_64", target_env = "msvc")
+))]
+fn native_platform_observation_can_publish_persistence_receipt() {
+    let target = if cfg!(target_os = "windows") {
+        "x86_64-pc-windows-msvc"
+    } else {
+        TARGET
+    };
+    let mut fixture = Fixture::new();
+    fixture.env.insert("SIDER_RELEASE_TARGET", target.into());
+    fixture.change(|state| {
+        state.plan["releases"][0]["required_gates"] = json!(["crash"]);
+        state.plan["release_policy"]["targets"] = json!([target]);
+        state.compiler = format!("rustc 1.97.1\nhost: {target}\nrelease: 1.97.1\n");
+        state.compiled_os = std::env::consts::OS.into();
+        state.compiled_arch = std::env::consts::ARCH.into();
+        state.compiled_env = gate_receipt::compiled_environment().into();
+    });
+    fixture
+        .context("crash")
+        .unwrap()
+        .publish(
+            1,
+            Duration::from_secs(1),
+            json!({"suite":"native-contract"}),
+        )
+        .unwrap();
+    assert!(fixture.out.join("receipt-crash.json").is_file());
+}
+
+#[test]
 fn persistence_receipts_support_both_native_targets_without_cross_compilation() {
     for gate in ["crash", "recovery", "migration"] {
         for (target, os, env) in [
