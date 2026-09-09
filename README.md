@@ -8,7 +8,7 @@ O binário atende `PING`, `ECHO`, `GET`, `SET` básico e `DEL` por RESP2/TCP.
 Um worker proprietário serializa o armazenamento, com filas, conexões e buffers
 limitados. É um protótipo local, sem persistência, autenticação ou quota do dataset.
 A suíte diferencial compara o binário com Redis 8.10.1 e verifica os cinco comandos
-com `redis-cli`. O fuzz tem alvo isolado e gate próprio. A
+com `redis-cli`. A
 [candidata 0.1.0-rc.1](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1)
 foi publicada no repositório privado; a final ainda não foi publicada.
 
@@ -89,9 +89,8 @@ Não é necessário aguardar CI para integrar um PR. Registre os testes locais n
 Os testes cobrem a fundação, o codec, comandos, worker, TCP e o binário real.
 As fixtures Redis são reproduzidas por TCP e pela suíte diferencial de servidores.
 O [guia de testes](docs/testing.md) explica os comandos locais; o
-[guia de diferenciais](docs/differential.md) cobre Redis/CLI e os recibos de gates,
-e o [guia de fuzz](fuzz/README.md) descreve o alvo instrumentado. Todos os testes
-novos usam Rust e os testes externos são opt-in.
+[guia de diferenciais](docs/differential.md) cobre Redis/CLI e os recibos de gates.
+Todos os testes novos usam Rust e os testes externos são opt-in.
 Antes de cada release, os gates cumulativos continuam obrigatórios,
 com execução manual e evidências nas plataformas previstas.
 
@@ -115,7 +114,6 @@ com execução manual e evidências nas plataformas previstas.
 | `tests/tcp.rs` | Fixtures por TCP, pipelines, fragmentação e ciclo das conexões |
 | `tests/compatibility.rs` | Comparação independente Sider/Redis e integração com redis-cli |
 | `tests/gate_contract.rs` e `tests/harness.rs` | Evidências, isolamento e falhas da infraestrutura de testes |
-| `tests/fuzz_gate.rs` e `fuzz/` | Alvo instrumentado, corpus e gate com duração mínima |
 | `dev/test.Dockerfile` | Ambiente local Ubuntu para testes, distinto da imagem de distribuição |
 | `Cargo.toml` e `Cargo.lock` | Pacote Rust e dependências fixadas |
 | `rust-toolchain.toml` | Toolchain e componentes de desenvolvimento |
@@ -142,11 +140,12 @@ encoder atômico, decoder incremental e testes de propriedades.
 validação das fixtures e das divergências de `SET`/comando desconhecido.
 `R01-04` conecta o núcleo ao worker e ao TCP, com configuração, timeouts,
 prontidão e encerramento supervisionado. `R01-05` acrescenta a comparação
-diferencial Sider/Redis, integração com `redis-cli` e fuzz, com execução registrada
+diferencial Sider/Redis e integração com `redis-cli`, com execução registrada
 no guia de testes. Essas entregas estão integradas. `R01-GATE` já publicou a
-candidata e ainda precisa conferir e publicar a final, com
-[pacotes e smokes](docs/packages.md). A migração das ferramentas não altera
-as evidências congeladas do SHA de release nem publica uma versão automaticamente.
+candidata. A migração das ferramentas e a remoção do fuzz alteram a preparação
+de release e exigem uma nova candidata antes da final, com
+[pacotes e smokes](docs/packages.md). As evidências anteriores continuam
+vinculadas aos seus SHAs e não aprovam o checkout alterado.
 
 O alvo da versão 0.1 inclui `PING`, `ECHO`, `GET`, `SET` básico e `DEL`, com um
 único worker de armazenamento. TTL, persistência e múltiplos shards pertencem às

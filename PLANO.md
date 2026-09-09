@@ -9,8 +9,8 @@ com tarefas, dependências e critérios. O [guia de releases](docs/releases.md)
 descreve candidatas e publicação. O bootstrap já contém pacote Rust, configuração de
 endereço e binário com testes. A referência Redis e o codec RESP2 isolado estão
 implementados, assim como parser e armazenamento síncrono dos cinco comandos.
-Worker e servidor TCP também estão implementados em R01-04. A suíte diferencial,
-a integração com CLI e o alvo de fuzz de R01-05 estão implementados. As execuções
+Worker e servidor TCP também estão implementados em R01-04. A suíte diferencial
+e a integração com CLI de R01-05 estão implementadas. As execuções
 e seus limites estão no [guia de testes](docs/testing.md).
 
 CI e publicação automática foram adiadas para depois da 1.0. Até a 1.0 inclusive,
@@ -173,7 +173,7 @@ estado. O mapa não conhecerá RESP. A conexão coordenará essas partes.
 Dependências de produção: `tokio`, `bytes`, `thiserror`, `tracing` e
 `tracing-subscriber`. Ativar apenas as funcionalidades Tokio necessárias para rede,
 I/O, runtime multithread, canais, timers e sinais. Nos testes, usar `proptest` e as
-utilidades de controle de tempo do Tokio. O alvo de fuzz terá dependências isoladas.
+utilidades de controle de tempo do Tokio.
 
 O código próprio começará com `#![forbid(unsafe_code)]`. Isso não afirma que todas
 as dependências transitivas sejam livres de `unsafe`. O projeto não usará panics
@@ -214,9 +214,6 @@ sider/
 │   ├── robustness.rs
 │   ├── differential.rs
 │   └── redis_cli.rs
-├── fuzz/
-│   ├── Cargo.toml
-│   └── fuzz_targets/resp_decoder.rs
 └── docs/
     ├── architecture.md
     └── compatibility.md
@@ -527,12 +524,6 @@ Clientes que exigem handshake automático terão sua limitação documentada.
 
 ### 7. Robustez e entrega da 0.1
 
-- [x] Adicionar alvo de fuzz do decoder com limites pequenos, múltiplas chamadas e
-      corpus de frames válidos, truncados, concatenados e malformados.
-- [x] Fazer uma execução inicial de fuzz com duração registrada, por exemplo 15 minutos,
-      em Linux com a toolchain exigida pela ferramenta, isolada do build estável.
-- [x] Revisar o resultado e transformar falhas encontradas em regressões determinísticas.
-      A execução inicial de 452.886 casos não encontrou falhas novas para converter.
 - [x] Validar liberação de recursos após clientes lentos e múltiplas desconexões.
 - [x] Documentar arquitetura, comandos suportados, limites e como reproduzir os testes.
 - [x] Executar a bateria final e registrar resultados reais, incluindo testes ignorados.
@@ -540,23 +531,22 @@ Clientes que exigem handshake automático terão sua limitação documentada.
 Verificação rápida local das etapas, conforme os alvos forem surgindo:
 
 ```powershell
-cargo fmt --check
-cargo check --locked
-cargo test --locked
+cargo test --locked <filtro>
+cargo xtask check
 ```
 
-Ao alterar código Rust, execute também
-`cargo clippy --locked --all-targets -- -D warnings`. Mudanças de interfaces,
-documentação de API ou build exigem `cargo doc --locked --no-deps` e
+O check reúne formatação, Clippy, build do binário e testes nativos.
+Mudanças de interfaces, documentação de API ou build exigem
+`cargo doc --locked --no-deps` e
 `cargo build --locked --release`. Registre os resultados locais no PR e integre
 por merge commit, sem aguardar CI.
 
-Os testes externos terão comandos próprios documentados. O alvo de fuzz terá seu
-próprio manifest e verificação. Não será incluído implicitamente em `cargo test`.
+Os testes externos têm comandos próprios documentados e não são executados
+implicitamente em `cargo test`.
 Antes de publicar, o build e os testes comuns serão verificados manualmente em
-Windows e Linux; o fuzz poderá rodar somente em Linux inicialmente. A CI
+Windows e Linux. A CI
 multiplataforma foi verificada no bootstrap, mas está desativada nesta fase.
-Os workflows arquivados serão revisados para retomada somente depois da 1.0.
+Os workflows foram removidos; uma futura CI exige solicitação explícita depois da 1.0.
 
 ## Critérios de conclusão
 
@@ -567,7 +557,7 @@ A versão 0.1 estará pronta quando:
 3. Fragmentação, concatenação, limites e entradas malformadas tiverem testes passando.
 4. A suíte diferencial passar contra a versão registrada do Redis.
 5. Cancelamento, backpressure, clientes lentos e shutdown tiverem comportamento testado.
-6. Formatação, lint, testes nativos e execução inicial de fuzz estiverem registrados.
+6. Formatação, lint e testes nativos estiverem registrados.
 7. A matriz não confundir comportamento planejado com compatibilidade demonstrada.
 
 Não haverá meta de superar Redis nesta versão. O custo de cópias, canais e alocações
@@ -577,7 +567,7 @@ será registrado como hipótese para medição futura, sem alegação de desempe
 
 | Risco ou decisão | Tratamento planejado |
 | --- | --- |
-| Parser consumir memória ou CPU com entrada hostil | Limites agregados, aritmética verificada, estado incremental, propriedades e fuzz |
+| Parser consumir memória ou CPU com entrada hostil | Limites agregados, aritmética verificada, estado incremental, fixtures e propriedades |
 | Chave pequena reter buffer grande | Copiar payloads para alocações independentes na entrada |
 | Limites de rede serem confundidos com limite do banco | Documentar dataset sem quota; resolver contabilidade na 0.2 |
 | Cliente interpretar timeout como operação desfeita | Definir aceitação no enqueue e resultado desconhecido depois dele |
@@ -636,6 +626,6 @@ A fundação executável, os testes de configuração e as fixtures de referênc
 Redis/CLI estão implementados. A execução de `R01-01` está documentada no
 [guia de testes](docs/testing.md). O codec isolado de `R01-02` também está
 implementado, assim como parser e armazenamento síncrono de `R01-03`, worker e
-TCP de `R01-04`. `R01-05` implementa diferenciais e fuzz; sua execução e integração
-precedem `R01-GATE`, a candidata e a publicação final. O roadmap preserva os
-checkpoints internos deste plano.
+TCP de `R01-04`. `R01-05` integra diferenciais e CLI. `R01-GATE` publicou a
+primeira candidata; a final aguarda nova candidata com as alterações de
+ferramentas e gates. O roadmap preserva os checkpoints internos deste plano.

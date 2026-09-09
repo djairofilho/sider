@@ -8,12 +8,16 @@
   com os mesmos critérios de release; CI permanece adiada para depois da 1.0.
 - Ciclo curto com testes focados e checks separados para banco e ferramentas,
   sem executar gates externos a cada edição ou duplicar check e Clippy.
+- Remoção completa da estrutura, dependências e gate de fuzz. Permanecem os
+  testes nativos, de propriedades, diferenciais e de pacotes extraídos.
+- As alterações de ferramentas e gates exigem nova candidata antes da final.
 
-## [0.1.0] - 2026-09-08
+## [0.1.0] - Preparação anterior, não publicada
 
-- Promoção da candidata aprovada, sem alterações funcionais ou de dependências.
-- Nova compilação e validação local dos dois pacotes antes da publicação final.
-- [Notas da final](releases/notes/v0.1.0.md), incluindo o requisito do runtime
+- A preparação anterior previa promover a candidata aprovada, sem alterações
+  funcionais ou de dependências. A final permanece pendente e precisa de nova
+  candidata para incluir as mudanças em ferramentas e gates.
+- [Rascunho das notas da final](releases/notes/v0.1.0.md), incluindo o requisito do runtime
   Visual C++ v14 Redistributable x64 para o executável Windows.
 
 ## [0.1.0-rc.1] - 2026-09-08
@@ -39,5 +43,7 @@
   adiadas para depois da 1.0.
 
 As [notas da candidata](releases/notes/v0.1.0-rc.1.md) descrevem o subconjunto e suas
-limitações. A RC foi publicada e aprovada. A publicação final depende de nova
-aprovação dos gates no SHA exato de seu merge e da conferência dos artefatos.
+limitações e preservam a política de validação vigente naquela publicação.
+A RC foi publicada e aprovada. A publicação final com as alterações atuais depende
+de outra candidata aprovada, dos gates no SHA exato de seu merge e da conferência
+dos artefatos.

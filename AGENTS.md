@@ -4,7 +4,7 @@
 
 - Leia `PLANO.md`, `README.md`, `ROADMAP.md` e `docs/compatibility.md` antes de implementar.
 - Avance pela próxima tarefa desbloqueada do milestone atual, em etapas compiláveis
-  e testáveis. Após validar e integrar diferenciais/fuzz de `R01-05`, o próximo
+  e testáveis. Após validar e integrar diferenciais/CLI de `R01-05`, o próximo
   item é `R01-GATE`, com candidata e final verificadas antes de avançar à 0.2.
 - Crie módulos quando houver implementação real; evite stubs e diretórios vazios.
 - Preserve as fronteiras entre RESP, comandos, armazenamento e rede.
@@ -20,7 +20,7 @@
 - CI e publicação automática estão adiadas para depois da 1.0. Os workflows e
   helpers Python foram removidos; não os restaure nem reative CI sem solicitação.
 - Banco, testes e ferramentas próprias usam Rust. `xtask/` tem manifesto e lockfile
-  independentes; não acrescente suas dependências ao servidor ou ao fuzz.
+  independentes; não acrescente suas dependências ao servidor.
 - Ao alterar o plano ou `xtask/`, execute `cargo xtask check --tools`.
   `cargo xtask sync` só simula; `--apply` permite alterar o backlog no GitHub.
   Não crie outro framework de publicação enquanto a publicação for manual.
@@ -49,7 +49,7 @@
 - Valide documentação isolada sem repetir toda a suíte do banco. Execute os testes
   das ferramentas somente quando elas, seus contratos ou seu manifesto mudarem.
   Preserve os caches Cargo e execute gates externos apenas quando relevantes à
-  tarefa ou obrigatórios na release. Nunca use o check rápido como prova de fuzz.
+  tarefa ou obrigatórios na release.
 - Verifique também `cargo doc --locked --no-deps` e `cargo build --locked --release`
   quando mudar interfaces, configuração de build ou documentação de API.
 

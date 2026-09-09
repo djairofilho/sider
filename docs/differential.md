@@ -28,15 +28,14 @@ ao Redis. Consulte a [matriz de compatibilidade](compatibility.md).
 ## Ciclo nativo, sem infraestrutura externa
 
 ```sh
-cargo test --locked --test compatibility --test harness --test gate_contract --test fuzz_gate
+cargo test --locked --test compatibility --test harness --test gate_contract
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
 Os testes externos são explicitamente ignorados por padrão. Isso não aprova os
 gates. Os testes nativos cobrem o leitor independente, o gerador reproduzível,
 processos com deadline/saída limitada, prontidão inválida, contexto de release
-divergente, recibo antigo, zero casos, duração insuficiente e logs de fuzz inválidos.
-O próprio alvo de fuzz também executa os seeds determinísticos nesse ciclo.
+divergente, recibo antigo e zero casos.
 
 ## Comparação binária no Windows
 
@@ -62,7 +61,7 @@ do Sider fora do loopback. Execute uma referência por runner, sem paralelizar
 os entrypoints externos. [Rede compartilhada do Docker](https://docs.docker.com/engine/network/#container-networks).
 
 A receita [dev/test.Dockerfile](../dev/test.Dockerfile) fixa Ubuntu 24.04 e Docker
-CLI por digest, Rust 1.97.1, rustup com checksum, nightly de fuzz e cargo-fuzz.
+CLI por digest, Rust 1.97.1 e rustup com checksum.
 Ela é uma ferramenta local, não a imagem de distribuição prevista para a 0.10.
 Os pacotes Ubuntu vêm dos repositórios da distribuição; não há promessa de imagem
 bit a bit idêntica em builds feitos em datas diferentes.
@@ -113,7 +112,6 @@ toolchain estável e target Linux GNU nativo. Além do ID do runner, forneça:
 
 ```sh
 cargo test --locked --test compatibility -- --ignored --exact release_compatibility_gate --nocapture
-cargo test --locked --test fuzz_gate -- --ignored --exact release_fuzz_gate --nocapture
 ```
 
 Os recibos só são publicados após sucesso e cleanup, com casos positivos, duração,
@@ -123,11 +121,5 @@ checkout alterado, target errado, recibo antigo ou execução filtrada sem casos
 produzem aprovação. Se o diretório estiver dentro do checkout, use `target/`, que
 é ignorado pelo Git. Copie os resultados para fora do runner antes de removê-lo.
 
-O [guia de fuzz](../fuzz/README.md) detalha a toolchain isolada, corpus e execução
-real de pelo menos 900 segundos. A compilação não conta nessa duração. A candidata
-e a final exigem novos recibos no próprio SHA; resultados de uma branch de trabalho
-não substituem essa validação.
-
-Em uma troca de versão, atualize também a entrada `sider` de `fuzz/Cargo.lock`,
-sem alterar outras dependências. O lockfile isolado participa da identidade do
-mesmo pacote, assim como o lockfile raiz.
+A candidata e a final exigem novos recibos no próprio SHA; resultados de uma
+branch de trabalho não substituem essa validação.

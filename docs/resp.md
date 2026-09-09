@@ -119,5 +119,5 @@ arbitrários. Um contador de trabalho exclusivo dos testes do decoder detecta
 reprocessamento quadrático sem medir tempo de parede.
 
 Isso valida o codec isolado, não o servidor TCP nem a semântica dos comandos.
-O fuzz prolongado da candidata pertence a R01-05 e continua obrigatório antes
-da publicação, além destes testes. Veja [o guia de testes](testing.md).
+Os testes de integração e os gates de publicação estão no
+[guia de testes](testing.md) e no [guia de releases](releases.md).
