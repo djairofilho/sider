@@ -115,7 +115,7 @@ pub fn verify(
     }
     let preflight = read_json(&directory.join("release-preflight.json"))?;
     if preflight["repository"]["nameWithOwner"] != plan["repository"]
-        || preflight["repository"]["isPrivate"] != true
+        || preflight["repository"]["isPrivate"] != false
         || preflight["pull_request"]["mergeCommit"]["oid"] != sha
     {
         return Err("Local preflight differs from declared identity".into());
@@ -857,7 +857,7 @@ mod tests {
             fs::write(
                 root.join("release-preflight.json"),
                 serde_json::to_vec(&json!({
-                    "repository":{"nameWithOwner":"example/sider","isPrivate":true},
+                    "repository":{"nameWithOwner":"example/sider","isPrivate":false},
                     "pull_request":{"mergeCommit":{"oid":SHA}}
                 }))
                 .unwrap(),
