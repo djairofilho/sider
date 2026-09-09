@@ -11,7 +11,7 @@
     "sorted_sets": {"command": ["cargo", "test", "--locked", "--test", "collections_differential", "--", "--ignored", "--exact", "release_sorted_sets_gate", "--nocapture"], "timeout_seconds": 600},
     "transactions": {"command": ["cargo", "test", "--locked", "--test", "transactions", "--", "--ignored", "--exact", "release_transactions_gate", "--nocapture"], "timeout_seconds": 600},
     "pubsub": {"command": ["cargo", "test", "--locked", "--test", "pubsub", "--", "--ignored", "--exact", "release_pubsub_gate", "--nocapture"], "timeout_seconds": 600},
-    "replication": {"command": null, "timeout_seconds": 1200},
+    "replication": {"command": ["cargo", "test", "--locked", "--test", "replication_network", "--", "--ignored", "--exact", "release_replication_gate", "--nocapture"], "timeout_seconds": 1200},
     "docker": {"command": ["cargo", "test", "--locked", "--test", "docker_distribution", "--", "--ignored", "--exact", "release_docker_gate", "--nocapture"], "timeout_seconds": 1200},
     "soak": {"command": null, "timeout_seconds": 3900, "minimum_seconds": 3600},
     "benchmarks": {"command": null, "timeout_seconds": 1800}
