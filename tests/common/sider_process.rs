@@ -4,6 +4,7 @@
 // Os consumidores de gates e de integração usam subconjuntos desta API.
 #![allow(dead_code)]
 
+use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream};
@@ -31,6 +32,15 @@ impl SiderProcess {
     }
 
     pub fn try_start(binary: &Path, expected_version: &str) -> Result<Self, String> {
+        Self::try_start_configured(binary, expected_version, &[])
+    }
+
+    /// Configuração injetada no filho; nunca altera o ambiente global dos testes.
+    pub fn try_start_configured(
+        binary: &Path,
+        expected_version: &str,
+        overrides: &[(&str, OsString)],
+    ) -> Result<Self, String> {
         let version = run(sider(binary).arg("--version"), TIMEOUT)?;
         if !version.status.success()
             || version.stdout != format!("sider {expected_version}\n").as_bytes()
@@ -42,8 +52,15 @@ impl SiderProcess {
             ));
         }
         let mut directory = Directory::new()?;
+        let mut command = sider(binary);
+        for (name, value) in overrides {
+            if !name.starts_with("SIDER_") || matches!(*name, "SIDER_ADDR" | "SIDER_READY_FILE") {
+                return Err("override de teste inválido".into());
+            }
+            command.env(name, value);
+        }
         let mut child = OwnedChild::spawn(
-            sider(binary)
+            command
                 .env("SIDER_ADDR", "127.0.0.1:0")
                 .env("SIDER_READY_FILE", directory.ready()),
         )?;
@@ -63,6 +80,10 @@ impl SiderProcess {
 
     pub fn address(&self) -> SocketAddr {
         self.address
+    }
+
+    pub fn id(&self) -> u32 {
+        self.child.id()
     }
 
     pub fn assert_alive(&mut self) {
