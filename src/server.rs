@@ -12,6 +12,7 @@ use tokio::time::{Instant, sleep_until};
 
 use crate::connection::{self, ConnectionError};
 use crate::storage::worker::{self, DbHandle};
+use crate::storage::{Store, StoreConfig, SystemClock};
 use crate::{ConfigError, ServerConfig};
 
 /// Falha que impede o servidor de continuar atendendo.
@@ -40,10 +41,17 @@ pub async fn serve(
 ) -> Result<(), ServerError> {
     config.validate()?;
     let (stop, receiver) = watch::channel(false);
-    let (database, worker) = worker::channel(
+    let store = Store::with_config(
+        StoreConfig {
+            max_dataset_bytes: config.max_dataset_bytes,
+        },
+        Arc::new(SystemClock),
+    )?;
+    let (database, worker) = worker::channel_with_store(
         config.worker_queue_capacity,
         config.request_timeout,
         receiver,
+        store,
     )?;
     supervise(listener, config, shutdown, database, worker.run(), stop).await
 }

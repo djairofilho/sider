@@ -42,16 +42,19 @@ redis-cli -2 -h 127.0.0.1 -p 6379 GET exemplo
 redis-cli -2 -h 127.0.0.1 -p 6379 DEL exemplo
 ```
 
-A versão 0.1 atende `PING [mensagem]`, `ECHO mensagem`, `GET chave`,
-`SET chave valor` básico e `DEL chave [chave ...]`, em arrays RESP2 de bulk strings.
+O núcleo atende `PING`, `ECHO`, `GET`, `SET`, `DEL`, `EXISTS`, `INCR`, `DECR`,
+`MGET`, `MSET`, `EXPIRE`, `PEXPIRE`, `TTL`, `PTTL` e `PERSIST`. SET aceita NX, XX,
+EX, PX, GET e KEEPTTL. Requisições usam arrays RESP2 de bulk strings.
 Chaves e valores preservam bytes arbitrários. Não há modo inline ou RESP3.
 Clientes que enviam comandos de inicialização adicionais podem ser incompatíveis.
 
 ## Limites e segurança
 
 - Use somente em ambiente controlado. Não há autenticação, ACL ou TLS.
-- Não há persistência, TTL ou quota do dataset na 0.1. Todos os dados são perdidos
-  ao terminar o processo; escritas podem esgotar a memória disponível.
+- Não há persistência. Todos os dados são perdidos ao terminar o processo.
+- TTL tem expiração passiva e limpeza ativa limitada. A quota lógica padrão é
+  64 MiB (`SIDER_MAX_DATASET_BYTES`); crescimento excedente é rejeitado sem eviction.
+  A contabilidade inclui chave, valor e taxa fixa de 128 bytes, não mede RSS.
 - O padrão permite 32 conexões e 32 comandos na fila do worker, payloads de até
   1 MiB e frames/buffers de entrada de até 4 MiB. Isso não limita a memória total.
 - Os prazos padrão são 10 segundos para formar um frame, 5 segundos para fila e
@@ -64,8 +67,8 @@ Clientes que enviam comandos de inicialização adicionais podem ser incompatív
 ## Documentação da versão
 
 O [repositório privado](https://github.com/djairofilho/sider) contém os guias de
-configuração, rede, compatibilidade e testes em `docs/`. Use a tag indicada nas
-notas e no manifesto da release, não a branch `main`, para consultar o mesmo código
+configuração, rede, compatibilidade e testes em `docs/`. Use o SHA do manifesto ou
+a tag da publicação para consultar o mesmo código
 do pacote. Os guias completos não estão incluídos neste arquivo compactado.
 
 O pacote não inclui Redis ou redis-cli. As dependências do Sider preservam suas

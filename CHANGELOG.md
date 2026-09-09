@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Strings adicionais (`EXISTS`, `INCR`, `DECR`, `MGET`, `MSET`) e SET com NX, XX,
+  EX, PX, GET e KEEPTTL, com overflow e rejeições sem alterações parciais.
+- EXPIRE, PEXPIRE, TTL, PTTL e PERSIST; relógio injetável e limpeza ativa limitada.
+- Quota lógica configurável do dataset, padrão 64 MiB, com contabilidade de lotes
+  pelo estado final e rejeição de crescimento sem eviction.
+- Diferenciais R02 contra Redis 8.10.1 e regressões de tempo, quota e limites TCP.
 - Ferramentas locais de planejamento, backlog, verificação e integridade de
   artefatos em Rust, acessíveis por `cargo xtask` e isoladas do servidor.
 - Remoção dos helpers Python e workflows arquivados. Publicação continua manual;

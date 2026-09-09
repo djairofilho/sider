@@ -28,6 +28,8 @@ pub struct ServerConfig {
     pub max_input_buffer_bytes: usize,
     /// Bytes de uma resposta completa, incluindo framing.
     pub max_response_bytes: usize,
+    /// Bytes lógicos do dataset, incluindo a taxa fixa por entrada, sem eviction.
+    pub max_dataset_bytes: usize,
     /// Prazo de formação do frame, contado desde seu primeiro byte.
     pub frame_timeout: Duration,
     /// Prazo total para enviar ao worker e receber sua resposta.
@@ -49,6 +51,7 @@ impl Default for ServerConfig {
             worker_queue_capacity: 32,
             max_input_buffer_bytes: 4 * 1024 * 1024,
             max_response_bytes: 4 * 1024 * 1024,
+            max_dataset_bytes: crate::storage::StoreConfig::default().max_dataset_bytes,
             frame_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(5),
             write_timeout: Duration::from_secs(5),
@@ -101,6 +104,7 @@ impl ServerConfig {
             "SIDER_MAX_INPUT_BUFFER_BYTES"
         );
         read_size!(config.max_response_bytes, "SIDER_MAX_RESPONSE_BYTES");
+        read_size!(config.max_dataset_bytes, "SIDER_MAX_DATASET_BYTES");
 
         for (field, name) in [
             (&mut config.frame_timeout, "SIDER_FRAME_TIMEOUT_MS"),
@@ -124,6 +128,10 @@ impl ServerConfig {
     /// mensagens internas de saída. A porta zero continua válida para bind efêmero.
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.resp_limits.validate()?;
+        crate::storage::StoreConfig {
+            max_dataset_bytes: self.max_dataset_bytes,
+        }
+        .validate()?;
         let invalid = |reason| ConfigError::InvalidServerLimits { reason };
         for (value, reason) in [
             (
@@ -238,7 +246,8 @@ fn parse_integer<T: FromStr>(name: &'static str, value: OsString) -> Result<T, C
 mod tests {
     use super::*;
 
-    const NUMERIC_NAMES: [&str; 13] = [
+    const NUMERIC_NAMES: [&str; 14] = [
+        "SIDER_MAX_DATASET_BYTES",
         "SIDER_MAX_CONNECTIONS",
         "SIDER_WORKER_QUEUE_CAPACITY",
         "SIDER_MAX_FRAME_BYTES",
@@ -273,6 +282,7 @@ mod tests {
         assert_eq!(config.worker_queue_capacity, 32);
         assert_eq!(config.max_input_buffer_bytes, 4 * 1024 * 1024);
         assert_eq!(config.max_response_bytes, 4 * 1024 * 1024);
+        assert_eq!(config.max_dataset_bytes, 64 * 1024 * 1024);
         assert_eq!(config.frame_timeout, Duration::from_secs(10));
         assert_eq!(config.request_timeout, Duration::from_secs(5));
         assert_eq!(config.write_timeout, Duration::from_secs(5));
@@ -303,6 +313,7 @@ mod tests {
             ("SIDER_MAX_DEPTH", "3"),
             ("SIDER_MAX_INPUT_BUFFER_BYTES", "1024"),
             ("SIDER_MAX_RESPONSE_BYTES", "512"),
+            ("SIDER_MAX_DATASET_BYTES", "2048"),
             ("SIDER_FRAME_TIMEOUT_MS", "1001"),
             ("SIDER_REQUEST_TIMEOUT_MS", "1002"),
             ("SIDER_WRITE_TIMEOUT_MS", "1003"),
@@ -325,6 +336,7 @@ mod tests {
         );
         assert_eq!(config.max_input_buffer_bytes, 1024);
         assert_eq!(config.max_response_bytes, 512);
+        assert_eq!(config.max_dataset_bytes, 2048);
         assert_eq!(config.frame_timeout, Duration::from_millis(1001));
         assert_eq!(config.request_timeout, Duration::from_millis(1002));
         assert_eq!(config.write_timeout, Duration::from_millis(1003));

@@ -3,7 +3,7 @@
 use bytes::Bytes;
 use thiserror::Error;
 
-use super::Command;
+use super::{Command, ExpiryUnit, SetCondition, SetExpiry, SetOptions};
 use crate::resp::Frame;
 
 /// Erro de formato encerra a conexão; erros de comando permitem continuar.
@@ -18,9 +18,14 @@ pub enum RequestError {
     /// Nome canônico usado para a resposta compatível de aridade.
     #[error("aridade inválida para {0}")]
     WrongArity(&'static str),
-    /// A 0.1 não aceita nenhum argumento após o valor de SET.
-    #[error("opções de SET não suportadas")]
-    UnsupportedSetOptions,
+    #[error("sintaxe inválida")]
+    Syntax,
+    #[error("inteiro inválido ou fora do intervalo")]
+    InvalidInteger,
+    #[error("prazo de SET inválido")]
+    InvalidSetExpiry,
+    #[error("prazo de expiração inválido")]
+    InvalidExpiry(&'static str),
 }
 
 impl RequestError {
@@ -37,7 +42,16 @@ impl RequestError {
             Self::WrongArity(name) => Bytes::from(format!(
                 "ERR wrong number of arguments for '{name}' command"
             )),
-            Self::UnsupportedSetOptions => Bytes::from_static(b"ERR unsupported SET options"),
+            Self::Syntax => Bytes::from_static(b"ERR syntax error"),
+            Self::InvalidInteger => {
+                Bytes::from_static(b"ERR value is not an integer or out of range")
+            }
+            Self::InvalidSetExpiry => {
+                Bytes::from_static(b"ERR invalid expire time in 'set' command")
+            }
+            Self::InvalidExpiry(name) => {
+                Bytes::from(format!("ERR invalid expire time in '{name}' command"))
+            }
         };
         Frame::Error(message)
     }
@@ -84,12 +98,17 @@ pub fn parse(frame: Frame) -> Result<Command, RequestError> {
         if count < 2 {
             return Err(RequestError::WrongArity("set"));
         }
-        if count > 2 {
-            return Err(RequestError::UnsupportedSetOptions);
-        }
         let key = arguments.next().ok_or(RequestError::WrongArity("set"))?;
         let value = arguments.next().ok_or(RequestError::WrongArity("set"))?;
-        Ok(Command::Set { key, value })
+        if count == 2 {
+            return Ok(Command::Set { key, value });
+        }
+        let options = parse_set_options(arguments)?;
+        Ok(Command::SetWithOptions {
+            key,
+            value,
+            options,
+        })
     } else if name.eq_ignore_ascii_case(b"DEL") {
         if count == 0 {
             return Err(RequestError::WrongArity("del"));
@@ -97,9 +116,146 @@ pub fn parse(frame: Frame) -> Result<Command, RequestError> {
         Ok(Command::Del {
             keys: arguments.collect(),
         })
+    } else if name.eq_ignore_ascii_case(b"EXISTS") || name.eq_ignore_ascii_case(b"MGET") {
+        let exists = name.eq_ignore_ascii_case(b"EXISTS");
+        if count == 0 {
+            return Err(RequestError::WrongArity(if exists {
+                "exists"
+            } else {
+                "mget"
+            }));
+        }
+        let keys = arguments.collect();
+        Ok(if exists {
+            Command::Exists { keys }
+        } else {
+            Command::MGet { keys }
+        })
+    } else if name.eq_ignore_ascii_case(b"INCR") || name.eq_ignore_ascii_case(b"DECR") {
+        let incr = name.eq_ignore_ascii_case(b"INCR");
+        let canonical = if incr { "incr" } else { "decr" };
+        if count != 1 {
+            return Err(RequestError::WrongArity(canonical));
+        }
+        let key = arguments
+            .next()
+            .ok_or(RequestError::WrongArity(canonical))?;
+        Ok(if incr {
+            Command::Incr { key }
+        } else {
+            Command::Decr { key }
+        })
+    } else if name.eq_ignore_ascii_case(b"MSET") {
+        if count == 0 || !count.is_multiple_of(2) {
+            return Err(RequestError::WrongArity("mset"));
+        }
+        let mut entries = Vec::with_capacity(count / 2);
+        while let Some(key) = arguments.next() {
+            let value = arguments.next().ok_or(RequestError::WrongArity("mset"))?;
+            entries.push((key, value));
+        }
+        Ok(Command::MSet { entries })
+    } else if name.eq_ignore_ascii_case(b"EXPIRE") || name.eq_ignore_ascii_case(b"PEXPIRE") {
+        let seconds = name.eq_ignore_ascii_case(b"EXPIRE");
+        let canonical = if seconds { "expire" } else { "pexpire" };
+        if count != 2 {
+            return Err(RequestError::WrongArity(canonical));
+        }
+        let key = arguments
+            .next()
+            .ok_or(RequestError::WrongArity(canonical))?;
+        let argument = arguments
+            .next()
+            .ok_or(RequestError::WrongArity(canonical))?;
+        let value = parse_integer(&argument)?;
+        if seconds {
+            value
+                .checked_mul(1000)
+                .ok_or(RequestError::InvalidExpiry(canonical))?;
+        }
+        Ok(Command::Expire {
+            key,
+            value,
+            unit: if seconds {
+                ExpiryUnit::Seconds
+            } else {
+                ExpiryUnit::Milliseconds
+            },
+        })
+    } else if name.eq_ignore_ascii_case(b"TTL")
+        || name.eq_ignore_ascii_case(b"PTTL")
+        || name.eq_ignore_ascii_case(b"PERSIST")
+    {
+        let persist = name.eq_ignore_ascii_case(b"PERSIST");
+        let milliseconds = name.eq_ignore_ascii_case(b"PTTL");
+        let canonical = if persist {
+            "persist"
+        } else if milliseconds {
+            "pttl"
+        } else {
+            "ttl"
+        };
+        if count != 1 {
+            return Err(RequestError::WrongArity(canonical));
+        }
+        let key = arguments
+            .next()
+            .ok_or(RequestError::WrongArity(canonical))?;
+        Ok(if persist {
+            Command::Persist { key }
+        } else {
+            Command::Ttl { key, milliseconds }
+        })
     } else {
         Err(RequestError::UnknownCommand)
     }
+}
+
+fn parse_integer(value: &[u8]) -> Result<i64, RequestError> {
+    super::parse_decimal(value).ok_or(RequestError::InvalidInteger)
+}
+
+fn parse_set_options(mut args: impl Iterator<Item = Bytes>) -> Result<SetOptions, RequestError> {
+    let mut options = SetOptions::default();
+    let mut duration = None;
+    let mut unit = None;
+    while let Some(option) = args.next() {
+        if option.eq_ignore_ascii_case(b"NX") && options.condition != SetCondition::Present {
+            options.condition = SetCondition::Missing;
+        } else if option.eq_ignore_ascii_case(b"XX") && options.condition != SetCondition::Missing {
+            options.condition = SetCondition::Present;
+        } else if option.eq_ignore_ascii_case(b"GET") {
+            options.return_previous = true;
+        } else if option.eq_ignore_ascii_case(b"KEEPTTL") && duration.is_none() {
+            options.expiry = SetExpiry::Keep;
+        } else if (option.eq_ignore_ascii_case(b"EX") || option.eq_ignore_ascii_case(b"PX"))
+            && options.expiry != SetExpiry::Keep
+        {
+            let seconds = option.eq_ignore_ascii_case(b"EX");
+            if unit.is_some_and(|previous| previous != seconds) {
+                return Err(RequestError::Syntax);
+            }
+            unit = Some(seconds);
+            duration = Some(args.next().ok_or(RequestError::Syntax)?);
+        } else {
+            return Err(RequestError::Syntax);
+        }
+    }
+    if let Some(value) = duration {
+        let value = parse_integer(&value)?;
+        let millis = if unit == Some(true) {
+            value
+                .checked_mul(1000)
+                .ok_or(RequestError::InvalidSetExpiry)?
+        } else {
+            value
+        };
+        if millis <= 0 {
+            return Err(RequestError::InvalidSetExpiry);
+        }
+        options.expiry = SetExpiry::After(std::time::Duration::from_millis(millis as u64));
+    }
+    Ok(options)
 }
 
 #[cfg(test)]
@@ -136,7 +292,7 @@ mod tests {
         assert!(RequestError::InvalidFormat.is_fatal());
         assert!(!RequestError::UnknownCommand.is_fatal());
         assert!(!RequestError::WrongArity("set").is_fatal());
-        assert!(!RequestError::UnsupportedSetOptions.is_fatal());
+        assert!(!RequestError::Syntax.is_fatal());
     }
 
     #[test]
@@ -180,22 +336,14 @@ mod tests {
     }
 
     #[test]
-    fn options_and_unknown_commands_have_explicit_divergences() {
-        for option in [
-            b"NX".as_slice(),
-            b"XX",
-            b"EX",
-            b"PX",
-            b"GET",
-            b"KEEPTTL",
-            b"invalid",
-        ] {
+    fn invalid_options_and_unknown_commands_have_explicit_errors() {
+        for option in [b"EX".as_slice(), b"PX", b"invalid"] {
             assert_eq!(
                 parse(request(&[b"SET", b"key", b"value", option])),
-                Err(RequestError::UnsupportedSetOptions)
+                Err(RequestError::Syntax)
             );
         }
-        for name in [b"".as_slice(), b"\xff", b"GET\0", b"SELECT", b"INCR"] {
+        for name in [b"".as_slice(), b"\xff", b"GET\0", b"SELECT"] {
             assert_eq!(parse(request(&[name])), Err(RequestError::UnknownCommand));
         }
         assert_eq!(
@@ -203,8 +351,8 @@ mod tests {
             Frame::Error(Bytes::from_static(b"ERR unknown command"))
         );
         assert_eq!(
-            RequestError::UnsupportedSetOptions.into_frame(),
-            Frame::Error(Bytes::from_static(b"ERR unsupported SET options"))
+            RequestError::Syntax.into_frame(),
+            Frame::Error(Bytes::from_static(b"ERR syntax error"))
         );
     }
 

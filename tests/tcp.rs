@@ -141,6 +141,153 @@ async fn read_until_closed(stream: &mut TcpStream) -> Vec<u8> {
     .expect("connection close deadline")
 }
 
+fn arguments(args: &[&[u8]]) -> Vec<u8> {
+    let mut output = format!("*{}\r\n", args.len()).into_bytes();
+    for arg in args {
+        output.extend_from_slice(format!("${}\r\n", arg.len()).as_bytes());
+        output.extend_from_slice(arg);
+        output.extend_from_slice(b"\r\n");
+    }
+    output
+}
+
+#[tokio::test]
+async fn r02_mget_exact_response_limit_and_one_byte_over_close_without_partial_reply() {
+    let server = TestServer::start(ServerConfig {
+        resp_limits: sider::resp::RespLimits {
+            max_frame_bytes: 256,
+            max_bulk_bytes: 64,
+            max_line_bytes: 64,
+            max_nodes: 8,
+            max_depth: 2,
+        },
+        max_input_buffer_bytes: 256,
+        max_response_bytes: 128,
+        ..ServerConfig::default()
+    })
+    .await;
+    let mut client = server.connect().await;
+    for key in [b"a".as_slice(), b"b"] {
+        exchange(
+            &mut client,
+            &arguments(&[b"SET", key, &[b'x'; 55]]),
+            b"+OK\r\n",
+        )
+        .await;
+    }
+    let mut expected = b"*2\r\n".to_vec();
+    for _ in 0..2 {
+        expected.extend_from_slice(b"$55\r\n");
+        expected.extend_from_slice(&[b'x'; 55]);
+        expected.extend_from_slice(b"\r\n");
+    }
+    assert_eq!(expected.len(), 128);
+    exchange(&mut client, &arguments(&[b"MGET", b"a", b"b"]), &expected).await;
+    exchange(
+        &mut client,
+        &arguments(&[b"SET", b"a", &[b'x'; 56]]),
+        b"+OK\r\n",
+    )
+    .await;
+    write(&mut client, &arguments(&[b"MGET", b"a", b"b"])).await;
+    assert!(read_until_closed(&mut client).await.is_empty());
+    let mut other = server.connect().await;
+    let mut value = b"$56\r\n".to_vec();
+    value.extend_from_slice(&[b'x'; 56]);
+    value.extend_from_slice(b"\r\n");
+    exchange(&mut other, &arguments(&[b"GET", b"a"]), &value).await;
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn r02_quota_and_integer_errors_preserve_the_connection_and_batch_state() {
+    let server = TestServer::start(ServerConfig {
+        max_dataset_bytes: 260,
+        ..ServerConfig::default()
+    })
+    .await;
+    let mut client = server.connect().await;
+    exchange(
+        &mut client,
+        &arguments(&[b"MSET", b"a", b"9", b"b", b"x"]),
+        b"+OK\r\n",
+    )
+    .await;
+    exchange(
+        &mut client,
+        &arguments(&[b"INCR", b"a"]),
+        b"-OOM dataset memory quota exceeded\r\n",
+    )
+    .await;
+    exchange(
+        &mut client,
+        &arguments(&[b"INCR", b"b"]),
+        b"-ERR value is not an integer or out of range\r\n",
+    )
+    .await;
+    exchange(
+        &mut client,
+        &arguments(&[b"MSET", b"a", b"0", b"c", b"x"]),
+        b"-OOM dataset memory quota exceeded\r\n",
+    )
+    .await;
+    exchange(
+        &mut client,
+        &arguments(&[b"MSET", b"a", b"0", b"b"]),
+        b"-ERR wrong number of arguments for 'mset' command\r\n",
+    )
+    .await;
+    exchange(
+        &mut client,
+        &arguments(&[b"MGET", b"a", b"b", b"c"]),
+        b"*3\r\n$1\r\n9\r\n$1\r\nx\r\n$-1\r\n",
+    )
+    .await;
+    exchange(&mut client, PING, PONG).await;
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn r02_mset_is_indivisible_between_clients() {
+    let server = TestServer::start(ServerConfig::default()).await;
+    let mut writer = server.connect().await;
+    let mut reader = server.connect().await;
+    exchange(
+        &mut writer,
+        &arguments(&[b"MSET", b"a", b"0", b"b", b"0"]),
+        b"+OK\r\n",
+    )
+    .await;
+    let writes = async {
+        for _ in 0..100 {
+            for value in [b"1".as_slice(), b"0"] {
+                exchange(
+                    &mut writer,
+                    &arguments(&[b"MSET", b"a", value, b"b", value]),
+                    b"+OK\r\n",
+                )
+                .await;
+            }
+        }
+    };
+    let reads = async {
+        for _ in 0..200 {
+            write(&mut reader, &arguments(&[b"MGET", b"a", b"b"])).await;
+            let mut actual = [0; 18];
+            timeout(IO_DEADLINE, reader.read_exact(&mut actual))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                actual == *b"*2\r\n$1\r\n0\r\n$1\r\n0\r\n"
+                    || actual == *b"*2\r\n$1\r\n1\r\n$1\r\n1\r\n"
+            );
+        }
+    };
+    tokio::join!(writes, reads);
+    server.stop().await;
+}
+
 #[tokio::test]
 async fn literal_reference_cases_work_sequentially_over_tcp() {
     let server = TestServer::start(ServerConfig::default()).await;
@@ -234,13 +381,13 @@ async fn recoverable_errors_keep_pipeline_alive_without_mutation() {
         b"*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$4\r\nsafe\r\n\
           *1\r\n$3\r\nGET\r\n\
           *2\r\n$7\r\nPRIVATE\r\n$6\r\nsecret\r\n\
-          *4\r\n$3\r\nSET\r\n$1\r\nk\r\n$6\r\nunsafe\r\n$2\r\nNX\r\n\
+          *4\r\n$3\r\nSET\r\n$1\r\nk\r\n$6\r\nunsafe\r\n$3\r\nBAD\r\n\
           *2\r\n$3\r\nGET\r\n$1\r\nk\r\n\
           *1\r\n$4\r\nPING\r\n",
         b"+OK\r\n\
           -ERR wrong number of arguments for 'get' command\r\n\
           -ERR unknown command\r\n\
-          -ERR unsupported SET options\r\n\
+          -ERR syntax error\r\n\
           $4\r\nsafe\r\n\
           +PONG\r\n",
     )

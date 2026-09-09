@@ -2,7 +2,7 @@
 
 use std::io::{self, Read, Write};
 
-const MAX_BYTES: usize = 2 * 1024 * 1024;
+const MAX_BYTES: usize = 4 * 1024 * 1024;
 const MAX_LINE: usize = 1024;
 const MAX_NODES: usize = 1024;
 const MAX_DEPTH: usize = 16;

@@ -1,4 +1,4 @@
-# Diferenciais e gates locais da 0.1
+# Diferenciais e gates locais
 
 Os testes novos usam Rust/Cargo. A suíte envia os mesmos bytes ao binário Sider
 e a um Redis descartável da imagem fixada em `releases/plan.json`. O leitor de
@@ -20,10 +20,21 @@ tipos, preserva os bytes completos e limita bytes, linhas, nós e profundidade.
 - Nove chamadas separadas de `redis-cli -2 --raw` nos dois servidores, cobrindo os
   cinco comandos. A saída textual da CLI não substitui o oráculo binário.
 
-Cada execução compara 3.588 respostas binárias. As nove chamadas CLI adicionais
+O núcleo R01 compara 3.588 respostas binárias. As nove chamadas CLI adicionais
 só são contabilizadas no caminho Linux compartilhado. Opções de `SET`, comando
 desconhecido e framing fora do subconjunto não são anunciados como equivalentes
 ao Redis. Consulte a [matriz de compatibilidade](compatibility.md).
+
+R02 acrescenta 461 comparações binárias de strings e opções de SET, mantendo as
+contagens de R01 separadas. Inclui 48 combinações de condição, retorno e prazo,
+inteiros inválidos/overflow, duplicatas, MGET com três payloads de 1 MiB e erros
+seguidos de novas operações. O leitor independente aceita respostas de até 4 MiB.
+
+As observações temporais ficam fora de `binary_comparisons`: `PTTL` tolera 100 ms
+e `TTL`, um segundo entre os dois processos. Um polling com deadline de cinco
+segundos confirma expiração real nos dois servidores. Seu número de iterações é
+registrado separadamente. O [guia de strings](strings.md) reúne a semântica e os
+testes determinísticos que verificam limites exatos e quota.
 
 ## Ciclo nativo, sem infraestrutura externa
 

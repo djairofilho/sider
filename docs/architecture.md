@@ -11,7 +11,7 @@ versão 0.1; este documento resume as fronteiras e identifica o que já existe.
 | Biblioteca | Expor a configuração reutilizável pelo binário e pelos testes |
 | Codec RESP2 | Representar, validar, codificar e decodificar frames com limites |
 | Parser de comandos | Validar formato/aridade e mover argumentos para comandos tipados |
-| Armazenamento síncrono | Executar os cinco comandos sobre um `HashMap<Bytes, Bytes>` privado |
+| Armazenamento síncrono | Executar strings e TTL sobre `HashMap<Bytes, Entry>` privado, com quota lógica |
 | Worker | Possuir o mapa, receber comandos na fila limitada e responder por oneshot |
 | Conexão e servidor | Coordenar RESP2/TCP, limites, timeouts, ordenação e supervisão |
 | Configuração | Validar endereço, limites, prazos e arquivo opcional de prontidão |
@@ -74,6 +74,23 @@ O parser move os payloads para `Command`, sem copiar novamente seu conteúdo.
 de comandos; o mapa não importa RESP. `GET` clona o handle imutável `Bytes`, de
 modo que uma resposta já obtida continua válida após sobrescrita ou remoção.
 
+R02 acrescenta arrays de respostas e erros recuperáveis de execução. `MGET`
+preserva a ordem e compartilha os mesmos payloads imutáveis. `MSET` pré-valida
+o saldo do lote inteiro antes de alterar o mapa, com último valor por chave.
+
+### Expiração e quota
+
+`Entry` guarda valor, geração, deadline monotônico e deadline Unix em milissegundos.
+O relógio é injetável. A execução usa o monotônico; o absoluto fica disponível
+para futura persistência. Um índice ordenado mantém no máximo um evento por chave,
+removido em reescritas ou `PERSIST`; a geração impede aplicar expiração antiga.
+O worker processa até 64 eventos a cada 100 ms, além da expiração em acesso.
+
+`StoreConfig` define a quota lógica. Cada entrada conta bytes da chave, do valor
+e uma taxa fixa de 128 bytes. Crescimento é rejeitado antes da mutação, sem eviction.
+Buffers, filas, respostas retidas e o RSS não pertencem a essa conta. O
+[guia de strings](strings.md) descreve comandos, invariantes e limites temporais.
+
 Erro de formato é fatal para a conexão. Aridade, comando desconhecido e
 opções não suportadas são recuperáveis e nunca chegam ao mapa. O texto do erro
 desconhecido não reproduz os argumentos enviados pelo cliente.
@@ -96,8 +113,8 @@ tarefas pertencentes ao servidor se a future de supervisão for cancelada.
 
 ## Evolução
 
-A versão 0.1 terá apenas dados em memória e um worker. TTL, quota do dataset e
-`EXISTS` estão previstos para a 0.2; AOF para a 0.3; múltiplos shards para a 0.4.
+A base mantém dados em memória e um worker. TTL, quota do dataset e strings
+adicionais estão implementados em R02; AOF fica para a 0.3 e múltiplos shards para a 0.4.
 Essas versões exigem decisões adicionais de semântica, durabilidade e ordenação.
 
 A divisão em várias crates e otimizações de cópia, alocação ou hashing dependerão

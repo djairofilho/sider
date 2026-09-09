@@ -5,6 +5,10 @@ diferencial do binário Sider com Redis 8.10.1. O teste separado com `redis-cli`
 também passou contra o Sider. Isso comprova o subconjunto abaixo nos casos
 registrados, não compatibilidade com todos os comandos ou clientes Redis.
 
+O desenvolvimento de R02 acrescenta strings, opções de SET, TTL e quota. Essa
+extensão está descrita abaixo e no [guia de strings](strings.md); a versão Cargo
+continua `0.1.0` durante os marcos internos, sem representar uma nova publicação.
+
 ## Matriz da versão 0.1
 
 | Forma do comando | Comportamento alvo | Implementação | Verificação contra Redis |
@@ -37,6 +41,25 @@ containers descartáveis. Os [comandos reproduzíveis](differential.md) registra
 seeds, cobertura e limites. A candidata 1.0 valida a matriz completa no seu SHA;
 a final promove os mesmos arquivos e evidências desse build aprovado.
 
+## Matriz implementada em R02
+
+| Forma | Contrato verificado | Evidência |
+| --- | --- | --- |
+| `EXISTS chave [chave ...]` | Duplicatas contam; ausentes e expiradas não contam | Nativo, TCP e diferencial Redis |
+| `INCR chave` / `DECR chave` | Decimal canônico i64; ausência começa em zero; rejeição preserva valor/TTL | Nativo, TCP e diferencial Redis |
+| `MGET chave [chave ...]` | Array ordenado com nulos e duplicatas | Nativo, TCP e diferencial até três payloads de 1 MiB |
+| `MSET chave valor [chave valor ...]` | Lote indivisível; último par vence; limpa TTL | Nativo, concorrência TCP e diferencial Redis |
+| `SET ... [NX|XX] [EX segundos|PX ms|KEEPTTL] [GET]` | Condições, retorno anterior, combinações e prazos validados | 48 combinações e casos inválidos comparados com Redis |
+| `EXPIRE chave segundos` / `PEXPIRE chave ms` | Prazo relativo; não positivo remove; ausência retorna zero | Relógio injetado e diferencial Redis |
+| `TTL chave` / `PTTL chave` | Prazo restante, -1 persistente, -2 ausente/expirada | Fronteiras exatas nativas; diferencial com tolerância declarada |
+| `PERSIST chave` | Remove somente um prazo existente | Nativo e diferencial Redis |
+
+O relatório separa 3.588 comparações binárias históricas de R01 e 461 novas de
+R02. As observações temporais usam tolerância de 100 ms para `PTTL` e um segundo
+para `TTL`; a expiração real é observada com deadline de cinco segundos. Esse
+caminho passou com Sider Windows e Redis Linux em Docker; não comprova build
+nativo Linux nem aprovação de pacotes. Veja a [reprodução](strings.md#validação-reproduzível).
+
 ## Subconjunto alvo
 
 O Sider aceitará requisições RESP2 formadas por arrays não vazios de bulk strings
@@ -50,11 +73,11 @@ array nulo e array vazio têm representações distintas.
 Frames fragmentados e comandos concatenados são tratados desde R01-04.
 Cada conexão processa os comandos em sequência, com um único pedido em voo.
 
-## Limitações e divergências planejadas
+## Limitações e divergências atuais
 
-| Área | Contrato alvo da versão 0.1 |
+| Área | Contrato do desenvolvimento atual |
 | --- | --- |
-| Opções de `SET` | Aceitar somente `SET chave valor`; argumentos adicionais produzirão `ERR unsupported SET options`, sem alterar estado |
+| Opções de `SET` | NX, XX, EX, PX, GET e KEEPTTL; EXAT, PXAT e condições de valor não integram o subconjunto |
 | Comando desconhecido | Responder `ERR unknown command`, com texto simplificado que não reproduz os argumentos |
 | Aridade dos comandos suportados | Produzir resposta compatível com a versão de Redis selecionada, após verificação |
 | Formato de requisição inválido | Rejeitar e fechar a conexão; sem promessa de equivalência com Redis fora do subconjunto declarado |
@@ -62,9 +85,9 @@ Cada conexão processa os comandos em sequência, com um único pedido em voo.
 | Banco lógico | Somente o banco padrão; sem `SELECT` |
 | Handshake e autenticação | Sem `AUTH`, `HELLO`, `COMMAND` ou `CLIENT`; clientes que exigem esses comandos não estarão cobertos |
 | Tipos de dados | Somente chaves e valores binários; sem listas, hashes, sets ou sorted sets |
-| Expiração e contagem | Sem TTL e sem `EXISTS` na versão 0.1 |
+| Expiração | EXPIRE e PEXPIRE básicos; sem NX, XX, GT ou LT; monotônico durante execução |
 | Persistência e replicação | Sem AOF, snapshots, replicação ou Redis Cluster |
-| Memória do dataset | Sem quota ou eviction; limites de rede não limitam o tamanho do banco |
+| Memória do dataset | Quota lógica própria com rejeição atômica, sem eviction; não reproduz o maxmemory/RSS do Redis |
 | Uso operacional | Protótipo para desenvolvimento local e testes, com endereço padrão em loopback |
 
 Os limites de entrada e os prazos estão no [guia de rede](network.md). São limites
@@ -82,7 +105,7 @@ cargo test --locked --test tcp
 cargo test --locked --test cli
 ```
 
-`tests/commands.rs` também confere que opções de `SET`, comandos desconhecidos e
+`tests/commands.rs` também confere que opções inválidas de `SET`, comandos desconhecidos e
 formatos inválidos não chegam ao armazenamento. O parser move os `Bytes` para o
 comando; `GET` compartilha conteúdo imutável, sem uma cópia proporcional ao valor.
 
@@ -102,7 +125,7 @@ ou um teste ignorado deve permanecer registrado como pendente.
 ## Evolução planejada
 
 O [ROADMAP](../ROADMAP.md) é a sequência oficial. Strings, opções de `SET`, TTL e
-quota entram na 0.2; AOF na 0.3; shards fixos na 0.4; hashes, listas e sets na 0.5;
+quota de R02 estão implementadas; AOF fica na 0.3; shards fixos na 0.4; hashes, listas e sets na 0.5;
 sorted sets na 0.6; transações de um shard na 0.7; Pub/Sub na 0.8; replicação
 Sider→Sider na 0.9; operação e imagem Docker na 0.10. A 1.0 estabiliza esse subconjunto.
 

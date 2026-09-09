@@ -61,23 +61,20 @@ fn every_rejected_set_option_preserves_existing_and_absent_keys() {
     );
     for key in [b"k".as_slice(), b"absent"] {
         for option in [
-            vec![b"NX".as_slice()],
-            vec![b"XX".as_slice()],
-            vec![b"EX".as_slice(), b"10"],
-            vec![b"PX".as_slice(), b"1000"],
-            vec![b"GET".as_slice()],
-            vec![b"KEEPTTL".as_slice()],
+            vec![b"NX".as_slice(), b"XX"],
+            vec![b"EX".as_slice()],
+            vec![b"EX".as_slice(), b"10", b"PX", b"1000"],
+            vec![b"PX".as_slice()],
+            vec![b"GET".as_slice(), b"invalid"],
+            vec![b"KEEPTTL".as_slice(), b"EX", b"10"],
             vec![b"invalid".as_slice()],
         ] {
             let mut args = vec![b"SET".as_slice(), key, b"replacement"];
             args.extend(option);
-            assert_eq!(
-                parse(request(&args)),
-                Err(RequestError::UnsupportedSetOptions)
-            );
+            assert_eq!(parse(request(&args)), Err(RequestError::Syntax));
             assert_eq!(
                 execute(&mut store, request(&args)),
-                RequestError::UnsupportedSetOptions.into_frame()
+                RequestError::Syntax.into_frame()
             );
             assert_eq!(
                 get(&mut store, b"k"),
