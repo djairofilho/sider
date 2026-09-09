@@ -102,7 +102,7 @@ X e seus comandos de reprodução ficam em [differential.md](differential.md).
 | RESP2/TCP | Framing limitado, fragmentação/pipeline, um pedido por conexão em voo; requisição inválida fecha conexão | [resp_codec.rs](../tests/resp_codec.rs), [tcp.rs](../tests/tcp.rs), fixtures e diferenciais |
 | Shards | FNV-1a 64 com hash tags; multichave e EXEC no mesmo shard; CROSSSLOT antes de efeito | [sharding.rs](../tests/sharding.rs), [transações](transactions.md) |
 | AOF | Formato próprio, lote resolvido indivisível, checksum/limites/selo; sem compatibilidade de arquivo Redis | [persistence.rs](../tests/persistence.rs), [types-persistence.md](types-persistence.md) |
-| Sync | `always` confirma após sync; `everysec` admite janela anterior ao sync; `no` depende do SO | [persistence.md](persistence.md), testes de falha e recovery |
+| Sync | `always` confirma após sync; `everysec` admite janela anterior ao sync | [persistence.md](persistence.md), testes de falha e recovery |
 | Compactação | Snapshot global e delta; publicação mantém corte e lotes completos | [sharding.rs](../tests/sharding.rs), testes de persistência/transações |
 | TTL durável | Prazo Unix absoluto no arquivo; tempo durante parada consome TTL | [aof_migration.rs](../tests/aof_migration.rs), [backup.rs](../tests/backup.rs) |
 | Replicação | Sider→Sider assíncrona, mesma versão/layout, FULL/CONTINUE e ACK após apply durável | [replication_network.rs](../tests/replication_network.rs), [replication_storage.rs](../tests/replication_storage.rs) |

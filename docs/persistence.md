@@ -62,21 +62,26 @@ período não é um limite rígido de perda: atrasos de I/O e agendamento podem 
 a janela. Uma parada normal drena pedidos aceitos e sincroniza o escritor. O prazo
 de drenagem não torna chamadas de filesystem canceláveis.
 
+Na replicação, a réplica sincroniza o lote aplicado antes de enviar ACK, inclusive
+com `everysec`. Esse ACK não altera a política de confirmação do primário nem
+faz suas respostas aguardarem réplicas; veja [replicação](replication.md).
+
 Falha de append ou sync impede uma resposta de sucesso e encerra a admissão do
 worker. Um lote completamente escrito pode reaparecer no reinício mesmo que a
 resposta tenha sido perdida. Timeout ou desconexão depois da aceitação não provam
 ausência de efeitos e não autorizam repetição automática de um incremento.
 
 Expiração ativa usa o mesmo caminho durável, com origem `Expiration`. Leituras que
-encontram uma entrada vencida também produzem tombstones com essa origem. Essa distinção
-permite distinguir manutenção de TTL de futuras escritas recebidas por réplicas.
+encontram uma entrada vencida também produzem tombstones com essa origem no primário.
+Réplicas ocultam entradas vencidas nas leituras, mas recebem os tombstones do
+primário; não executam expiração ativa nem geram remoções locais.
 
-## Formatos v1 e v2
+## Formatos de cabeçalho v1, v2 e v3
 
 Todos os inteiros usam little endian. Chaves e valores são bytes, sem exigência de
 UTF-8. CRC-32/ISO-HDLC detecta corrupção acidental; não autentica os arquivos.
 
-Novos arquivos e compactações usam o cabeçalho v2, com 32 bytes:
+Arquivos e compactações sem metadados de replicação usam o cabeçalho v2, com 32 bytes:
 
 | Offset | Tamanho | Campo |
 | --- | --- | --- |
@@ -87,11 +92,28 @@ Novos arquivos e compactações usam o cabeçalho v2, com 32 bytes:
 | 24 | 4 | Versão do roteamento, `1` |
 | 28 | 4 | CRC dos primeiros 28 bytes |
 
+Com papel e época duráveis de replicação, o writer usa o cabeçalho v3 de 52 bytes.
+Os primeiros 28 bytes têm os mesmos campos, com versão `3` no offset 8. Depois:
+
+| Offset | Tamanho | Campo |
+| --- | --- | --- |
+| 28 | 1 | Papel: `1` primário ou `2` réplica |
+| 29 | 3 | Reservados, obrigatoriamente zero |
+| 32 | 16 | Época do fluxo de replicação |
+| 48 | 4 | CRC dos primeiros 48 bytes |
+
+Dataset, sequência, papel e época pertencem à mesma geração publicada. A
+compactação preserva esses metadados. Backup/restauração grava v2 sem herdar
+o papel da origem; iniciar uma instância replicada estabelece seus metadados
+duráveis conforme o [contrato de replicação](replication.md).
+
 O leitor também aceita o cabeçalho v1, com 24 bytes: mesmo magic, versão `1`,
 sequência e CRC dos primeiros 20 bytes no offset 20. Sua configuração implícita é
 um shard com roteamento v1. A versão de roteamento 1 identifica FNV-1a64 sobre as
 hash tags de `storage::routing`; versões desconhecidas são recusadas. Registros e
-mutações preservam a mesma codificação nas duas versões do cabeçalho.
+mutações preservam a mesma codificação nas três versões do cabeçalho. A versão
+dos registros continua `1`, independente da versão de cabeçalho. Binários
+antigos que não conhecem v3 devem recusá-lo, sem editar o arquivo.
 
 Cada registro tem comprimento de payload `u32`, seu complemento binário `u32`,
 CRC do payload `u32` e o payload. Comprimento e complemento são conferidos antes
