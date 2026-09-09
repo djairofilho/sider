@@ -1,6 +1,8 @@
 //! Persistência em disco e falhas de processos reais, executáveis em Windows e Linux.
 #![forbid(unsafe_code)]
 
+#[path = "common/baseline_manifest.rs"]
+mod baseline_manifest;
 #[path = "common/gate_receipt.rs"]
 mod gate_receipt;
 #[path = "common/process.rs"]
