@@ -51,7 +51,8 @@ Clientes que enviam comandos de inicialização adicionais podem ser incompatív
 ## Limites e segurança
 
 - Use somente em ambiente controlado. Não há autenticação, ACL ou TLS.
-- Não há persistência. Todos os dados são perdidos ao terminar o processo.
+- Persistência é opcional por `SIDER_AOF_DIR`; sem AOF, dados se perdem ao terminar.
+  Consulte [durabilidade e recuperação](../docs/persistence.md) para as políticas de sync.
 - TTL tem expiração passiva e limpeza ativa limitada. A quota lógica padrão é
   64 MiB (`SIDER_MAX_DATASET_BYTES`); crescimento excedente é rejeitado sem eviction.
   A contabilidade inclui chave, valor e taxa fixa de 128 bytes, não mede RSS.

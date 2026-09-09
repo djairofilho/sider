@@ -86,7 +86,7 @@ Cada conexão processa os comandos em sequência, com um único pedido em voo.
 | Handshake e autenticação | Sem `AUTH`, `HELLO`, `COMMAND` ou `CLIENT`; clientes que exigem esses comandos não estarão cobertos |
 | Tipos de dados | Somente chaves e valores binários; sem listas, hashes, sets ou sorted sets |
 | Expiração | EXPIRE e PEXPIRE básicos; sem NX, XX, GT ou LT; monotônico durante execução |
-| Persistência e replicação | Sem AOF, snapshots, replicação ou Redis Cluster |
+| Persistência e replicação | AOF binário próprio e snapshots globais; sem replicação ou Redis Cluster nesta etapa |
 | Memória do dataset | Quota lógica própria com rejeição atômica, sem eviction; não reproduz o maxmemory/RSS do Redis |
 | Uso operacional | Protótipo para desenvolvimento local e testes, com endereço padrão em loopback |
 
@@ -132,8 +132,8 @@ O [guia Pub/Sub](pubsub.md) descreve entrega efêmera, limites, comandos permiti
 e divergências. Transações e sua interação com Pub/Sub permanecem em R07.
 
 O [ROADMAP](../ROADMAP.md) é a sequência oficial. Strings, opções de `SET`, TTL e
-quota de R02 estão implementadas, assim como shards fixos em memória (R04-01 a
-R04-03). AOF e integração durável permanecem pendentes; hashes, listas e sets ficam na 0.5;
+quota de R02 estão implementadas, assim como AOF e shards fixos duráveis (R03/R04).
+O formato AOF é próprio, sem compatibilidade de arquivo com Redis. Hashes, listas e sets ficam na 0.5;
 sorted sets na 0.6; transações de um shard na 0.7; replicação
 Sider→Sider na 0.9; operação e imagem Docker na 0.10. A 1.0 estabiliza esse subconjunto.
 

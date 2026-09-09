@@ -2,12 +2,18 @@
 
 ## [Unreleased]
 
+- AOF binário com checksum, lotes resolvidos, sync configurável, recuperação antes
+  do bind, compactação global e rejeição recuperável de registros excessivos.
+- Metadados de shards no formato AOF v2, leitor legado v1 e migração offline
+  explícita com `sider-aof-migrate`. Snapshots aguardam apply de pedidos aceitos.
+- Testes de crash/migração nas duas plataformas e medição exploratória TCP de R04.
+
 - SUBSCRIBE, UNSUBSCRIBE, PUBLISH e PING no modo assinante, com canais binários,
   filas limitadas e cleanup em fila cheia, timeout, EOF, cancelamento e shutdown.
   Mensagens efêmeras permanecem separadas do dataset e do AOF.
 - Shards fixos com workers e filas independentes, hash binário estável e hash tags.
   Comandos multichave entre shards são rejeitados antes do enqueue; quota total
-  é dividida entre workers. Integração durável permanece na tarefa R04-04.
+  é dividida entre workers e conferida novamente durante a recuperação do AOF.
 - Strings adicionais (`EXISTS`, `INCR`, `DECR`, `MGET`, `MSET`) e SET com NX, XX,
   EX, PX, GET e KEEPTTL, com overflow e rejeições sem alterações parciais.
 - EXPIRE, PEXPIRE, TTL, PTTL e PERSIST; relógio injetável e limpeza ativa limitada.
