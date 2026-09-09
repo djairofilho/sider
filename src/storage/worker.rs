@@ -9,7 +9,7 @@ use tokio::time::{Instant, MissedTickBehavior, interval, sleep_until};
 use crate::command::{Command, Reply};
 use crate::error::ConfigError;
 
-use super::Store;
+use super::{Store, routing::ShardRouter};
 
 /// Falha de transporte ou de ciclo de vida, distinta de uma resposta do banco.
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
@@ -34,7 +34,8 @@ pub(crate) struct Request {
 /// Acesso clonável ao mesmo armazenamento, sem compartilhar o mapa diretamente.
 #[derive(Clone)]
 pub struct DbHandle {
-    requests: mpsc::Sender<Request>,
+    requests: Vec<mpsc::Sender<Request>>,
+    router: ShardRouter,
     request_timeout: Duration,
     shutdown: watch::Receiver<bool>,
 }
@@ -71,6 +72,19 @@ pub fn channel_with_store(
     shutdown: watch::Receiver<bool>,
     store: Store,
 ) -> Result<(DbHandle, Worker), ConfigError> {
+    let (handle, mut workers) =
+        channel_with_stores(capacity, request_timeout, shutdown, vec![store])?;
+    Ok((handle, workers.remove(0)))
+}
+
+/// Cada Store é movido para um único worker; filas e mapas permanecem separados.
+pub fn channel_with_stores(
+    capacity: usize,
+    request_timeout: Duration,
+    shutdown: watch::Receiver<bool>,
+    stores: Vec<Store>,
+) -> Result<(DbHandle, Vec<Worker>), ConfigError> {
+    let router = ShardRouter::new(stores.len())?;
     if capacity == 0 || capacity > Semaphore::MAX_PERMITS {
         return Err(ConfigError::InvalidServerLimits {
             reason: "capacidade da fila deve estar entre 1 e Semaphore::MAX_PERMITS",
@@ -86,18 +100,25 @@ pub fn channel_with_store(
         });
     }
 
-    let (sender, receiver) = mpsc::channel(capacity);
+    let mut senders = Vec::with_capacity(stores.len());
+    let mut workers = Vec::with_capacity(stores.len());
+    for store in stores {
+        let (sender, receiver) = mpsc::channel(capacity);
+        senders.push(sender);
+        workers.push(Worker {
+            store,
+            requests: receiver,
+            shutdown: shutdown.clone(),
+        });
+    }
     Ok((
         DbHandle {
-            requests: sender,
+            requests: senders,
+            router,
             request_timeout,
             shutdown: shutdown.clone(),
         },
-        Worker {
-            store,
-            requests: receiver,
-            shutdown,
-        },
+        workers,
     ))
 }
 
@@ -115,6 +136,10 @@ impl DbHandle {
     /// [`DbError::Timeout`] nunca promete ausência de efeitos. A parada cancela
     /// somente envios ainda não aceitos; respostas aceitas mantêm seu prazo original.
     pub async fn execute(&self, command: Command) -> Result<Reply, DbError> {
+        let shard = match self.router.route(&command) {
+            Ok(shard) => shard,
+            Err(error) => return Ok(Reply::Error(error)),
+        };
         let deadline = Instant::now()
             .checked_add(self.request_timeout)
             .ok_or(DbError::Timeout)?;
@@ -126,7 +151,7 @@ impl DbHandle {
             biased;
             () = sleep_until(deadline) => return Err(DbError::Timeout),
             () = stopping(&mut shutdown) => return Err(DbError::ShuttingDown),
-            sent = self.requests.send(request) => {
+            sent = self.requests[shard].send(request) => {
                 sent.map_err(|_| DbError::Unavailable)?;
             }
         }
@@ -234,7 +259,11 @@ mod tests {
 
     fn enqueue(handle: &DbHandle, command: Command) -> oneshot::Receiver<Result<Reply, DbError>> {
         let (reply, response) = oneshot::channel();
-        assert!(handle.requests.try_send(Request { command, reply }).is_ok());
+        assert!(
+            handle.requests[0]
+                .try_send(Request { command, reply })
+                .is_ok()
+        );
         response
     }
 
@@ -254,6 +283,67 @@ mod tests {
             ));
         }
         assert!(channel(1, Duration::from_nanos(1), shutdown).is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn saturated_shard_does_not_block_an_independent_worker() {
+        let (stop, shutdown) = watch::channel(false);
+        let (handle, mut workers) = channel_with_stores(
+            1,
+            Duration::from_secs(5),
+            shutdown,
+            vec![Store::new(), Store::new()],
+        )
+        .unwrap();
+        // FNV-1a(a) termina em bit zero; FNV-1a(b) termina em bit um.
+        assert_eq!(handle.router.shard_for(b"a"), 0);
+        assert_eq!(handle.router.shard_for(b"b"), 1);
+        let cold = workers.pop().unwrap();
+        let hot = workers.pop().unwrap();
+        let mut first = Box::pin(handle.execute(set(b"a", b"first")));
+        let mut second = Box::pin(handle.execute(set(b"a", b"second")));
+        assert_pending(first.as_mut()).await;
+        assert_pending(second.as_mut()).await;
+        assert_eq!(hot.requests.len(), 1);
+        let cold_task = tokio::spawn(cold.run());
+        assert_eq!(
+            handle.execute(set(b"b", b"independent")).await,
+            Ok(Reply::Ok)
+        );
+        // O shard quente progride assim que seu worker volta a ser escalonado.
+        let hot_task = tokio::spawn(hot.run());
+        assert_eq!(first.await, Ok(Reply::Ok));
+        assert_eq!(second.await, Ok(Reply::Ok));
+        stop.send_replace(true);
+        cold_task.await.unwrap();
+        hot_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cross_shard_commands_are_rejected_before_any_enqueue() {
+        let (_stop, shutdown) = watch::channel(false);
+        let (handle, workers) = channel_with_stores(
+            1,
+            Duration::from_secs(5),
+            shutdown,
+            vec![Store::new(), Store::new()],
+        )
+        .unwrap();
+        let keys = vec![Bytes::from_static(b"a"), Bytes::from_static(b"b")];
+        for command in [
+            Command::Del { keys: keys.clone() },
+            Command::Exists { keys: keys.clone() },
+            Command::MGet { keys: keys.clone() },
+            Command::MSet {
+                entries: keys.iter().map(|key| (key.clone(), Bytes::new())).collect(),
+            },
+        ] {
+            assert_eq!(
+                handle.execute(command).await,
+                Ok(Reply::Error(crate::command::ExecutionError::CrossShard))
+            );
+            assert!(workers.iter().all(|worker| worker.requests.is_empty()));
+        }
     }
 
     #[tokio::test(start_paused = true)]

@@ -94,3 +94,26 @@ pub enum Command {
     /// Remove a expiração de uma chave existente.
     Persist { key: Bytes },
 }
+
+impl Command {
+    /// Visita chaves na ordem original sem alocar nem confundir valores com chaves.
+    pub fn visit_keys(&self, mut visit: impl FnMut(&Bytes)) {
+        match self {
+            Self::Ping(_) | Self::Echo(_) => {}
+            Self::Get { key }
+            | Self::Set { key, .. }
+            | Self::SetWithOptions { key, .. }
+            | Self::Incr { key }
+            | Self::Decr { key }
+            | Self::Expire { key, .. }
+            | Self::Ttl { key, .. }
+            | Self::Persist { key } => visit(key),
+            Self::Del { keys } | Self::Exists { keys } | Self::MGet { keys } => {
+                keys.iter().for_each(visit);
+            }
+            Self::MSet { entries } => {
+                entries.iter().for_each(|(key, _)| visit(key));
+            }
+        }
+    }
+}

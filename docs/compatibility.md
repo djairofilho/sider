@@ -125,13 +125,16 @@ ou um teste ignorado deve permanecer registrado como pendente.
 ## Evolução planejada
 
 O [ROADMAP](../ROADMAP.md) é a sequência oficial. Strings, opções de `SET`, TTL e
-quota de R02 estão implementadas; AOF fica na 0.3; shards fixos na 0.4; hashes, listas e sets na 0.5;
+quota de R02 estão implementadas, assim como shards fixos em memória (R04-01 a
+R04-03). AOF e integração durável permanecem pendentes; hashes, listas e sets ficam na 0.5;
 sorted sets na 0.6; transações de um shard na 0.7; Pub/Sub na 0.8; replicação
 Sider→Sider na 0.9; operação e imagem Docker na 0.10. A 1.0 estabiliza esse subconjunto.
 
-A partir da 0.4, operações multichave serão restritas ao mesmo shard, com rejeição
-antes de qualquer efeito. Isso altera uma forma aceita no worker único e deverá
-aparecer nas notas de incompatibilidade. Replicação será assíncrona entre instâncias
+Com `SIDER_SHARDS` maior que um, operações multichave precisam do mesmo shard,
+com rejeição `CROSSSLOT` antes de qualquer efeito. Essa divergência intencional
+do Redis standalone é verificada em testes nativos/TCP; hash tags permitem
+colocalizar chaves, conforme o [guia de shards](sharding.md).
+Replicação será assíncrona entre instâncias
 Sider da mesma versão/configuração, sem compatibilidade com replicação Redis.
 
 Para coleções sem ordem garantida, como `SMEMBERS`, a suíte compara conteúdo

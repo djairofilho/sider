@@ -103,6 +103,96 @@ async fn exchange(stream: &mut TcpStream, request: &[u8], expected: &[u8]) {
     expect_bytes(stream, expected).await;
 }
 
+#[tokio::test]
+async fn shard_routing_rejects_crossing_and_preserves_binary_hash_tag_batches() {
+    let server = TestServer::start(ServerConfig {
+        shards: 2,
+        ..ServerConfig::default()
+    })
+    .await;
+    let mut stream = server.connect().await;
+    exchange(
+        &mut stream,
+        b"*3\r\n$3\r\nSET\r\n$1\r\na\r\n$1\r\n1\r\n",
+        b"+OK\r\n",
+    )
+    .await;
+    exchange(
+        &mut stream,
+        b"*3\r\n$3\r\nSET\r\n$1\r\nb\r\n$1\r\n2\r\n",
+        b"+OK\r\n",
+    )
+    .await;
+    for command in [b"MGET".as_slice(), b"MSET", b"DEL", b"EXISTS"] {
+        let mut request = if command == b"MSET" {
+            b"*5\r\n$4\r\nMSET\r\n$1\r\na\r\n$1\r\nx\r\n$1\r\nb\r\n$1\r\ny\r\n".to_vec()
+        } else {
+            format!("*3\r\n${}\r\n", command.len()).into_bytes()
+        };
+        if command != b"MSET" {
+            request.extend_from_slice(command);
+            request.extend_from_slice(b"\r\n$1\r\na\r\n$1\r\nb\r\n");
+        }
+        exchange(
+            &mut stream,
+            &request,
+            b"-CROSSSLOT Keys in request don't hash to the same slot\r\n",
+        )
+        .await;
+    }
+    exchange(
+        &mut stream,
+        b"*2\r\n$3\r\nGET\r\n$1\r\na\r\n*2\r\n$3\r\nGET\r\n$1\r\nb\r\n",
+        b"$1\r\n1\r\n$1\r\n2\r\n",
+    )
+    .await;
+    exchange(
+        &mut stream,
+        b"*5\r\n$4\r\nMSET\r\n$4\r\n{\xff}a\r\n$1\r\nx\r\n$4\r\n{\xff}b\r\n$0\r\n\r\n",
+        b"+OK\r\n",
+    )
+    .await;
+    exchange(
+        &mut stream,
+        b"*4\r\n$4\r\nMGET\r\n$4\r\n{\xff}b\r\n$4\r\n{\xff}a\r\n$4\r\n{\xff}a\r\n",
+        b"*3\r\n$0\r\n\r\n$1\r\nx\r\n$1\r\nx\r\n",
+    )
+    .await;
+    drop(stream);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn quota_is_partitioned_without_borrowing_other_shards_budget() {
+    let server = TestServer::start(ServerConfig {
+        shards: 2,
+        max_dataset_bytes: 260,
+        ..ServerConfig::default()
+    })
+    .await;
+    let mut stream = server.connect().await;
+    exchange(
+        &mut stream,
+        b"*3\r\n$3\r\nSET\r\n$1\r\na\r\n$2\r\n12\r\n",
+        b"-OOM dataset memory quota exceeded\r\n",
+    )
+    .await;
+    exchange(
+        &mut stream,
+        b"*3\r\n$3\r\nSET\r\n$1\r\na\r\n$1\r\n1\r\n*3\r\n$3\r\nSET\r\n$1\r\nb\r\n$1\r\n2\r\n",
+        b"+OK\r\n+OK\r\n",
+    )
+    .await;
+    exchange(
+        &mut stream,
+        b"*2\r\n$3\r\nGET\r\n$1\r\na\r\n*2\r\n$3\r\nGET\r\n$1\r\nb\r\n",
+        b"$1\r\n1\r\n$1\r\n2\r\n",
+    )
+    .await;
+    drop(stream);
+    server.stop().await;
+}
+
 async fn half_close(stream: &mut TcpStream) {
     timeout(IO_DEADLINE, stream.shutdown())
         .await

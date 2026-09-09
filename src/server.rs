@@ -41,21 +41,33 @@ pub async fn serve(
 ) -> Result<(), ServerError> {
     config.validate()?;
     let (stop, receiver) = watch::channel(false);
-    let store = Store::with_config(
-        StoreConfig {
-            max_dataset_bytes: config.max_dataset_bytes,
-        },
-        Arc::new(SystemClock),
-    )?;
-    let (database, worker) = worker::channel_with_store(
+    // Divisão fixa evita um contador de quota global no caminho de cada escrita.
+    // O resto é distribuído pelos primeiros shards sem exceder a quota total.
+    let stores = (0..config.shards)
+        .map(|index| {
+            Store::with_config(
+                StoreConfig {
+                    max_dataset_bytes: config.max_dataset_bytes / config.shards
+                        + usize::from(index < config.max_dataset_bytes % config.shards),
+                },
+                Arc::new(SystemClock),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let (database, shard_workers) = worker::channel_with_stores(
         config.worker_queue_capacity,
         config.request_timeout,
         receiver,
-        store,
+        stores,
     )?;
-    supervise(listener, config, shutdown, database, worker.run(), stop).await
+    let mut workers = JoinSet::new();
+    for worker in shard_workers {
+        workers.spawn(worker.run());
+    }
+    supervise_workers(listener, config, shutdown, database, workers, stop).await
 }
 
+#[cfg(test)]
 async fn supervise(
     listener: TcpListener,
     config: ServerConfig,
@@ -66,6 +78,17 @@ async fn supervise(
 ) -> Result<(), ServerError> {
     let mut workers = JoinSet::new();
     workers.spawn(worker);
+    supervise_workers(listener, config, shutdown, database, workers, stop).await
+}
+
+async fn supervise_workers(
+    listener: TcpListener,
+    config: ServerConfig,
+    shutdown: impl Future<Output = ()> + Send,
+    database: DbHandle,
+    mut workers: JoinSet<()>,
+    stop: watch::Sender<bool>,
+) -> Result<(), ServerError> {
     let mut connections = JoinSet::new();
     let slots = Arc::new(Semaphore::new(config.max_connections));
     tokio::pin!(shutdown);

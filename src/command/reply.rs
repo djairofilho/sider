@@ -8,6 +8,8 @@ use crate::resp::Frame;
 /// Erros recuperáveis de execução, sem encerrar a conexão ou o worker.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ExecutionError {
+    #[error("CROSSSLOT Keys in request don't hash to the same slot")]
+    CrossShard,
     #[error("ERR value is not an integer or out of range")]
     InvalidInteger,
     #[error("ERR increment or decrement would overflow")]

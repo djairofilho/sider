@@ -1,6 +1,7 @@
 //! Armazenamento síncrono de chaves e valores binários, sem acesso ao protocolo.
 
 mod clock;
+pub mod routing;
 pub mod worker;
 pub use clock::{Clock, SystemClock};
 
