@@ -24,6 +24,8 @@ pub struct ServerConfig {
     pub max_connections: usize,
     /// Quantidade de comandos aceitos que podem aguardar na fila do worker.
     pub worker_queue_capacity: usize,
+    /// Quantidade fixa de workers proprietários; não admite resharding online.
+    pub shards: usize,
     /// Bytes não consumidos que uma conexão pode manter no buffer de entrada.
     pub max_input_buffer_bytes: usize,
     /// Bytes de uma resposta completa, incluindo framing.
@@ -49,6 +51,7 @@ impl Default for ServerConfig {
             resp_limits: RespLimits::default(),
             max_connections: 32,
             worker_queue_capacity: 32,
+            shards: 1,
             max_input_buffer_bytes: 4 * 1024 * 1024,
             max_response_bytes: 4 * 1024 * 1024,
             max_dataset_bytes: crate::storage::StoreConfig::default().max_dataset_bytes,
@@ -94,6 +97,7 @@ impl ServerConfig {
         }
         read_size!(config.max_connections, "SIDER_MAX_CONNECTIONS");
         read_size!(config.worker_queue_capacity, "SIDER_WORKER_QUEUE_CAPACITY");
+        read_size!(config.shards, "SIDER_SHARDS");
         read_size!(config.resp_limits.max_frame_bytes, "SIDER_MAX_FRAME_BYTES");
         read_size!(config.resp_limits.max_bulk_bytes, "SIDER_MAX_BULK_BYTES");
         read_size!(config.resp_limits.max_line_bytes, "SIDER_MAX_LINE_BYTES");
@@ -128,11 +132,17 @@ impl ServerConfig {
     /// mensagens internas de saída. A porta zero continua válida para bind efêmero.
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.resp_limits.validate()?;
+        crate::storage::routing::ShardRouter::new(self.shards)?;
         crate::storage::StoreConfig {
             max_dataset_bytes: self.max_dataset_bytes,
         }
         .validate()?;
         let invalid = |reason| ConfigError::InvalidServerLimits { reason };
+        if self.max_dataset_bytes < self.shards {
+            return Err(invalid(
+                "a quota total precisa reservar ao menos um byte por shard",
+            ));
+        }
         for (value, reason) in [
             (
                 self.max_connections,
@@ -246,7 +256,8 @@ fn parse_integer<T: FromStr>(name: &'static str, value: OsString) -> Result<T, C
 mod tests {
     use super::*;
 
-    const NUMERIC_NAMES: [&str; 14] = [
+    const NUMERIC_NAMES: [&str; 15] = [
+        "SIDER_SHARDS",
         "SIDER_MAX_DATASET_BYTES",
         "SIDER_MAX_CONNECTIONS",
         "SIDER_WORKER_QUEUE_CAPACITY",
@@ -280,6 +291,7 @@ mod tests {
         assert_eq!(config.resp_limits, RespLimits::default());
         assert_eq!(config.max_connections, 32);
         assert_eq!(config.worker_queue_capacity, 32);
+        assert_eq!(config.shards, 1);
         assert_eq!(config.max_input_buffer_bytes, 4 * 1024 * 1024);
         assert_eq!(config.max_response_bytes, 4 * 1024 * 1024);
         assert_eq!(config.max_dataset_bytes, 64 * 1024 * 1024);
@@ -289,6 +301,23 @@ mod tests {
         assert_eq!(config.shutdown_timeout, Duration::from_secs(5));
         assert_eq!(config.ready_file, None);
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn shard_count_is_bounded_and_has_a_positive_partition_budget() {
+        for count in [1, 2, 3, 256] {
+            let count = count.to_string();
+            assert_eq!(
+                config_with(&[("SIDER_SHARDS", &count)])
+                    .unwrap()
+                    .shards
+                    .to_string(),
+                count
+            );
+        }
+        assert!(config_with(&[("SIDER_SHARDS", "257")]).is_err());
+        assert!(config_with(&[("SIDER_SHARDS", "4"), ("SIDER_MAX_DATASET_BYTES", "3")]).is_err());
+        assert!(config_with(&[("SIDER_SHARDS", "4"), ("SIDER_MAX_DATASET_BYTES", "4")]).is_ok());
     }
 
     #[test]
