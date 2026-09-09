@@ -2,6 +2,8 @@
 
 #![forbid(unsafe_code)]
 
+#[path = "common/gate_receipt.rs"]
+mod gate_receipt;
 #[path = "common/process.rs"]
 mod process;
 #[path = "common/redis_reference.rs"]
@@ -247,6 +249,10 @@ fn generated(pair: &mut Pair) {
 #[test]
 #[ignore = "exige Docker e Redis fixado; execute explicitamente"]
 fn collections_match_redis() {
+    assert!(collections_cases().0 > 0);
+}
+
+fn collections_cases() -> (usize, usize) {
     let redis = redis_reference::RedisReference::start();
     let mut sider = sider_process::SiderProcess::start(
         Path::new(env!("CARGO_BIN_EXE_sider")),
@@ -261,10 +267,12 @@ fn collections_match_redis() {
         pair.normalized,
         pair.exact + pair.normalized
     );
+    let counts = (pair.exact, pair.normalized);
     drop(pair);
     sider.assert_alive();
     sider.finish();
     redis.finish();
+    counts
 }
 
 fn sorted_fixtures(pair: &mut Pair) {
@@ -436,6 +444,10 @@ fn sorted_generated(pair: &mut Pair) {
 #[test]
 #[ignore = "exige Docker e Redis fixado; execute explicitamente"]
 fn sorted_sets_match_redis() {
+    assert!(sorted_cases() > 0);
+}
+
+fn sorted_cases() -> usize {
     let redis = redis_reference::RedisReference::start();
     let mut sider = sider_process::SiderProcess::start(
         Path::new(env!("CARGO_BIN_EXE_sider")),
@@ -465,8 +477,48 @@ fn sorted_sets_match_redis() {
         "R06: {} respostas exatas, incluindo scores e ordem",
         pair.exact
     );
+    let count = pair.exact;
     drop(pair);
     sider.assert_alive();
     sider.finish();
     redis.finish();
+    count
+}
+
+#[test]
+#[ignore = "gate de release exige contexto exato e Redis fixado"]
+fn release_types_gate() {
+    let context = gate_receipt::GateContext::from_env("types").unwrap();
+    let began = std::time::Instant::now();
+    let (exact, normalized) = collections_cases();
+    context
+        .publish(
+            (exact + normalized) as u64,
+            began.elapsed(),
+            serde_json::json!({
+                "exact_responses":exact,"normalized_responses":normalized,
+                "normalization":"pares HGETALL e ordem SMEMBERS; demais respostas literais",
+                "durability":"suíte persistence typed_ integra os gates native/crash/recovery"
+            }),
+        )
+        .unwrap();
+}
+
+#[test]
+#[ignore = "gate de release exige contexto exato e Redis fixado"]
+fn release_sorted_sets_gate() {
+    let context = gate_receipt::GateContext::from_env("sorted_sets").unwrap();
+    let began = std::time::Instant::now();
+    let exact = sorted_cases();
+    context
+        .publish(
+            exact as u64,
+            began.elapsed(),
+            serde_json::json!({
+                "exact_responses":exact,"normalized_responses":0,
+                "generated_float_batches":32,"samples_per_batch":400,
+                "durability":"suíte persistence typed_ integra os gates native/crash/recovery"
+            }),
+        )
+        .unwrap();
 }

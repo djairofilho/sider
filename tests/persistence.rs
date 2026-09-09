@@ -900,11 +900,12 @@ fn release_crash_gate() {
     snapshot_disk_error_keeps_old_aof_writable();
     bounded_delta_abort_preserves_writes_and_allows_retry();
     expiration_tombstone_during_snapshot_prevents_resurrection();
+    typed_process_crashes_preserve_complete_values_and_compaction_deltas();
     context
         .publish(
-            cases + 14,
+            cases + 14 + 36,
             began.elapsed(),
-            serde_json::json!({ "process_crash_points": cases, "injected_io_cases": 14, "policies": ["always", "periodic"], "scope": "process_crash" }),
+            serde_json::json!({ "process_crash_points": cases, "typed_process_crashes":36,"injected_io_cases": 14, "policies": ["always", "periodic"], "scope": "process_crash" }),
         )
         .unwrap();
 }
@@ -918,11 +919,12 @@ fn release_recovery_gate() {
     replay_restores_quota_and_absolute_deadlines_after_clock_movement();
     removed_snapshot_record_is_rejected_even_when_other_checksums_are_valid();
     binary_refuses_corrupt_aof_before_bind_and_readiness();
+    typed_roundtrip_compaction_restores_exact_data_ttl_and_quota();
     context
         .publish(
-            cases + 6,
+            cases + 6 + 4,
             began.elapsed(),
-            serde_json::json!({ "prefixes_and_corruption": cases, "absolute_ttl_and_quota": true }),
+            serde_json::json!({ "prefixes_and_corruption": cases, "typed_families":4,"absolute_ttl_and_quota": true }),
         )
         .unwrap();
 }

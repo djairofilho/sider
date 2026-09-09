@@ -52,24 +52,27 @@ fn persistence_receipts_support_both_native_targets_without_cross_compilation() 
 }
 
 #[test]
-fn pubsub_receipt_requires_its_gate_in_the_plan() {
-    let fixture = Fixture::new();
-    assert!(fixture.context("pubsub").is_err());
-    fixture.change(|state| {
-        state.plan["releases"][0]["required_gates"] = json!(["compatibility", "pubsub"])
-    });
-    let context = fixture.context("pubsub").unwrap();
-    context
-        .publish(
-            1,
-            Duration::from_secs(1),
-            json!({"suite":"pubsub-contract"}),
+fn family_receipt_requires_its_gate_in_the_plan() {
+    for gate in ["pubsub", "types", "sorted_sets", "sharding"] {
+        let fixture = Fixture::new();
+        assert!(fixture.context(gate).is_err());
+        fixture.change(|state| {
+            state.plan["releases"][0]["required_gates"] = json!(["compatibility", gate])
+        });
+        let context = fixture.context(gate).unwrap();
+        context
+            .publish(
+                1,
+                Duration::from_secs(1),
+                json!({"suite":"family-contract"}),
+            )
+            .unwrap();
+        let receipt: Value = serde_json::from_slice(
+            &fs::read(fixture.out.join(format!("receipt-{gate}.json"))).unwrap(),
         )
         .unwrap();
-    let receipt: Value =
-        serde_json::from_slice(&fs::read(fixture.out.join("receipt-pubsub.json")).unwrap())
-            .unwrap();
-    assert_eq!(receipt["gate"], "pubsub");
+        assert_eq!(receipt["gate"], gate);
+    }
 }
 
 struct Fixture {
