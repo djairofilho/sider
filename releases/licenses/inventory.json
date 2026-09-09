@@ -11,7 +11,7 @@
     "excludes": [
       "dev-dependencies",
       "build-dependency edges",
-      "Redis",
+      "Redis server except the explicitly licensed fpconv component",
       "Rust compiler-only copyright inventory"
     ],
     "crate_packages": 27,
@@ -29,10 +29,10 @@
     "rustc --print sysroot"
   ],
   "verification": {
-    "upstream_files": 53,
-    "source_bytes": 513057,
-    "copied_bytes": 513058,
-    "byte_identical_files": 52,
+    "upstream_files": 54,
+    "source_bytes": 514395,
+    "copied_bytes": 514396,
+    "byte_identical_files": 53,
     "append_final_lf_files": 1,
     "rust_source_files_identical_between_hosts": true,
     "rust_source_hosts": [
@@ -42,6 +42,29 @@
     "method": "SHA-256 e tamanho da origem e da cópia; COPYRIGHT-library.html foi comparado byte a byte com a origem seguida de um único LF."
   },
   "components": [
+    {
+      "name": "fpconv",
+      "version": "redis-8.10.1",
+      "license_expression": "BSL-1.0",
+      "scope": "safe Rust adaptation in src/command/fpconv.rs",
+      "runtime_targets": ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"],
+      "files": ["fpconv-redis-8.10.1/LICENSE.txt"],
+      "copyright": [
+        "Copyright (c) 2021, Redis Labs",
+        "Copyright (c) 2013-2019, night-shift <as.smljk at gmail dot com>",
+        "Copyright (c) 2009, Florian Loitsch <florian.loitsch at inria dot fr>"
+      ],
+      "source_files": [
+        {
+          "url": "https://raw.githubusercontent.com/redis/redis/8.10.1/deps/fpconv/fpconv_dtoa.c",
+          "sha256": "38f5d3f52e6c9487eab7c40ecd60f1387e1b19585d917602a3dd48558709814d"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/redis/redis/8.10.1/deps/fpconv/fpconv_powers.h",
+          "sha256": "dc1f5da3d54ee64234384d89fcd567632d87966113aad88b52791196dc6bac66"
+        }
+      ]
+    },
     {
       "name": "bytes",
       "version": "1.12.1",
@@ -404,6 +427,17 @@
     }
   ],
   "files": [
+    {
+      "path": "fpconv-redis-8.10.1/LICENSE.txt",
+      "component": "fpconv",
+      "version": "redis-8.10.1",
+      "source": "https://raw.githubusercontent.com/redis/redis/8.10.1/deps/fpconv/LICENSE.txt",
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+      "bytes": 1338,
+      "source_sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+      "source_bytes": 1338,
+      "normalization": "none"
+    },
     {
       "path": "crates/bytes-1.12.1/LICENSE",
       "component": "bytes",
