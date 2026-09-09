@@ -1,4 +1,4 @@
-//! Contexto e recibo de gates externos; nenhuma ausência vira evidência de sucesso.
+//! External gate context and receipt; missing results never become evidence of success.
 
 #![allow(dead_code)]
 
@@ -22,7 +22,7 @@ static NEXT_RECEIPT: AtomicU64 = AtomicU64::new(0);
 
 type Observer = Box<dyn Fn(&Path) -> Result<Observation, String>>;
 
-/// Observação injetável permite testar rejeições sem modificar Git ou o ambiente.
+/// Injectable observation allows rejection tests without modifying Git or the environment.
 #[derive(Clone)]
 pub(crate) struct Observation {
     pub head: String,
@@ -43,7 +43,7 @@ struct Expected {
     reference_image: String,
 }
 
-/// Um contexto só publica depois de conferir novamente o mesmo checkout limpo.
+/// A context publishes only after rechecking the same clean checkout.
 pub struct GateContext {
     gate: String,
     root: PathBuf,
@@ -94,16 +94,16 @@ impl GateContext {
                 | "soak"
                 | "benchmarks"
         ) {
-            return Err("gate desconhecido ou sem runner implementado".into());
+            return Err("unknown gate or runner not implemented".into());
         }
         let mut text = |name: &str| -> Result<String, String> {
             lookup(name)
-                .ok_or_else(|| format!("{name} ausente"))?
+                .ok_or_else(|| format!("missing {name}"))?
                 .into_string()
-                .map_err(|_| format!("{name} precisa ser UTF-8"))
+                .map_err(|_| format!("{name} must be UTF-8"))
                 .and_then(|value| {
                     if value.is_empty() {
-                        Err(format!("{name} vazio"))
+                        Err(format!("empty {name}"))
                     } else {
                         Ok(value)
                     }
@@ -116,9 +116,9 @@ impl GateContext {
             reference_image: text("SIDER_REFERENCE_IMAGE")?,
         };
         let release_dir =
-            PathBuf::from(lookup("SIDER_RELEASE_DIR").ok_or("SIDER_RELEASE_DIR ausente")?);
+            PathBuf::from(lookup("SIDER_RELEASE_DIR").ok_or("missing SIDER_RELEASE_DIR")?);
         if !release_dir.is_absolute() || !release_dir.is_dir() {
-            return Err("SIDER_RELEASE_DIR precisa ser diretório absoluto existente".into());
+            return Err("SIDER_RELEASE_DIR must be an existing absolute directory".into());
         }
         let release_dir = release_dir.canonicalize().map_err(|e| e.to_string())?;
         let root = root.canonicalize().map_err(|e| e.to_string())?;
@@ -150,13 +150,13 @@ impl GateContext {
         &self.expected.target
     }
 
-    /// O chamador comprova os casos e mede a duração real antes de chamar aqui.
+    /// The caller verifies the cases and measures the actual duration before calling this.
     ///
-    /// Não substitui recibos. O hard link publica somente JSON completo; o
-    /// diretório deve ser controlado e seu filesystem precisa suportar hard links.
+    /// Does not replace receipts. The hard link publishes only complete JSON; the
+    /// directory must be controlled and its filesystem must support hard links.
     pub fn publish(&self, cases: u64, duration: Duration, details: Value) -> Result<(), String> {
         if cases == 0 {
-            return Err("gate sem casos executados".into());
+            return Err("gate has no executed cases".into());
         }
         self.ensure_destination_absent()?;
         let observed = (self.observer)(&self.root)?;
@@ -177,7 +177,7 @@ impl GateContext {
         let mut contents = serde_json::to_vec_pretty(&receipt).map_err(|e| e.to_string())?;
         contents.push(b'\n');
         if contents.len() > MAX_RECEIPT_BYTES {
-            return Err("recibo excede 1 MiB; guarde logs separadamente".into());
+            return Err("receipt exceeds 1 MiB; store logs separately".into());
         }
         let temporary = self.release_dir.join(format!(
             ".receipt-{}-{}-{}.tmp",
@@ -189,20 +189,20 @@ impl GateContext {
             .write(true)
             .create_new(true)
             .open(&temporary)
-            .map_err(|e| format!("criar recibo temporário: {e}"))?;
+            .map_err(|e| format!("create temporary receipt: {e}"))?;
         let mut cleanup = TemporaryReceipt {
             path: temporary,
             file: Some(file),
         };
-        let file = cleanup.file.as_mut().ok_or("recibo temporário fechado")?;
+        let file = cleanup.file.as_mut().ok_or("temporary receipt closed")?;
         file.write_all(&contents).map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
         cleanup.file.take();
 
-        // Também detecta mudanças ocorridas enquanto o recibo era preparado.
+        // Also detects changes that occurred while the receipt was being prepared.
         self.validate(&(self.observer)(&self.root)?)?;
         fs::hard_link(&cleanup.path, self.receipt_path())
-            .map_err(|e| format!("publicar recibo sem substituir destino: {e}"))?;
+            .map_err(|e| format!("publish receipt without replacing the destination: {e}"))?;
         Ok(())
     }
 
@@ -212,29 +212,28 @@ impl GateContext {
 
     fn ensure_destination_absent(&self) -> Result<(), String> {
         match fs::symlink_metadata(self.receipt_path()) {
-            Ok(_) => Err("recibo antigo encontrado; use diretório novo".into()),
+            Ok(_) => Err("old receipt found; use a new directory".into()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(format!("inspecionar destino do recibo: {error}")),
+            Err(error) => Err(format!("inspect receipt destination: {error}")),
         }
     }
 
     fn validate(&self, observed: &Observation) -> Result<(), String> {
         let expected = &self.expected;
         if !hex_id(&expected.sha, 40) || observed.head != expected.sha {
-            return Err("SHA de release inválido ou divergente do HEAD real".into());
+            return Err("invalid release SHA or mismatch with actual HEAD".into());
         }
         if !observed.status.is_empty() {
             return Err(
-                "checkout sujo; alterações tracked ou untracked não são evidência de release"
-                    .into(),
+                "dirty checkout; tracked or untracked changes are not release evidence".into(),
             );
         }
         let base = base_version(&expected.version)?;
         if base != expected.version {
-            return Err("recibos identificam a versão final do binário, sem sufixo RC".into());
+            return Err("receipts identify the final binary version, without an RC suffix".into());
         }
         if observed.compiled_version != expected.version {
-            return Err("versão compilada do teste diverge da release".into());
+            return Err("compiled test version differs from the release".into());
         }
         let linux = expected.target == LINUX_TARGET
             && observed.compiled_os == "linux"
@@ -246,7 +245,7 @@ impl GateContext {
             && observed.compiled_env == "msvc";
         let portable = matches!(self.gate.as_str(), "crash" | "recovery" | "migration");
         if !linux && !(portable && windows) {
-            return Err("gate exige plataforma nativa e target suportados".into());
+            return Err("gate requires a supported native platform and target".into());
         }
         let hosts: Vec<_> = observed
             .compiler
@@ -254,7 +253,7 @@ impl GateContext {
             .filter_map(|line| line.strip_prefix("host: "))
             .collect();
         if hosts != [expected.target.as_str()] {
-            return Err("host do compilador diverge do target declarado".into());
+            return Err("compiler host differs from the declared target".into());
         }
         let plan = &observed.plan;
         let policy = &plan["release_policy"];
@@ -267,9 +266,11 @@ impl GateContext {
                 .as_array()
                 .is_some_and(|targets| targets.contains(&json!(expected.target)))
         {
-            return Err("política de release privada, bundle imutável ou target inválido".into());
+            return Err(
+                "invalid private release policy, immutable bundle policy, or target".into(),
+            );
         }
-        let releases = plan["releases"].as_array().ok_or("releases ausente")?;
+        let releases = plan["releases"].as_array().ok_or("missing releases")?;
         let matches: Vec<_> = releases
             .iter()
             .filter(|release| release["version"] == base)
@@ -281,15 +282,15 @@ impl GateContext {
                 .is_some_and(|gates| gates.contains(&json!(self.gate)))
         {
             return Err(
-                "versão publicável ou gate não registrado de forma única no manifesto".into(),
+                "publishable version or gate not uniquely registered in the manifest".into(),
             );
         }
         let reference = &plan["reference"];
         let redis_version = reference["redis_version"]
             .as_str()
-            .ok_or("versão Redis ausente")?;
+            .ok_or("missing Redis version")?;
         if base_version(redis_version)? != redis_version {
-            return Err("referência Redis precisa de versão final, sem sufixo RC".into());
+            return Err("Redis reference requires a final version without an RC suffix".into());
         }
         let prefix = format!("redis:{redis_version}@sha256:");
         if reference["image"] != expected.reference_image
@@ -300,12 +301,12 @@ impl GateContext {
                 .strip_prefix(&prefix)
                 .is_some_and(|digest| hex_id(digest, 64))
         {
-            return Err("referência Redis/CLI diverge da imagem fixada no manifesto".into());
+            return Err("Redis/CLI reference differs from the image pinned in the manifest".into());
         }
-        let repository = plan["repository"].as_str().ok_or("repositório ausente")?;
+        let repository = plan["repository"].as_str().ok_or("missing repository")?;
         let packages = observed.cargo_metadata["packages"]
             .as_array()
-            .ok_or("packages ausente no cargo metadata")?;
+            .ok_or("packages missing from cargo metadata")?;
         let manifests: Vec<_> = packages
             .iter()
             .filter(|package| {
@@ -315,7 +316,7 @@ impl GateContext {
             })
             .collect();
         if manifests.len() != 1 {
-            return Err("pacote raiz não identificado de forma única no cargo metadata".into());
+            return Err("root package not uniquely identified in cargo metadata".into());
         }
         let package = manifests[0];
         if package["name"] != "sider"
@@ -324,7 +325,9 @@ impl GateContext {
             || package["license"] != "MIT"
             || package["repository"] != format!("https://github.com/{repository}")
         {
-            return Err("metadados Cargo devem manter versão exata, MIT e publish=false".into());
+            return Err(
+                "Cargo metadata must retain the exact version, MIT, and publish=false".into(),
+            );
         }
         Ok(())
     }
@@ -352,7 +355,7 @@ fn hex_id(value: &str, length: usize) -> bool {
 fn base_version(version: &str) -> Result<&str, String> {
     let base = if let Some((base, candidate)) = version.split_once("-rc.") {
         if !decimal(candidate, false) {
-            return Err("número de candidata inválido".into());
+            return Err("invalid candidate number".into());
         }
         base
     } else {
@@ -360,7 +363,7 @@ fn base_version(version: &str) -> Result<&str, String> {
     };
     let parts: Vec<_> = base.split('.').collect();
     if parts.len() != 3 || !parts.into_iter().all(|part| decimal(part, true)) {
-        return Err("versão inválida; esperado x.y.z ou x.y.z-rc.N".into());
+        return Err("invalid version; expected x.y.z or x.y.z-rc.N".into());
     }
     Ok(base)
 }
@@ -408,7 +411,7 @@ fn observe(root: &Path) -> Result<Observation, String> {
         ])?
         .is_empty()
     {
-        return Err("checkout mudou durante a observação do gate".into());
+        return Err("checkout changed during gate observation".into());
     }
     Ok(Observation {
         head: head.trim_end().to_owned(),
@@ -437,7 +440,7 @@ fn checked(command: &mut Command) -> Result<Vec<u8>, String> {
     let output = process::run(command, COMMAND_TIMEOUT)?;
     if !output.status.success() {
         return Err(format!(
-            "observação do gate falhou: {:?}: {}",
+            "gate observation failed: {:?}: {}",
             command.get_program(),
             String::from_utf8_lossy(&output.stderr)
         ));

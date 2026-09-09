@@ -24,9 +24,9 @@ fn temporary_path(directory: &Path, prefix: &str) -> PathBuf {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SyncPolicy {
-    /// A resposta aguarda sync_all do lote.
+    /// The reply waits for the batch's sync_all.
     Always,
-    /// A resposta confirma write_all; a janela inclui o período e atrasos de I/O/agendamento.
+    /// The reply confirms write_all; the window includes the period and I/O/scheduling delays.
     Periodic(Duration),
 }
 
@@ -37,7 +37,7 @@ pub struct AofConfig {
     pub sync: SyncPolicy,
     pub queue_capacity: usize,
     pub limits: Limits,
-    /// Zero desabilita compactação automática; a API explícita continua disponível.
+    /// Zero disables automatic compaction; the explicit API remains available.
     pub compact_after_bytes: u64,
     pub max_delta_bytes: usize,
 }
@@ -57,10 +57,10 @@ impl AofConfig {
         self.layout.validate()?;
         let bad = |reason| ConfigError::InvalidServerLimits { reason };
         if self.directory.as_os_str().is_empty() {
-            return Err(bad("SIDER_AOF_DIR não pode ser vazio"));
+            return Err(bad("SIDER_AOF_DIR cannot be empty"));
         }
         if self.queue_capacity == 0 || self.queue_capacity > tokio::sync::Semaphore::MAX_PERMITS {
-            return Err(bad("fila AOF precisa ter capacidade válida"));
+            return Err(bad("AOF queue must have valid capacity"));
         }
         if self.limits.max_record_bytes < 64
             || self.limits.max_record_bytes > format::MAX_RECORD_BYTES
@@ -69,12 +69,12 @@ impl AofConfig {
             || self.max_delta_bytes == 0
             || self.max_delta_bytes > isize::MAX as usize
         {
-            return Err(bad("limites AOF inválidos"));
+            return Err(bad("invalid AOF limits"));
         }
         if let SyncPolicy::Periodic(period) = self.sync
             && (period.is_zero() || period > Duration::from_secs(60))
         {
-            return Err(bad("período de sync AOF precisa estar entre 1 ms e 60 s"));
+            return Err(bad("AOF sync period must be between 1 ms and 60 s"));
         }
         Ok(())
     }
@@ -82,44 +82,44 @@ impl AofConfig {
 
 #[derive(Debug, Error)]
 pub enum AofError {
-    #[error("configuração AOF: {0}")]
+    #[error("AOF configuration: {0}")]
     Config(#[from] ConfigError),
-    #[error("I/O AOF: {0}")]
+    #[error("AOF I/O: {0}")]
     Io(#[from] io::Error),
-    #[error("formato AOF: {0}")]
+    #[error("AOF format: {0}")]
     Format(#[from] FormatError),
     #[error("replay AOF: {0}")]
     Replay(#[from] ReplayError),
-    #[error("AOF já está aberto por outro processo")]
+    #[error("AOF is already open by another process")]
     Locked,
-    #[error("escritor AOF indisponível")]
+    #[error("AOF writer unavailable")]
     Unavailable,
-    #[error("sequência ou snapshot AOF inválido")]
+    #[error("invalid AOF sequence or snapshot")]
     Sequence,
-    #[error("compactação já está em andamento")]
+    #[error("compaction is already in progress")]
     Compacting,
-    #[error("delta da compactação excedeu o limite; AOF anterior preservado")]
+    #[error("compaction delta exceeded the limit; prior AOF preserved")]
     DeltaLimit,
     #[error(
-        "configuração AOF divergente: esperado {expected:?}, encontrado {actual:?}; migração offline necessária"
+        "divergent AOF configuration: expected {expected:?}, found {actual:?}; offline migration required"
     )]
     LayoutMismatch {
         expected: DurableLayout,
         actual: DurableLayout,
     },
-    #[error("lote AOF cruza shards")]
+    #[error("AOF batch crosses shards")]
     CrossShard,
-    #[error("shard {shard} usa {used} bytes, excedendo a quota {quota}")]
+    #[error("shard {shard} uses {used} bytes, exceeding quota {quota}")]
     ShardQuota {
         shard: usize,
         used: usize,
         quota: usize,
     },
-    #[error("migração offline recusada: {0}")]
+    #[error("offline migration rejected: {0}")]
     Migration(&'static str),
 }
 
-/// Pontos de falha injetáveis para ensaios reproduzíveis. Produção usa NoFaults.
+/// Injectable fault points for reproducible tests. Production uses NoFaults.
 pub trait FaultInjector: Send + Sync + 'static {
     fn hit(&self, point: &'static str) -> io::Result<()>;
     fn write_append(&self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
@@ -149,7 +149,7 @@ enum Request {
     Journal(crate::replication::journal::Journal, Response<()>),
 }
 
-/// Canal limitado para um escritor global; clones podem ser compartilhados entre workers.
+/// Bounded channel for a global writer; clones can be shared among workers.
 #[derive(Clone)]
 pub struct AofHandle {
     requests: mpsc::Sender<Request>,
@@ -157,7 +157,7 @@ pub struct AofHandle {
     diagnostics: super::diagnostics::Shared,
 }
 
-/// Observador que não mantém o escritor nem sua fila abertos.
+/// Observer that does not keep the writer or its queue open.
 #[derive(Clone)]
 pub struct AofDiagnosticsHandle {
     requests: mpsc::WeakSender<Request>,
@@ -176,7 +176,7 @@ impl AofDiagnosticsHandle {
 }
 
 impl AofHandle {
-    /// A sequência vem do upstream e deve ser o sucessor exato do AOF local.
+    /// The sequence comes from upstream and must exactly follow the local AOF.
     pub async fn append_expected(
         &self,
         sequence: u64,
@@ -189,7 +189,7 @@ impl AofHandle {
             .map_err(|_| AofError::Unavailable)?;
         response.await.map_err(|_| AofError::Unavailable)?
     }
-    /// O coordenador mantém a exclusão global até trocar todos os stores.
+    /// The coordinator retains global exclusion until it swaps all stores.
     pub async fn install_snapshot(
         &self,
         snapshot: Vec<Mutation>,
@@ -209,7 +209,7 @@ impl AofHandle {
         response.await.map_err(|_| AofError::Unavailable)?
     }
 
-    /// Vincula o journal à mesma época/posição do escritor, sob a barreira global.
+    /// Binds the journal to the writer's same epoch/position under the global barrier.
     pub async fn attach_journal(
         &self,
         journal: crate::replication::journal::Journal,
@@ -221,7 +221,7 @@ impl AofHandle {
             .map_err(|_| AofError::Unavailable)?;
         response.await.map_err(|_| AofError::Unavailable)?
     }
-    /// Lê campos numéricos e categorias fixas sem esperar pelo escritor ou fazer I/O.
+    /// Reads numeric fields and fixed categories without waiting for the writer or doing I/O.
     pub fn diagnostics(&self) -> super::AofDiagnostics {
         self.diagnostics_handle().snapshot()
     }
@@ -249,8 +249,8 @@ impl AofHandle {
             .map_err(|_| AofError::Unavailable)?;
         result.await.map_err(|_| AofError::Unavailable)?
     }
-    /// O chamador garante que o snapshot contém todo lote confirmado até a barreira.
-    /// A chamada termina após o cutover ou aborto; appends por outros clones seguem livres.
+    /// The caller ensures the snapshot contains every batch confirmed through the barrier.
+    /// The call ends after cutover or abort; appends by other clones remain free.
     pub async fn compact(&self, snapshot: Vec<Mutation>) -> Result<(), AofError> {
         self.begin_compaction(snapshot)
             .await?
@@ -303,7 +303,7 @@ pub struct RecoveryMetadata {
     pub replication: Option<ReplicationMetadata>,
 }
 impl Recovered {
-    /// Inicia somente após replay completo; o JoinHandle supervisiona sync, append e fechamento.
+    /// Starts only after complete replay; the JoinHandle supervises sync, append, and close.
     pub fn start(
         self,
     ) -> (
@@ -324,7 +324,7 @@ impl Recovered {
             let result = self.writer.run(receiver, runtime);
             completed.stopped(result.as_ref().err());
             if let Err(error) = &result {
-                tracing::error!(%error, "escritor AOF encerrado com falha");
+                tracing::error!(%error, "AOF writer terminated with failure");
                 failure.send_replace(true);
             }
             result
@@ -387,10 +387,10 @@ impl DirectoryLock {
 }
 impl Drop for DirectoryLock {
     fn drop(&mut self) {
-        // flock pertence à descrição aberta: fork/dup pode manter outro descritor vivo.
-        // Libera explicitamente a propriedade antes de fechar o nosso handle.
+        // flock belongs to the open description: fork/dup can keep another descriptor alive.
+        // Explicitly releases ownership before closing our handle.
         if let Err(error) = self.0.unlock() {
-            tracing::warn!(%error, "falha ao liberar lock AOF");
+            tracing::warn!(%error, "failed to release AOF lock");
         }
     }
 }
@@ -403,7 +403,7 @@ pub fn recover(
     recover_with_faults(config, store_config, clock, Arc::new(NoFaults))
 }
 
-/// Recuperação síncrona: não abre listener e preserva o arquivo em qualquer erro de validação.
+/// Synchronous recovery: does not open a listener and preserves the file on any validation error.
 pub fn recover_with_faults(
     config: AofConfig,
     store_config: StoreConfig,
@@ -465,7 +465,7 @@ fn load(
         if read_only {
             return Err(AofError::Sequence);
         }
-        // Publica somente o arquivo inicial completo; resíduos .tmp nunca são candidatos.
+        // Publishes only the complete initial file; .tmp residues are never candidates.
         let temporary = temporary_path(&config.directory, "initial");
         let mut initial = OpenOptions::new()
             .write(true)
@@ -568,7 +568,7 @@ fn load(
     };
     if incomplete && !read_only {
         faults.hit("recovery_before_truncate")?;
-        // Preserva o original para diagnóstico antes de descartar somente a cauda incompleta.
+        // Preserves the original for diagnosis before discarding only the incomplete tail.
         let backup = config.directory.join(format!(
             "tail-{generation:020}-{}-{}.bak",
             std::process::id(),
@@ -668,8 +668,8 @@ fn generation_path(directory: &Path, generation: u64) -> PathBuf {
     directory.join(format!("generation-{generation:020}.aof"))
 }
 
-// Rust não expõe sync de diretório portátil no Windows. Preservamos gerações antigas;
-// garantia Windows cobre término do processo, sem prometer atomicidade contra queda de energia.
+// Rust does not expose portable directory sync on Windows. We retain old generations;
+// the Windows guarantee covers process termination, without promising power-failure atomicity.
 #[cfg(unix)]
 pub(super) fn sync_directory(directory: &Path) -> io::Result<()> {
     File::open(directory)?.sync_all()
@@ -834,7 +834,7 @@ impl Writer {
         });
         if let Some(compaction) = &mut self.compaction {
             if compaction.aborted {
-                // O produtor anterior ainda termina; não abre outro snapshot em paralelo.
+                // The previous producer is still ending; do not open another snapshot in parallel.
             } else if compaction
                 .delta_bytes
                 .checked_add(encoded.len())
@@ -885,7 +885,7 @@ impl Writer {
             return Err(AofError::Compacting);
         }
         let generation = self.generation.checked_add(1).ok_or(AofError::Sequence)?;
-        // Valida todas as pós-imagens e quotas antes de criar a geração candidata.
+        // Validates all post-images and quotas before creating the candidate generation.
         let mut checked = Store::with_config(self.store_config, self.clock.clone())?;
         let mut usage = vec![0; self.config.layout.shard_count as usize];
         let mut previous = None;
@@ -969,7 +969,7 @@ impl Writer {
             if path.exists()
                 && let Err(error) = fs::remove_file(path)
             {
-                tracing::warn!(%error, "não foi possível retirar geração anterior à instalação");
+                tracing::warn!(%error, "could not remove generation prior to installation");
             }
         }
         Ok(())
@@ -1072,7 +1072,7 @@ impl Writer {
             }
             file.sync_all()?;
             self.faults.hit("compact_before_publish")?;
-            // Destino único: não substitui arquivo aberto. A geração antiga continua recuperável.
+            // Unique destination: does not replace an open file. The old generation remains recoverable.
             fs::rename(&compaction.temporary, &compaction.destination)?;
             sync_directory(&self.config.directory)?;
             self.faults.hit("compact_after_publish")?;
@@ -1081,18 +1081,18 @@ impl Writer {
             self.bytes_since_compact = 0;
             self.dirty = false;
             self.synced = Instant::now();
-            // Mantém uma geração anterior completa, retirando somente a que ficou obsoleta.
+            // Keeps one complete prior generation, removing only the obsolete one.
             if let Some(obsolete) = self.generation.checked_sub(2) {
                 let path = generation_path(&self.config.directory, obsolete);
                 if path.exists()
                     && let Err(error) = fs::remove_file(path)
                 {
-                    tracing::warn!(%error, "não foi possível retirar geração AOF antiga");
+                    tracing::warn!(%error, "could not remove old AOF generation");
                 }
             }
             Ok(())
         })();
-        // Após publicar, falha é fatal: continuar no arquivo antigo perderia appends no próximo replay.
+        // After publishing, failure is fatal: continuing in the old file would lose appends on next replay.
         let published = compaction.destination.exists();
         if result.is_err() && !published {
             let _ = fs::remove_file(&compaction.temporary);

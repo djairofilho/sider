@@ -1,4 +1,4 @@
-//! Papel e época publicados junto da geração AOF, sem sidecar independente.
+//! Role and epoch published with the AOF generation, without an independent sidecar.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
@@ -9,7 +9,7 @@ pub enum Role {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReplicationMetadata {
     pub role: Role,
-    /// Na réplica, identifica o upstream cujo prefixo está neste AOF.
-    /// Zero é reservado para réplica que ainda não instalou um snapshot.
+    /// On a replica, identifies the upstream whose prefix is in this AOF.
+    /// Zero is reserved for a replica that has not yet installed a snapshot.
     pub epoch: [u8; 16],
 }

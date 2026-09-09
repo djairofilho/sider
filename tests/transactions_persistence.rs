@@ -1,4 +1,4 @@
-//! O lote produzido pelo worker real é a unidade de append, replay e crash.
+//! The batch produced by the real worker is the unit of append, replay, and crash recovery.
 #![forbid(unsafe_code)]
 
 #[path = "common/process.rs"]
@@ -194,7 +194,7 @@ fn transactions_one_append_runtime_error_and_watch_abort_survive_compaction() {
         assert_eq!(
             aof.status().await.unwrap().0,
             1,
-            "EXEC produz um append, mesmo com erro individual"
+            "EXEC produces one append, even with an individual error"
         );
         assert_eq!(
             db.execute_batch(commands(b"blocked"), watched)
@@ -205,7 +205,7 @@ fn transactions_one_append_runtime_error_and_watch_abort_survive_compaction() {
         assert_eq!(
             aof.status().await.unwrap().0,
             1,
-            "WATCH abortado não produz registro"
+            "An aborted WATCH produces no record"
         );
         db.begin_compaction(&aof)
             .await
@@ -251,7 +251,7 @@ fn transactions_every_truncated_prefix_recovers_all_or_none_of_real_batch() {
         let mut recovered = directory.recover();
         let a = get(&mut recovered.store, b"a");
         let b = get(&mut recovered.store, b"b");
-        assert_eq!(a, b, "prefixo {end} de {}", bytes.len());
+        assert_eq!(a, b, "prefix {end} of {}", bytes.len());
         assert_eq!(
             a,
             if end == bytes.len() {
@@ -262,7 +262,7 @@ fn transactions_every_truncated_prefix_recovers_all_or_none_of_real_batch() {
         );
     }
     eprintln!(
-        "transactions: {} prefixos de um lote real",
+        "transactions: {} prefixes of a real batch",
         bytes.len() - batch_start + 1
     );
 }
@@ -289,7 +289,7 @@ impl FaultInjector for Pause {
 }
 
 #[test]
-#[ignore = "helper de crash executado somente pelo processo pai"]
+#[ignore = "crash helper executed only by the parent process"]
 fn transactions_crash_child() {
     let directory = PathBuf::from(std::env::var_os("SIDER_TEST_TX_AOF_DIR").unwrap());
     let point = std::env::var("SIDER_TEST_TX_AOF_POINT").unwrap();
@@ -358,7 +358,7 @@ fn transactions_process_crashes_never_replay_half_an_exec() {
         let deadline = Instant::now() + TIMEOUT;
         while !directory.0.join("paused").is_file() {
             child.assert_alive().unwrap();
-            assert!(Instant::now() < deadline, "ponto não alcançado: {point}");
+            assert!(Instant::now() < deadline, "point not reached: {point}");
             std::thread::sleep(Duration::from_millis(5));
         }
         let acknowledged = directory.0.join("acknowledged").is_file();
@@ -368,7 +368,7 @@ fn transactions_process_crashes_never_replay_half_an_exec() {
         assert_eq!(
             a,
             get(&mut recovered.store, b"b"),
-            "meio EXEC recuperado em {point}"
+            "partial EXEC recovered at {point}"
         );
         assert!(
             matches!(&a, Reply::Bulk(Some(value)) if value.as_ref() == b"old" || value.as_ref() == b"new")
@@ -381,7 +381,7 @@ fn transactions_process_crashes_never_replay_half_an_exec() {
         }
     }
     eprintln!(
-        "transactions: {} crashes de processo; nenhum lote parcial",
+        "transactions: {} process crashes; no partial batch",
         points.len()
     );
 }

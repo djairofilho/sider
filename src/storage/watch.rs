@@ -1,4 +1,4 @@
-//! Observações efêmeras: somente chaves com tokens vivos ocupam o registro.
+//! Ephemeral observations: only keys with live tokens occupy the registry.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,8 +10,8 @@ use tokio::time::Instant;
 #[derive(Clone, Default)]
 pub(super) struct Registry(Arc<Mutex<BTreeMap<Bytes, Weak<AtomicBool>>>>);
 
-/// Observação pertencente a uma conexão ou pedido aceito; Drop faz UNWATCH.
-/// Não é clonável: cada registro representa uma observação explicitamente adquirida.
+/// Observation owned by a connection or accepted request; Drop performs UNWATCH.
+/// It is not cloneable: each record represents an explicitly acquired observation.
 pub struct WatchToken {
     key: Bytes,
     changed: Arc<AtomicBool>,
@@ -35,7 +35,11 @@ impl WatchToken {
 
 impl Drop for WatchToken {
     fn drop(&mut self) {
-        let mut entries = self.registry.0.lock().expect("registro WATCH envenenado");
+        let mut entries = self
+            .registry
+            .0
+            .lock()
+            .expect("WATCH registry lock poisoned");
         if Arc::strong_count(&self.changed) == 1
             && entries
                 .get(&self.key)
@@ -48,7 +52,7 @@ impl Drop for WatchToken {
 
 impl Registry {
     fn token(&self, key: Bytes, deadline: Option<Instant>) -> WatchToken {
-        let mut entries = self.0.lock().expect("registro WATCH envenenado");
+        let mut entries = self.0.lock().expect("WATCH registry lock poisoned");
         let changed = entries
             .get(&key)
             .and_then(Weak::upgrade)
@@ -69,7 +73,7 @@ impl Registry {
         if let Some(changed) = self
             .0
             .lock()
-            .expect("registro WATCH envenenado")
+            .expect("WATCH registry lock poisoned")
             .remove(key)
             .and_then(|value| value.upgrade())
         {
@@ -79,7 +83,7 @@ impl Registry {
 }
 
 impl super::Store {
-    /// O worker resolve expirações das chaves antes de obter estas observações.
+    /// The worker resolves key expiries before obtaining these observations.
     pub fn watch(&self, keys: Vec<Bytes>) -> Vec<WatchToken> {
         keys.into_iter()
             .map(|key| {
@@ -89,7 +93,7 @@ impl super::Store {
             .collect()
     }
 
-    /// Conferida pelo mesmo proprietário que vai preparar e aplicar o lote.
+    /// Checked by the same owner that will prepare and apply the batch.
     pub fn watches_valid(&self, tokens: &[WatchToken]) -> bool {
         let now = self.clock.now();
         tokens

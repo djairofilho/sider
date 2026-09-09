@@ -28,7 +28,7 @@ pub(super) struct OwnedDirectory {
 pub(super) fn destination(path: &Path) -> Result<PathBuf, Error> {
     let name = path
         .file_name()
-        .ok_or(Error::Invalid("destino precisa nomear diretório novo"))?;
+        .ok_or(Error::Invalid("destination must name a new directory"))?;
     let parent = path
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
@@ -47,7 +47,11 @@ impl OwnedDirectory {
     }
     pub fn finish(&mut self) -> Result<(), Error> {
         sync_directory(&self.path)?;
-        sync_directory(self.path.parent().ok_or(Error::Invalid("pai do destino"))?)?;
+        sync_directory(
+            self.path
+                .parent()
+                .ok_or(Error::Invalid("destination parent"))?,
+        )?;
         self.committed = true;
         Ok(())
     }
@@ -85,9 +89,7 @@ fn regular(path: &Path, limit: u64) -> Result<File, Error> {
         || metadata.len() == 0
         || metadata.len() > limit
     {
-        return Err(Error::Invalid(
-            "arquivo obrigatório regular, não vazio e limitado",
-        ));
+        return Err(Error::Invalid("required regular, non-empty, bounded file"));
     }
     Ok(File::open(path)?)
 }
@@ -104,7 +106,7 @@ pub(super) fn hash_file(file: &mut File) -> Result<(String, u64), Error> {
         }
         count += bytes as u64;
         if count > super::MAX_BACKUP_BYTES {
-            return Err(Error::Invalid("arquivo excede teto de backup"));
+            return Err(Error::Invalid("file exceeds backup ceiling"));
         }
         hash.update(&buffer[..bytes]);
     }
@@ -149,9 +151,9 @@ impl Quotas {
             .map_err(crate::persistence::AofError::from)?;
         self.usage[shard] = self.usage[shard]
             .checked_add(self.store.used_bytes())
-            .ok_or(Error::Invalid("overflow da quota"))?;
+            .ok_or(Error::Invalid("quota overflow"))?;
         if self.usage[shard] > self.layout.quota(self.total, shard)? {
-            return Err(Error::Invalid("snapshot excede quota de um shard"));
+            return Err(Error::Invalid("snapshot exceeds one shard's quota"));
         }
         self.live_entries += u64::from(!self.store.is_empty());
         self.store
@@ -189,7 +191,7 @@ pub(super) fn validate_file(
     clock: Arc<dyn Clock>,
 ) -> Result<(Vec<usize>, u64), Error> {
     if hash_file(file)? != (manifest.snapshot_sha256.clone(), manifest.snapshot_bytes) {
-        return Err(Error::Invalid("checksum ou tamanho do snapshot"));
+        return Err(Error::Invalid("snapshot checksum or size"));
     }
     file.seek(SeekFrom::Start(0))?;
     let header = format::read_header_with_layout(&mut *file)?;
@@ -197,7 +199,7 @@ pub(super) fn validate_file(
         || header.sequence != manifest.cursor.sequence
         || header.layout != manifest.layout
     {
-        return Err(Error::Invalid("identidade do cabeçalho do snapshot"));
+        return Err(Error::Invalid("snapshot header identity"));
     }
     let mut previous = None;
     let mut digest = 0;
@@ -207,10 +209,10 @@ pub(super) fn validate_file(
         let Next::Record(Record::Snapshot(mutation @ Mutation::Put { .. })) =
             format::read_record(&mut *file, limits.record())?
         else {
-            return Err(Error::Invalid("entrada de snapshot ausente"));
+            return Err(Error::Invalid("missing snapshot entry"));
         };
         if previous.as_ref().is_some_and(|key| key >= mutation.key()) {
-            return Err(Error::Invalid("ordem ou duplicata de chave"));
+            return Err(Error::Invalid("key order or duplicate"));
         }
         previous = Some(mutation.key().clone());
         quotas.add(&mutation)?;
@@ -236,12 +238,12 @@ pub(super) fn validate_file(
         || transport_digest != manifest.transport_digest
         || hash_file(file)? != (manifest.snapshot_sha256.clone(), manifest.snapshot_bytes)
     {
-        return Err(Error::Invalid("selo, EOF ou integridade do snapshot"));
+        return Err(Error::Invalid("snapshot seal, EOF, or integrity"));
     }
     Ok((quotas.usage, quotas.live_entries))
 }
 
-/// Verifica todos os bytes e quotas sem criar ou alterar diretórios de dados.
+/// Verifies all bytes and quotas without creating or changing data directories.
 pub fn verify(
     source: &Path,
     layout: DurableLayout,
@@ -252,25 +254,25 @@ pub fn verify(
     layout.validate()?;
     let metadata = fs::symlink_metadata(source)?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err(Error::Invalid("backup precisa ser diretório real"));
+        return Err(Error::Invalid("backup must be a real directory"));
     }
     let mut bytes = Vec::new();
     regular(&source.join(MANIFEST), MAX_MANIFEST_BYTES)?
         .take(MAX_MANIFEST_BYTES + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_MANIFEST_BYTES {
-        return Err(Error::Invalid("manifesto excede limite"));
+        return Err(Error::Invalid("manifest exceeds limit"));
     }
     let manifest = Manifest::parse(&bytes, limits)?;
     if manifest.layout != layout {
-        return Err(Error::Invalid("layout solicitado difere do backup"));
+        return Err(Error::Invalid("requested layout differs from backup"));
     }
     let mut sums = Vec::new();
     regular(&source.join(CHECKSUMS), 512)?
         .take(513)
         .read_to_end(&mut sums)?;
     if sums != checksums(&bytes, &manifest.snapshot_sha256).as_bytes() {
-        return Err(Error::Invalid("checksums do manifesto"));
+        return Err(Error::Invalid("manifest checksums"));
     }
     let mut snapshot = regular(&source.join(SNAPSHOT), limits.max_snapshot_bytes)?;
     let (shard_usage, live_entries) = validate_file(&mut snapshot, &manifest, limits, clock)?;
@@ -281,7 +283,7 @@ pub fn verify(
     })
 }
 
-/// Recusa destino existente. Publica somente após conferir a cópia completa e o sync.
+/// Rejects an existing destination. Publishes only after checking the complete copy and sync.
 pub fn restore(options: RestoreOptions, clock: Arc<dyn Clock>) -> Result<VerifiedBackup, Error> {
     let verified = verify(
         &options.source,
@@ -291,7 +293,7 @@ pub fn restore(options: RestoreOptions, clock: Arc<dyn Clock>) -> Result<Verifie
     )?;
     let source = options.source.canonicalize()?;
     if destination(&options.destination)?.starts_with(&source) {
-        return Err(Error::Invalid("destino deve ficar fora do backup"));
+        return Err(Error::Invalid("destination must be outside backup"));
     }
     let mut owned = OwnedDirectory::new(&options.destination)?;
     let _lock = DirectoryLock::acquire(&owned.path, true)?;

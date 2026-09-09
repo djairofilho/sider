@@ -1,4 +1,4 @@
-//! Fila e observações pertencem à conexão; nenhum comando enfileirado toca o banco.
+//! Queue and observations belong to the connection; no queued command touches the database.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -170,7 +170,7 @@ impl Transaction {
     }
 }
 
-/// Tamanho RESP exato para o formato de requisição aceito (array de bulks).
+/// Exact RESP size for the accepted request format (an array of bulks).
 pub(super) fn request_bytes(frame: &Frame) -> usize {
     fn digits(value: usize) -> usize {
         value.checked_ilog10().unwrap_or(0) as usize + 1
@@ -197,7 +197,7 @@ mod tests {
     fn reply(action: Action) -> Frame {
         match action {
             Action::Reply(frame) => frame,
-            _ => panic!("resposta imediata esperada"),
+            _ => panic!("expected immediate reply"),
         }
     }
 
@@ -263,7 +263,7 @@ mod tests {
         assert!(
             matches!(reply(tx.handle(Command::Exec, 1, &config, &db, false).await.unwrap()), Frame::Error(error) if error.starts_with(b"EXECABORT"))
         );
-        // EXECABORT remove os tokens e o shard fixado; WATCH passa a aceitar o outro shard.
+        // EXECABORT removes tokens and the pinned shard; WATCH then accepts the other shard.
         assert_eq!(
             reply(
                 tx.handle(watch(b"b"), 1, &config, &db, false)

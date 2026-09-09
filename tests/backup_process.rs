@@ -1,4 +1,4 @@
-//! R10-03: primário e CLI reais, rede lenta, tráfego transacional e instância restaurada.
+//! R10-03: real primary and CLI, slow network, transactional traffic, and a restored instance.
 #![forbid(unsafe_code)]
 
 #[path = "common/process.rs"]
@@ -146,10 +146,7 @@ impl Traffic {
         let wanted = self.count.load(Ordering::SeqCst) + count;
         let deadline = Instant::now() + TIMEOUT;
         while self.count.load(Ordering::SeqCst) < wanted {
-            assert!(
-                Instant::now() < deadline,
-                "tráfego bloqueado durante exportação"
-            );
+            assert!(Instant::now() < deadline, "traffic blocked during export");
             tokio::task::yield_now().await;
         }
     }
@@ -176,10 +173,10 @@ async fn real_backup_preserves_transaction_cut_while_slow_export_and_writes_cont
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "exige SIDER_BACKUP_PACKAGE_DIR com pacote realmente extraído; não produz recibo de release"]
+#[ignore = "requires SIDER_BACKUP_PACKAGE_DIR with an actually extracted package; does not produce a release receipt"]
 async fn extracted_package_backup_roundtrip_under_traffic() {
     let directory =
-        PathBuf::from(std::env::var_os("SIDER_BACKUP_PACKAGE_DIR").expect("pacote explícito"));
+        PathBuf::from(std::env::var_os("SIDER_BACKUP_PACKAGE_DIR").expect("explicit package"));
     assert!(directory.is_absolute());
     let suffix = if cfg!(windows) { ".exe" } else { "" };
     let sider = directory.join(format!("sider{suffix}"));
@@ -237,7 +234,7 @@ async fn exercise(sider_binary: &Path, backup_binary: &Path) {
     };
     let value = vec![b'x'; 512 * 1024];
     let mut per_shard = [0usize; 4];
-    // 8 MiB distribuídos igualmente: excede buffers do peer lento sem esgotar quota.
+    // 8 MiB evenly distributed: exceeds the slow peer buffers without exhausting the quota.
     for index in 0..1000 {
         let key = format!("bulk:{index}");
         let shard = layout.shard_for(key.as_bytes()).unwrap();
@@ -281,7 +278,7 @@ async fn exercise(sider_binary: &Path, backup_binary: &Path) {
     assert!(
         matches!(protocol::read(&mut slow, protocol::Limits::default(), TIMEOUT).await.unwrap(), Message::FullStart { entries, .. } if entries >= 24)
     );
-    // Nenhuma entrada do snapshot é lida; o servidor fica sem espaço de envio.
+    // No snapshot entry is read; the server runs out of send buffer space.
     traffic.advance(20).await;
     let before = traffic.count.load(Ordering::SeqCst);
     let output = cli(
@@ -344,19 +341,19 @@ async fn exercise(sider_binary: &Path, backup_binary: &Path) {
     }
     let a = call(&mut recovered, &[b"GET", b"{traffic}:a"]);
     let b = call(&mut recovered, &[b"GET", b"{traffic}:b"]);
-    assert_eq!(a, b, "snapshot não pode capturar metade de EXEC");
+    assert_eq!(a, b, "snapshot must not capture half of EXEC");
     assert!(
         matches!(a, Response::Bulk(Some(value)) if std::str::from_utf8(&value).unwrap().parse::<u64>().unwrap() >= before)
     );
     let Response::Integer(ttl_before) = ttl_before else {
-        panic!("PTTL da origem")
+        panic!("source PTTL")
     };
     let Response::Integer(ttl_after) = call(&mut recovered, &[b"PTTL", b"{types}:ttl"]) else {
-        panic!("PTTL restaurado")
+        panic!("restored PTTL")
     };
     assert!(
         ttl_after > 0 && ttl_after <= ttl_before,
-        "TTL não deve recomeçar"
+        "TTL must not restart"
     );
     restored.finish();
     primary.finish();

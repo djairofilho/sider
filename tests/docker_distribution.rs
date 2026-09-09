@@ -1,4 +1,4 @@
-//! Constrói a imagem a partir dos bytes selecionados e testa o arquivo após docker load.
+//! Builds the image from the selected bytes and tests the archive after docker load.
 #![forbid(unsafe_code)]
 
 #[path = "common/gate_receipt.rs"]
@@ -42,7 +42,7 @@ fn hex(value: String, count: usize) -> Result<String, String> {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     {
         return Err(format!(
-            "identidade exige {count} dígitos hexadecimais minúsculos"
+            "identity requires {count} lowercase hexadecimal digits"
         ));
     }
     Ok(value)
@@ -54,21 +54,21 @@ impl Options {
             .map(|value| {
                 value
                     .into_string()
-                    .map_err(|_| "ID do runner precisa ser UTF-8".to_owned())
+                    .map_err(|_| "runner ID must be UTF-8".to_owned())
             })
             .transpose()?
             .map(|value| hex(value, 64))
             .transpose()?;
-        let mut required = |name| lookup(name).ok_or_else(|| format!("{name} ausente"));
+        let mut required = |name| lookup(name).ok_or_else(|| format!("missing {name}"));
         let package = PathBuf::from(required("SIDER_DOCKER_PACKAGE_DIR")?);
         let output = PathBuf::from(required("SIDER_DOCKER_OUTPUT_DIR")?);
         if !package.is_absolute() || !output.is_absolute() {
-            return Err("diretórios de pacote e saída precisam ser absolutos".into());
+            return Err("package and output directories must be absolute".into());
         }
         let mut text = |name| {
             required(name)?
                 .into_string()
-                .map_err(|_| format!("{name} precisa ser UTF-8"))
+                .map_err(|_| format!("{name} must be UTF-8"))
         };
         Ok(Self {
             package,
@@ -88,7 +88,7 @@ fn regular(path: &Path) -> Result<(), String> {
     let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() == 0 {
         return Err(format!(
-            "arquivo regular não vazio obrigatório: {}",
+            "nonempty regular file required: {}",
             path.display()
         ));
     }
@@ -98,7 +98,7 @@ fn regular(path: &Path) -> Result<(), String> {
 fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
     let metadata = fs::symlink_metadata(source).map_err(|error| error.to_string())?;
     if metadata.file_type().is_symlink() {
-        return Err("pacote não admite symlinks".into());
+        return Err("package does not allow symlinks".into());
     }
     if metadata.is_dir() {
         fs::create_dir(destination).map_err(|error| error.to_string())?;
@@ -164,7 +164,7 @@ impl Runner {
             .as_array()
             .and_then(|items| items.first())
             .cloned()
-            .ok_or("inspect vazio".into())
+            .ok_or("empty inspect".into())
     }
 
     fn hash(&mut self, path: &Path) -> Result<String, String> {
@@ -173,7 +173,7 @@ impl Runner {
             result
                 .split_whitespace()
                 .next()
-                .ok_or("checksum vazio")?
+                .ok_or("empty checksum")?
                 .to_owned(),
             64,
         )
@@ -230,19 +230,19 @@ impl Runner {
                     let ready: Value =
                         serde_json::from_slice(&ready.stdout).map_err(|error| error.to_string())?;
                     if ready["pid"] != 1 || ready["host"] != "127.0.0.1" {
-                        return Err("prontidão não pertence ao PID 1 em loopback".into());
+                        return Err("readiness does not belong to PID 1 on loopback".into());
                     }
                     let port = ready["port"]
                         .as_u64()
                         .and_then(|value| u16::try_from(value).ok())
                         .filter(|value| *value > 0)
-                        .ok_or("porta de prontidão inválida")?;
+                        .ok_or("invalid readiness port")?;
                     break SocketAddr::from(([127, 0, 0, 1], port));
                 }
                 if Instant::now() >= deadline
                     || self.inspect("container", name)?["State"]["Running"] != true
                 {
-                    return Err("prontidão da imagem ausente".into());
+                    return Err("missing image readiness".into());
                 }
                 std::thread::sleep(Duration::from_millis(25));
             }
@@ -250,10 +250,10 @@ impl Runner {
             self.docker(&["port", name, "6379/tcp"])?
                 .trim()
                 .parse()
-                .map_err(|error| format!("porta Docker inválida: {error}"))?
+                .map_err(|error| format!("invalid Docker port: {error}"))?
         };
         if !address.ip().is_loopback() || address.port() == 0 {
-            return Err("Docker precisa publicar somente porta efêmera em loopback".into());
+            return Err("Docker must publish only an ephemeral loopback port".into());
         }
         loop {
             if matches!(exchange(address, &[b"PING"]), Ok(wire::Response::Simple(value)) if value == b"PONG")
@@ -264,24 +264,24 @@ impl Runner {
             if state["State"]["Running"] != true || Instant::now() >= deadline {
                 let logs = self.run(Command::new("docker").args(["logs", name]), TIMEOUT)?;
                 return Err(format!(
-                    "contêiner sem prontidão TCP: {}",
+                    "container has no TCP readiness: {}",
                     String::from_utf8_lossy(&logs.stderr)
                 ));
             }
             std::thread::sleep(Duration::from_millis(25));
         }
         if self.docker(&["exec", name, "id", "-u"])?.trim() != "10001" {
-            return Err("servidor não executa com UID 10001".into());
+            return Err("server is not running with UID 10001".into());
         }
         let status = self.docker(&["exec", name, "cat", "/proc/1/status"])?;
         if !status.lines().any(|line| {
             line.starts_with("Uid:") && line.split_whitespace().skip(1).all(|uid| uid == "10001")
         }) {
-            return Err("PID 1 não pertence ao usuário sem privilégio".into());
+            return Err("PID 1 does not belong to the unprivileged user".into());
         }
         let executable = self.docker(&["exec", name, "readlink", "/proc/1/exe"])?;
         if executable.trim() != "/usr/local/bin/sider" {
-            return Err("o servidor precisa ser o PID 1".into());
+            return Err("server must be PID 1".into());
         }
         Ok(address)
     }
@@ -293,17 +293,17 @@ impl Runner {
             self.docker(&["stop", "--timeout", "7", name])?;
         }
         if self.docker(&["wait", name])?.trim() != "0" {
-            return Err("SIGTERM não produziu encerramento normal".into());
+            return Err("SIGTERM did not produce normal shutdown".into());
         }
         let observed = self.inspect("container", name)?;
         if observed["State"]["Running"] != false || observed["State"]["OOMKilled"] != false {
-            return Err("contêiner continuou ativo ou foi encerrado por OOM".into());
+            return Err("container remained active or was killed by OOM".into());
         }
         let logs = self.run(Command::new("docker").args(["logs", name]), TIMEOUT)?;
         if !logs.status.success()
-            || !String::from_utf8_lossy(&logs.stderr).contains("servidor encerrado")
+            || !String::from_utf8_lossy(&logs.stderr).contains("server stopped")
         {
-            return Err("log não confirma drenagem do servidor".into());
+            return Err("log does not confirm server draining".into());
         }
         self.docker(&["rm", "--volumes", name])?;
         self.containers.retain(|item| item != name);
@@ -314,7 +314,7 @@ impl Runner {
 fn private_runner(observed: &Value, id: &str) -> Result<(), String> {
     let network = observed["HostConfig"]["NetworkMode"]
         .as_str()
-        .ok_or("rede do runner ausente")?;
+        .ok_or("missing runner network")?;
     let no_ports = |value: &Value| {
         value.is_null()
             || value.as_object().is_some_and(|ports| {
@@ -333,7 +333,7 @@ fn private_runner(observed: &Value, id: &str) -> Result<(), String> {
         || !no_ports(&observed["NetworkSettings"]["Ports"])
     {
         return Err(
-            "runner deve ser Linux ativo com ID completo e rede privada sem portas publicadas"
+            "runner must be active Linux with a full ID and a private network without published ports"
                 .into(),
         );
     }
@@ -388,7 +388,7 @@ fn check_reply(
     expected: wire::Response,
 ) -> Result<(), String> {
     if exchange(address, args)? != expected {
-        return Err("resposta TCP divergente no ensaio de distribuição".into());
+        return Err("TCP response mismatch in the distribution test".into());
     }
     Ok(())
 }
@@ -399,15 +399,15 @@ fn exercise(options: Options) -> Result<Value, String> {
         target_arch = "x86_64",
         target_env = "gnu"
     )) {
-        return Err("runner Docker exige Linux GNU x86_64 nativo".into());
+        return Err("Docker runner requires native Linux GNU x86_64".into());
     }
     let package_metadata =
         fs::symlink_metadata(&options.package).map_err(|error| error.to_string())?;
     if !package_metadata.is_dir() || package_metadata.file_type().is_symlink() {
-        return Err("pacote precisa ser diretório real".into());
+        return Err("package must be a real directory".into());
     }
-    // create_dir recusa saída existente; todos os arquivos de ensaio ficam preservados.
-    fs::create_dir(&options.output).map_err(|error| format!("saída precisa ser nova: {error}"))?;
+    // create_dir rejects existing output; all test files are preserved.
+    fs::create_dir(&options.output).map_err(|error| format!("output must be new: {error}"))?;
     let context = options.output.join("context");
     fs::create_dir(&context).map_err(|error| error.to_string())?;
     let suffix = format!(
@@ -442,7 +442,7 @@ fn exercise(options: Options) -> Result<Value, String> {
     ] {
         regular(&options.package.join(file))?;
         if &runner.hash(&options.package.join(file))? != expected {
-            return Err(format!("hash do executável selecionado diverge: {file}"));
+            return Err(format!("selected executable hash mismatch: {file}"));
         }
     }
     for name in [
@@ -464,7 +464,7 @@ fn exercise(options: Options) -> Result<Value, String> {
         ("LICENSE", include_bytes!("../LICENSE").as_slice()),
     ] {
         if fs::read(context.join(name)).map_err(|error| error.to_string())? != expected {
-            return Err(format!("{name} do pacote diverge do checkout do runner"));
+            return Err(format!("package {name} differs from runner checkout"));
         }
     }
     fs::write(
@@ -481,7 +481,7 @@ fn exercise(options: Options) -> Result<Value, String> {
         .status
         .success()
     {
-        return Err("tag local já existe; não sobrescrever".into());
+        return Err("local tag already exists; do not overwrite".into());
     }
     runner.image_owned = true;
     runner.checked(
@@ -542,7 +542,7 @@ fn exercise(options: Options) -> Result<Value, String> {
         .status
         .success()
     {
-        return Err("tag permaneceu antes do load".into());
+        return Err("tag remained before load".into());
     }
     runner.image_owned = true;
     runner.checked(
@@ -562,7 +562,7 @@ fn exercise(options: Options) -> Result<Value, String> {
         || loaded["Config"]["Labels"]["io.sider.backup.sha256"] != options.backup_sha
         || loaded["Config"]["Labels"]["io.sider.replica.sha256"] != options.replica_sha
     {
-        return Err("identidade/configuração da imagem recarregada divergente".into());
+        return Err("reloaded image identity/configuration mismatch".into());
     }
     let hashes = runner.docker(&[
         "run",
@@ -582,14 +582,14 @@ fn exercise(options: Options) -> Result<Value, String> {
         options.binary_sha, options.migrator_sha, options.backup_sha, options.replica_sha
     );
     if hashes != expected_hashes {
-        return Err("imagem recarregada não contém os executáveis selecionados".into());
+        return Err("reloaded image does not contain the selected executables".into());
     }
     if runner
         .docker(&["run", "--rm", "--network", "none", &image, "--version"])?
         .trim()
         != format!("sider {}", options.version)
     {
-        return Err("--version da imagem diverge".into());
+        return Err("image --version mismatch".into());
     }
     runner.docker(&[
         "run",
@@ -615,7 +615,7 @@ fn exercise(options: Options) -> Result<Value, String> {
         .trim()
         != format!("sider-backup {}", options.version)
     {
-        return Err("versão da CLI de backup da imagem diverge".into());
+        return Err("image backup CLI version mismatch".into());
     }
     runner.docker(&[
         "run",
@@ -643,9 +643,9 @@ fn exercise(options: Options) -> Result<Value, String> {
         TIMEOUT,
     )?;
     if invalid.status.code() != Some(1)
-        || !String::from_utf8_lossy(&invalid.stderr).contains("erro:")
+        || !String::from_utf8_lossy(&invalid.stderr).contains("error:")
     {
-        return Err("configuração inválida não produziu erro do produto".into());
+        return Err("invalid configuration did not produce a product error".into());
     }
     runner.docker(&["rm", "--volumes", &invalid_name])?;
     runner.containers.clear();
@@ -686,14 +686,14 @@ fn exercise(options: Options) -> Result<Value, String> {
     )?;
     let ttl = exchange(address, &[b"PTTL", b"{r10}:ttl"])?;
     if !matches!(ttl, wire::Response::Integer(value) if value > 0 && value < 120000) {
-        return Err("TTL não foi preservado como deadline absoluto".into());
+        return Err("TTL was not preserved as an absolute deadline".into());
     }
     runner.stop(&second, true)?;
     let size = fs::metadata(&archive)
         .map_err(|error| error.to_string())?
         .len();
     if size == 0 || size > 2 * 1024 * 1024 * 1024 || runner.hash(&archive)? != archive_sha {
-        return Err("arquivo vazio, excessivo ou alterado durante o ensaio".into());
+        return Err("file empty, oversized, or changed during the test".into());
     }
     runner.docker(&["volume", "rm", &volume])?;
     runner.volume = None;
@@ -707,7 +707,7 @@ fn exercise(options: Options) -> Result<Value, String> {
         "artifact": {"name": archive_name, "size": size, "sha256": archive_sha},
         "binaries": {"sider": options.binary_sha, "sider-aof-migrate": options.migrator_sha, "sider-backup": options.backup_sha, "sider-replica": options.replica_sha},
         "cases": 8, "scenarios": ["save_gzip_remove_load_identity", "exact_binary_hashes", "versions_and_operational_clis", "uid_and_pid1", "binary_tcp", "aof_volume_restart_ttl", "sigterm_drain", "invalid_configuration"],
-        "status": "success", "source_provenance": "SHA declarado pelo empacotador; bytes conferidos contra hashes fornecidos, sem inferir SHA do nome do arquivo"
+        "status": "success", "source_provenance": "SHA declared by the packager; bytes checked against supplied hashes, without inferring SHA from the file name"
     });
     fs::write(
         options.output.join("docker-report.json"),
@@ -718,14 +718,14 @@ fn exercise(options: Options) -> Result<Value, String> {
 }
 
 #[test]
-#[ignore = "ensaio real exige pacote Linux extraído, hashes e diretório novo; não é recibo de release"]
+#[ignore = "actual test requires an extracted Linux package, hashes, and a new directory; not a release receipt"]
 fn exported_image_runs_after_load() {
     let report = exercise(Options::read(|name| std::env::var_os(name)).unwrap()).unwrap();
     println!("{}", serde_json::to_string_pretty(&report).unwrap());
 }
 
 #[test]
-#[ignore = "gate exige contexto exato e arquivo Docker realmente exportado/recarregado"]
+#[ignore = "gate requires exact context and an actually exported/reloaded Docker archive"]
 fn release_docker_gate() {
     let context = gate_receipt::GateContext::from_env("docker").unwrap();
     let options = Options::read(|name| std::env::var_os(name)).unwrap();

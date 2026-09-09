@@ -158,7 +158,7 @@ async fn transactions_snapshot_waits_for_accepted_batch_even_after_client_cancel
         Poll::Ready(())
     })
     .await;
-    drop(batch); // O pedido aceito mantém a admissão e continua pertencendo ao worker.
+    drop(batch); // The accepted request retains admission and remains owned by the worker.
     let mut snapshot = Box::pin(db.snapshot(None));
     poll_fn(|cx| {
         assert!(snapshot.as_mut().poll(cx).is_pending());
@@ -199,7 +199,7 @@ struct ErrorAt(&'static str);
 impl FaultInjector for ErrorAt {
     fn hit(&self, point: &'static str) -> io::Result<()> {
         if point == self.0 {
-            Err(io::Error::other("falha AOF transacional injetada"))
+            Err(io::Error::other("injected transactional AOF failure"))
         } else {
             Ok(())
         }

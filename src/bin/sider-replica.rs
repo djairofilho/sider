@@ -1,4 +1,4 @@
-//! Administração explícita da replicação pelo listener interno local.
+//! Explicit replication administration through the local internal listener.
 
 #![forbid(unsafe_code)]
 
@@ -23,19 +23,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if arguments == ["--help"] || arguments.is_empty() {
         println!(
-            "Uso: sider-replica --addr IP:PORTA --status|--promote\n--promote persiste o papel primário e interrompe o upstream. Exige loopback."
+            "Usage: sider-replica --addr IP:PORT --status|--promote\n--promote persists the primary role and stops upstream. Requires loopback."
         );
         return Ok(());
     }
     if arguments.len() != 3 || arguments[0] != "--addr" {
-        return Err("argumentos inválidos; consulte --help".into());
+        return Err("invalid arguments; see --help".into());
     }
     let address: SocketAddr = arguments[1].parse()?;
     let promote = match arguments[2].as_str() {
         "--status" => false,
         "--promote" if address.ip().is_loopback() => true,
-        "--promote" => return Err("promoção exige endereço de loopback".into()),
-        _ => return Err("operação inválida; consulte --help".into()),
+        "--promote" => return Err("promotion requires a loopback address".into()),
+        _ => return Err("invalid operation; see --help".into()),
     };
     let deadline = Duration::from_secs(30);
     let mut socket = tokio::time::timeout(deadline, TcpStream::connect(address)).await??;
@@ -74,7 +74,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             "upstream_sequence": upstream_sequence, "connected": connected, "backlog_bytes": backlog_bytes,
             "full_syncs": full_syncs, "partial_syncs": partial_syncs
         }),
-        response => return Err(format!("resposta administrativa inesperada: {response:?}").into()),
+        response => return Err(format!("unexpected administrative reply: {response:?}").into()),
     };
     println!("{}", serde_json::to_string(&value)?);
     Ok(())

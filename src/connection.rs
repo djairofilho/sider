@@ -1,4 +1,4 @@
-//! Uma requisição em voo por conexão, com entrada e saída limitadas.
+//! One request in flight per connection, with bounded input and output.
 
 use std::io;
 
@@ -19,32 +19,32 @@ mod transaction;
 
 #[derive(Debug, Error)]
 pub(crate) enum ConnectionError {
-    #[error("falha de I/O da conexão: {0}")]
+    #[error("connection I/O failure: {0}")]
     Io(#[from] io::Error),
-    #[error("protocolo inválido: {0}")]
+    #[error("invalid protocol: {0}")]
     Protocol(#[from] ProtocolError),
-    #[error("formato de requisição inválido")]
+    #[error("invalid request format")]
     InvalidRequest,
-    #[error("frame truncado no EOF")]
+    #[error("frame truncated at EOF")]
     Truncated,
-    #[error("limite do buffer de entrada excedido")]
+    #[error("input buffer limit exceeded")]
     InputLimit,
-    #[error("prazo de formação do frame excedido")]
+    #[error("frame-formation timeout exceeded")]
     FrameTimeout,
-    #[error("prazo de escrita excedido")]
+    #[error("write timeout exceeded")]
     WriteTimeout,
-    #[error("falha de codificação da resposta: {0}")]
+    #[error("reply encoding failure: {0}")]
     Encode(#[from] EncodeError),
-    #[error("falha do worker: {0}")]
+    #[error("worker failure: {0}")]
     Database(#[from] DbError),
-    #[error("configuração da conexão inválida: {0}")]
+    #[error("invalid connection configuration: {0}")]
     Config(#[from] crate::ConfigError),
-    #[error("falha do assinante: {0}")]
+    #[error("subscriber failure: {0}")]
     PubSub(#[from] PubSubError),
 }
 
 pub(crate) async fn stopped(shutdown: &mut watch::Receiver<bool>) {
-    // Um emissor descartado também encerra consumidores, sem espera infinita.
+    // A dropped sender also terminates consumers, without an infinite wait.
     let _ = shutdown.wait_for(|stopping| *stopping).await;
 }
 
@@ -123,7 +123,7 @@ where
         if subscription.is_evicted() {
             return Err(PubSubError::Closed.into());
         }
-        // Uma notificação por volta mantém comandos e mensagens progredindo.
+        // One notification per round keeps commands and messages progressing.
         if let Some(message) = subscription.try_message() {
             write_subscriber_response(
                 &mut stream,
@@ -137,8 +137,8 @@ where
         match decoder.decode(&mut input) {
             Ok(Some(frame)) => {
                 database.metrics.add(Counter::Requests, 1);
-                // Só lemos enquanto o frame anterior estava incompleto. Logo,
-                // qualquer sufixo novo veio necessariamente da última leitura.
+                // We read only while the prior frame was incomplete. Therefore,
+                // any new suffix necessarily came from the most recent read.
                 frame_started = if input.is_empty() { None } else { last_read_at };
                 let command_name = match &frame {
                     Frame::Array(Some(parts)) => match parts.first() {
@@ -278,7 +278,7 @@ where
                         continue;
                     }
                 };
-                // Parada não cancela a tentativa de resposta de um pedido aceito.
+                // Shutdown does not cancel the reply attempt for an accepted request.
                 write_subscriber_response(
                     &mut stream,
                     &mut output,

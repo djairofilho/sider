@@ -1,4 +1,4 @@
-//! FULL/CONTINUE, confirmação após apply durável e reconexão de uma única sessão.
+//! FULL/CONTINUE, confirmation after durable apply, and reconnection of a single session.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -68,7 +68,7 @@ pub async fn serve(
             Some(result) = sessions.join_next() => {
                 match result {
                     Ok(Ok(())) => {},
-                    Ok(Err(error)) => tracing::debug!(%error, "sessão interna encerrada"),
+                    Ok(Err(error)) => tracing::debug!(%error, "internal session closed"),
                     Err(error) => return Err(error.into()),
                 }
             }
@@ -150,7 +150,7 @@ async fn serve_connection(
             };
             tracing::info!(
                 sequence = cursor.sequence,
-                "promoção manual persistida; upstream anterior desligado"
+                "manual promotion persisted; previous upstream stopped"
             );
             protocol::write(
                 &mut socket,
@@ -233,7 +233,7 @@ async fn serve_connection(
                     config.frame_timeout,
                 )
                 .await?;
-                tracing::info!(sequence = cursor.sequence, "replicação CONTINUE");
+                tracing::info!(sequence = cursor.sequence, "replication CONTINUE");
                 (cursor, subscription)
             } else {
                 let mut snapshot = timeout(
@@ -255,7 +255,7 @@ async fn serve_connection(
                 )
                 .await
                 .map_err(|_| protocol::Error::Timeout)??;
-                tracing::info!(sequence = snapshot.cursor.sequence, "replicação FULL");
+                tracing::info!(sequence = snapshot.cursor.sequence, "replication FULL");
                 (
                     snapshot.cursor,
                     snapshot.subscription.take().ok_or(Error::Sequence)?,
@@ -400,7 +400,7 @@ pub async fn follow(
         };
         context.runtime.disconnected(generation);
         if let Err(error) = &result {
-            tracing::warn!(%error, "upstream desconectado; reconexão limitada");
+            tracing::warn!(%error, "upstream disconnected; reconnection bounded");
             if matches!(
                 error,
                 Error::Database(crate::storage::worker::DbError::Unavailable)
@@ -490,7 +490,7 @@ async fn receive_session(
             }
             Message::Batch { sequence, batch } => {
                 if sequence == position.sequence && previous.as_ref() == Some(&frame) {
-                    // Retransmissão exata do último lote: não reaplica nem renova prazo.
+                    // Exact retransmission of the last batch: neither reapplies nor renews timeout.
                 } else {
                     if position.sequence.checked_add(1) != Some(sequence) {
                         return Err(Error::Sequence);

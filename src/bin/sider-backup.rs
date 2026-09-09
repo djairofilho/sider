@@ -1,4 +1,4 @@
-//! Backup operacional explícito; não abre o listener público do servidor.
+//! Explicit operational backup; does not open the server's public listener.
 #![forbid(unsafe_code)]
 
 use std::process::ExitCode;
@@ -11,7 +11,7 @@ fn main() -> ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
     if args.len() == 1 && args[0] == "--help" {
         println!(
-            "Uso: sider-backup export --source IP:PORTA --destination DIRETORIO_NOVO --source-sha SHA\n     sider-backup verify --source BACKUP --shards N --routing 1\n     sider-backup restore --source BACKUP --destination DIRETORIO_NOVO --shards N --routing 1\nLimites: --max-record-bytes N --max-mutations N --max-snapshot-bytes N --max-dataset-bytes N --timeout-ms N"
+            "Usage: sider-backup export --source IP:PORT --destination NEW_DIRECTORY --source-sha SHA\n     sider-backup verify --source BACKUP --shards N --routing 1\n     sider-backup restore --source BACKUP --destination NEW_DIRECTORY --shards N --routing 1\nLimits: --max-record-bytes N --max-mutations N --max-snapshot-bytes N --max-dataset-bytes N --timeout-ms N"
         );
         return ExitCode::SUCCESS;
     }

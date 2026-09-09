@@ -1,4 +1,4 @@
-//! Semântica da 0.1 sem sockets ou runtime, usando o oráculo literal verificado.
+//! 0.1 semantics without sockets or a runtime, using the verified literal oracle.
 
 #![forbid(unsafe_code)]
 
@@ -36,7 +36,7 @@ fn execute(store: &mut Store, frame: Frame) -> Frame {
 fn five_commands_match_all_verified_redis_fixtures_without_network() {
     for case in resp_fixtures::CASES {
         let mut store = Store::new();
-        // Os casos também comprovam que seu cleanup permite repetir a sequência.
+        // The cases also verify that their cleanup allows the sequence to be repeated.
         for _ in 0..2 {
             for (index, (request, expected)) in case.exchanges.iter().enumerate() {
                 let mut decoder = Decoder::new(RespLimits::default()).unwrap();
@@ -153,7 +153,7 @@ fn protocol_commands_only_move_owned_payloads_into_storage() {
     let mut store = Store::new();
     assert_eq!(execute(&mut store, frame), Frame::from(Reply::Ok));
     let Reply::Bulk(Some(value)) = get(&mut store, b"key") else {
-        panic!("valor esperado")
+        panic!("expected value")
     };
     assert_eq!(value.as_ptr(), address);
     assert_eq!(value.len(), 32_768);

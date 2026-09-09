@@ -1,4 +1,4 @@
-//! Sessões entre processos reais, export consistente, reconexão e promoção durável.
+//! Sessions between real processes, consistent export, reconnection, and durable promotion.
 
 #![forbid(unsafe_code)]
 
@@ -113,7 +113,7 @@ impl Node {
             if directory.join("resp.json").exists() {
                 break;
             }
-            assert!(Instant::now() < deadline, "prontidão do processo");
+            assert!(Instant::now() < deadline, "process readiness");
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         let read = |name| {
@@ -202,7 +202,7 @@ fn ok(response: Response) {
 
 fn dataset_metrics(node: &Node) -> Vec<(String, String)> {
     let Response::Bulk(Some(bytes)) = node.command(&[b"INFO", b"memory"]) else {
-        panic!("INFO memory ausente");
+        panic!("missing INFO memory");
     };
     let text = String::from_utf8(bytes).unwrap();
     let fields: Vec<_> = text
@@ -228,7 +228,7 @@ async fn caught_up(primary: &Node, replica: &Node) -> Message {
         }
         assert!(
             Instant::now() < deadline,
-            "réplica não alcançou {expected:?}: {status:?}"
+            "replica did not reach {expected:?}: {status:?}"
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -236,7 +236,7 @@ async fn caught_up(primary: &Node, replica: &Node) -> Message {
 
 fn replication_metrics(response: Response) -> std::collections::BTreeMap<String, String> {
     let Response::Bulk(Some(bytes)) = response else {
-        panic!("INFO replication ausente")
+        panic!("missing INFO replication")
     };
     let text = String::from_utf8(bytes).unwrap();
     assert!(text.starts_with("# Replication\r\n"));
@@ -268,7 +268,7 @@ async fn metrics_replication_observes_full_delta_disconnect_and_promotion_over_t
         }
         assert!(
             Instant::now() < deadline,
-            "head observado após aplicar delta: {current:?}"
+            "head observed after applying delta: {current:?}"
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     };
@@ -315,7 +315,7 @@ async fn metrics_replication_observes_full_delta_disconnect_and_promotion_over_t
             );
             break;
         }
-        assert!(Instant::now() < deadline, "desconexão não observada");
+        assert!(Instant::now() < deadline, "disconnection not observed");
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert!(matches!(
@@ -371,7 +371,7 @@ async fn replication_processes_full_delta_export_continue_and_durable_promotion(
     assert_eq!(
         dataset_metrics(&primary),
         dataset_metrics(&replica),
-        "métricas após FULL"
+        "metrics after FULL"
     );
     assert!(
         matches!(replica.command(&[b"SET", b"{s}:forbidden", b"x"]), Response::Error(error) if error.starts_with(b"READONLY"))
@@ -398,7 +398,7 @@ async fn replication_processes_full_delta_export_continue_and_durable_promotion(
     assert_eq!(
         dataset_metrics(&primary),
         dataset_metrics(&replica),
-        "métricas após lote e TTL"
+        "metrics after batch and TTL"
     );
     assert_eq!(
         replica.command(&[b"MGET", b"{s}:string", b"{s}:other", b"{s}:ttl"]),
@@ -534,7 +534,7 @@ async fn offer(listener: &TcpListener, expected: Option<Cursor>, head: Cursor) -
         .unwrap()
         .unwrap();
     let Message::Hello(peer) = read(&mut socket).await else {
-        panic!("hello da réplica");
+        panic!("replica hello");
     };
     assert_eq!(peer.cursor, expected);
     send(&mut socket, Message::Hello(hello(Some(head)))).await;
@@ -657,7 +657,7 @@ async fn replication_process_rejects_bad_full_gaps_and_changed_duplicates_ack_su
             .is_err()
     );
     assert_eq!(replica.cursor().await, next);
-    // A política é everysec; matar assim que recebemos ACK exige flush da replicação.
+    // The policy is everysec; killing immediately after receiving ACK requires replication to flush.
     replica.stop();
     let replica = Node::start(&path, Some(upstream)).await;
     let mut socket = offer(&listener, Some(next), next).await;
@@ -707,10 +707,10 @@ async fn replication_slow_peer_does_not_block_healthy_replica_and_lost_history_f
     assert_eq!(read(&mut slow).await, Message::Continue(baseline));
     send(&mut slow, Message::Ack(baseline)).await;
     ok(primary.command(&[b"SET", b"{s}:bounded", b"first"]));
-    // Confirma que o peer já recebeu um lote antes de ultrapassar o histórico.
+    // Confirms that the peer has already received a batch before exceeding the history.
     assert!(matches!(read(&mut slow).await, Message::Heartbeat(_)));
     let Message::Batch { sequence, .. } = read(&mut slow).await else {
-        panic!("primeiro lote");
+        panic!("first batch");
     };
     for index in 0..200 {
         let value = format!("{index:04}{}", "x".repeat(1024));
@@ -724,7 +724,7 @@ async fn replication_slow_peer_does_not_block_healthy_replica_and_lost_history_f
     assert!(
         matches!(primary.status().await, Message::Status { backlog_bytes, .. } if backlog_bytes <= 32768)
     );
-    // O peer reteve no máximo um lote fora do journal e ficou esperando ACK.
+    // The peer retained at most one batch outside the journal and waited for ACK.
     send(&mut slow, Message::Ack(baseline)).await;
     send(
         &mut slow,
@@ -761,7 +761,7 @@ async fn replication_primary_restart_changes_epoch_and_forces_full_online() {
     let previous = primary.cursor().await;
     let listen = primary.internal;
     primary.stop();
-    // Reabrir o endereço real do serviço após sua parada, sem reservar porta livre.
+    // Reopen the actual service address after shutdown, without reserving a free port.
     let primary = Node::start_at(&path, None, Some(listen)).await;
     assert_ne!(primary.cursor().await.epoch, previous.epoch);
     ok(primary.command(&[b"SET", b"{s}:after", b"new-epoch"]));
@@ -873,7 +873,10 @@ async fn delayed_promotion_case() -> serde_json::Value {
         {
             break head - cursor.sequence;
         }
-        assert!(Instant::now() < deadline, "atraso observado pelo heartbeat");
+        assert!(
+            Instant::now() < deadline,
+            "delay observed through heartbeat"
+        );
         tokio::time::sleep(Duration::from_millis(5)).await;
     };
     assert_eq!(
@@ -927,7 +930,7 @@ async fn replication_delayed_manual_promotion_preserves_applied_prefix_and_cuts_
 }
 
 #[test]
-#[ignore = "gate de release exige contexto exato; suíte interna roda diretamente"]
+#[ignore = "release gate requires exact context; the internal suite runs directly"]
 fn release_replication_gate() {
     let context = gate_receipt::GateContext::from_env("replication").unwrap();
     let began = Instant::now();
@@ -978,7 +981,7 @@ async fn library_node(
     }));
     let deadline = Instant::now() + DEADLINE;
     while !ready.is_file() {
-        assert!(!task.is_finished(), "servidor terminou antes da prontidão");
+        assert!(!task.is_finished(), "server exited before readiness");
         assert!(Instant::now() < deadline);
         tokio::time::sleep(Duration::from_millis(5)).await;
     }

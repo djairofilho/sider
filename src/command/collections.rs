@@ -1,4 +1,4 @@
-//! Operações de coleções binárias, validadas antes de consultar o banco.
+//! Binary collection operations, validated before accessing the database.
 
 use super::{Command, RequestError};
 use bytes::Bytes;
@@ -78,7 +78,7 @@ pub(super) fn parse(
             },
             b"SCARD" => SetCommand::Card,
             b"SMEMBERS" => SetCommand::Members,
-            _ => unreachable!("nome validado"),
+            _ => unreachable!("validated name"),
         };
         return Ok(Command::SetCollection { key, operation });
     }
@@ -101,7 +101,7 @@ pub(super) fn parse(
                         .ok_or(RequestError::InvalidInteger)?;
                 ListCommand::Range { start, stop }
             }
-            _ => unreachable!("nome validado"),
+            _ => unreachable!("validated name"),
         };
         return Ok(Command::List { key, operation });
     }
@@ -127,7 +127,7 @@ pub(super) fn parse(
         },
         b"HLEN" => HashCommand::Len,
         b"HGETALL" => HashCommand::GetAll,
-        _ => unreachable!("nome validado"),
+        _ => unreachable!("validated name"),
     };
     Ok(Command::Hash { key, operation })
 }

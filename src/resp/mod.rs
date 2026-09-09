@@ -1,7 +1,7 @@
-//! Codec RESP2 incremental sem dependência de rede, comandos ou armazenamento.
+//! Incremental RESP2 codec without network, command, or storage dependencies.
 //!
-//! Frames incompletos preservam o buffer. Após um erro de protocolo, descarte o
-//! decoder e encerre a conexão: não existe tentativa de ressincronização.
+//! Incomplete frames retain the buffer. After a protocol error, discard the
+//! decoder and close the connection: no resynchronization is attempted.
 //!
 //! ```
 //! use bytes::BytesMut;

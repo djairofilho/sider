@@ -1,4 +1,4 @@
-//! Varredura incremental com metadados limitados e materialização tardia.
+//! Incremental scanning with bounded metadata and delayed materialization.
 
 use bytes::{Buf, Bytes, BytesMut};
 
@@ -34,16 +34,16 @@ enum State {
     Bulk { payload: Payload, saw_cr: bool },
 }
 
-/// Decoder RESP2 pertencente a uma única conexão.
+/// RESP2 decoder owned by one connection.
 ///
-/// Enquanto [`Self::decode`] retornar `Ok(None)`, o chamador só pode acrescentar
-/// bytes ao final do mesmo conteúdo. Não remova nem modifique o prefixo já
-/// fornecido. Realocações de `BytesMut` são permitidas; uma redução de comprimento
-/// é detectada, mas modificações dos bytes antigos não são verificadas novamente.
+/// While [`Self::decode`] returns `Ok(None)`, the caller may only append bytes to the
+/// same content. Do not remove or modify the prefix already supplied. `BytesMut`
+/// reallocations are allowed; a length decrease is detected, but modifications of
+/// earlier bytes are not checked again.
 ///
-/// O scanner preserva cursor, pilha e metadados entre chamadas. Nenhum payload é
-/// copiado antes da validação completa. Em erro, o buffer permanece intacto e o
-/// decoder fica permanentemente encerrado; descarte também a conexão.
+/// The scanner retains its cursor, stack, and metadata across calls. No payload is
+/// copied before complete validation. On error, the buffer stays intact and the
+/// decoder is permanently terminated; discard the connection as well.
 #[derive(Debug)]
 pub struct Decoder {
     limits: RespLimits,
@@ -60,7 +60,7 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    /// Cria um scanner vazio após validar todos os limites.
+    /// Creates an empty scanner after validating all limits.
     pub fn new(limits: RespLimits) -> Result<Self, crate::ConfigError> {
         limits.validate()?;
         Ok(Self {
@@ -78,10 +78,10 @@ impl Decoder {
         })
     }
 
-    /// Consome exatamente um frame completo, preservando o sufixo concatenado.
+    /// Consumes exactly one complete frame, retaining the concatenated suffix.
     ///
-    /// `Ok(None)` e `Err` nunca alteram `src`. Uma falha é terminal, inclusive
-    /// quando causada pela redução indevida de um buffer incompleto.
+    /// `Ok(None)` and `Err` never change `src`. A failure is terminal, including
+    /// one caused by an invalid reduction of an incomplete buffer.
     pub fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Frame>, ProtocolError> {
         if self.poisoned {
             return Err(ProtocolError::Poisoned);
@@ -133,7 +133,7 @@ impl Decoder {
                         return Ok(false);
                     };
                     if !matches!(kind, b'+' | b'-' | b':' | b'$' | b'*') {
-                        return Err(ProtocolError::Malformed("prefixo desconhecido"));
+                        return Err(ProtocolError::Malformed("unknown prefix"));
                     }
                     if kind == b'*' && self.arrays.len() >= self.limits.max_depth {
                         return Err(ProtocolError::LimitExceeded("max_depth"));
@@ -146,7 +146,7 @@ impl Decoder {
                     self.pending_nodes = self
                         .pending_nodes
                         .checked_sub(1)
-                        .ok_or(ProtocolError::Malformed("nó sem pai"))?;
+                        .ok_or(ProtocolError::Malformed("node without parent"))?;
                     let start = self.cursor;
                     self.cursor = checked_add(self.cursor, 1)?;
                     self.state = State::Line(Line {
@@ -157,13 +157,13 @@ impl Decoder {
                     });
                 }
                 State::Line(mut line) => {
-                    // Mesmo sem bytes disponíveis, uma linha que já não comporta
-                    // seu terminador não pode vir a ser um frame válido.
+                    // Even with no available bytes, a line that can no longer fit
+                    // its terminator cannot become a valid frame.
                     let minimum_end = checked_add(self.cursor, if line.saw_cr { 1 } else { 2 })?;
                     self.require_frame_end(minimum_end)?;
                     let line_len = minimum_end
                         .checked_sub(line.start)
-                        .ok_or(ProtocolError::Malformed("offset de linha inválido"))?;
+                        .ok_or(ProtocolError::Malformed("invalid line offset"))?;
                     if line_len > self.limits.max_line_bytes {
                         return Err(ProtocolError::LimitExceeded("max_line_bytes"));
                     }
@@ -173,21 +173,21 @@ impl Decoder {
                     self.cursor = checked_add(self.cursor, 1)?;
                     if line.saw_cr {
                         if byte != b'\n' {
-                            return Err(ProtocolError::Malformed("CR sem LF"));
+                            return Err(ProtocolError::Malformed("CR without LF"));
                         }
                         let payload = Payload {
                             start: line.payload_start,
                             end: self
                                 .cursor
                                 .checked_sub(2)
-                                .ok_or(ProtocolError::Malformed("offset de linha inválido"))?,
+                                .ok_or(ProtocolError::Malformed("invalid line offset"))?,
                         };
                         if self.finish_line(src, line.kind, payload)? {
                             return Ok(true);
                         }
                     } else {
                         match byte {
-                            b'\n' => return Err(ProtocolError::Malformed("LF sem CR")),
+                            b'\n' => return Err(ProtocolError::Malformed("LF without CR")),
                             b'\r' => line.saw_cr = true,
                             _ => {}
                         }
@@ -198,8 +198,8 @@ impl Decoder {
                     payload,
                     mut saw_cr,
                 } => {
-                    // O payload é binário: basta avançar sobre os novos bytes,
-                    // sem inspecionar seu conteúdo nem recopiá-lo por fragmento.
+                    // The payload is binary: advance over new bytes without inspecting
+                    // its content or recopying it for each fragment.
                     if self.cursor < payload.end {
                         self.cursor = src.len().min(payload.end);
                         if self.cursor < payload.end {
@@ -212,7 +212,7 @@ impl Decoder {
                     self.cursor = checked_add(self.cursor, 1)?;
                     if saw_cr {
                         if byte != b'\n' {
-                            return Err(ProtocolError::Malformed("terminador bulk inválido"));
+                            return Err(ProtocolError::Malformed("invalid bulk terminator"));
                         }
                         self.nodes.push(Node::Bulk(Some(payload)));
                         if self.finish_node()? {
@@ -220,7 +220,7 @@ impl Decoder {
                         }
                     } else {
                         if byte != b'\r' {
-                            return Err(ProtocolError::Malformed("terminador bulk inválido"));
+                            return Err(ProtocolError::Malformed("invalid bulk terminator"));
                         }
                         saw_cr = true;
                         self.state = State::Bulk { payload, saw_cr };
@@ -284,8 +284,8 @@ impl Decoder {
                         if declared_nodes > self.limits.max_nodes {
                             return Err(ProtocolError::LimitExceeded("max_nodes"));
                         }
-                        // Cada nó futuro precisa de ao menos "+\r\n". Esta
-                        // verificação não reserva memória pelo tamanho declarado.
+                        // Every future node needs at least "+\r\n". This check does
+                        // not reserve memory based on the declared size.
                         let minimum_bytes = self
                             .pending_nodes
                             .checked_mul(3)
@@ -300,7 +300,7 @@ impl Decoder {
                     }
                 }
             }
-            _ => return Err(ProtocolError::Malformed("prefixo desconhecido")),
+            _ => return Err(ProtocolError::Malformed("unknown prefix")),
         }
         self.finish_node()
     }
@@ -314,7 +314,7 @@ impl Decoder {
             }
             *remaining = remaining
                 .checked_sub(1)
-                .ok_or(ProtocolError::Malformed("array já concluído"))?;
+                .ok_or(ProtocolError::Malformed("array already complete"))?;
             if *remaining > 0 {
                 return Ok(false);
             }
@@ -332,8 +332,8 @@ impl Decoder {
     }
 
     fn materialize(&mut self, src: &[u8]) -> Result<Frame, ProtocolError> {
-        // A ordem inversa permite montar a árvore sem recursão. Neste ponto,
-        // todos os nós e payloads já passaram pelos limites e pela sintaxe.
+        // Reverse order builds the tree without recursion. At this point, all nodes
+        // and payloads have already passed limits and syntax validation.
         let mut frames = Vec::new();
         for node in self.nodes.iter().rev() {
             #[cfg(test)]
@@ -353,7 +353,7 @@ impl Decoder {
                         children.push(
                             frames
                                 .pop()
-                                .ok_or(ProtocolError::Malformed("array incompleto"))?,
+                                .ok_or(ProtocolError::Malformed("incomplete array"))?,
                         );
                     }
                     Frame::Array(Some(children))
@@ -363,9 +363,9 @@ impl Decoder {
         }
         let result = frames
             .pop()
-            .ok_or(ProtocolError::Malformed("frame sem raiz"))?;
+            .ok_or(ProtocolError::Malformed("frame without root"))?;
         if !frames.is_empty() {
-            return Err(ProtocolError::Malformed("frame com múltiplas raízes"));
+            return Err(ProtocolError::Malformed("frame with multiple roots"));
         }
         Ok(result)
     }
@@ -392,25 +392,25 @@ fn parse_integer(bytes: &[u8]) -> Result<i64, ProtocolError> {
         _ => (false, bytes),
     };
     if digits.is_empty() {
-        return Err(ProtocolError::Malformed("inteiro sem dígitos"));
+        return Err(ProtocolError::Malformed("integer without digits"));
     }
-    // Acumular na faixa negativa admite MIN sem precisar negar seu módulo.
+    // Accumulating in the negative range accepts MIN without negating its magnitude.
     let mut value = 0_i64;
     for &digit in digits {
         if !digit.is_ascii_digit() {
-            return Err(ProtocolError::Malformed("inteiro inválido"));
+            return Err(ProtocolError::Malformed("invalid integer"));
         }
         value = value
             .checked_mul(10)
             .and_then(|value| value.checked_sub(i64::from(digit - b'0')))
-            .ok_or(ProtocolError::Malformed("inteiro fora do intervalo"))?;
+            .ok_or(ProtocolError::Malformed("integer out of range"))?;
     }
     if negative {
         Ok(value)
     } else {
         value
             .checked_neg()
-            .ok_or(ProtocolError::Malformed("inteiro fora do intervalo"))
+            .ok_or(ProtocolError::Malformed("integer out of range"))
     }
 }
 
@@ -419,17 +419,17 @@ fn parse_length(bytes: &[u8]) -> Result<Option<usize>, ProtocolError> {
         return Ok(None);
     }
     if bytes.is_empty() {
-        return Err(ProtocolError::Malformed("comprimento sem dígitos"));
+        return Err(ProtocolError::Malformed("length without digits"));
     }
     let mut value = 0_usize;
     for &digit in bytes {
         if !digit.is_ascii_digit() {
-            return Err(ProtocolError::Malformed("comprimento inválido"));
+            return Err(ProtocolError::Malformed("invalid length"));
         }
         value = value
             .checked_mul(10)
             .and_then(|value| value.checked_add(usize::from(digit - b'0')))
-            .ok_or(ProtocolError::Malformed("comprimento fora do intervalo"))?;
+            .ok_or(ProtocolError::Malformed("length out of range"))?;
     }
     Ok(Some(value))
 }
@@ -759,7 +759,7 @@ mod tests {
                 Frame::Simple(payload) | Frame::Error(payload) | Frame::Bulk(Some(payload)) => {
                     payload
                 }
-                _ => panic!("tipo diferente do fixture"),
+                _ => panic!("fixture has a different type"),
             };
             let address = payload.as_ptr() as usize;
             assert!(address < start || address >= end);
@@ -807,7 +807,7 @@ mod tests {
         let mut frame = decoder.decode(&mut src).unwrap().unwrap();
         for _ in 0..128 {
             let Frame::Array(Some(mut children)) = frame else {
-                panic!("array esperado");
+                panic!("expected array");
             };
             assert_eq!(children.len(), 1);
             frame = children.pop().unwrap();

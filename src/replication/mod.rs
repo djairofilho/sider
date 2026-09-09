@@ -1,6 +1,6 @@
-//! Transporte interno e histórico limitado de lotes resolvidos Sider → Sider.
+//! Internal transport and bounded history of resolved Sider-to-Sider batches.
 //!
-//! A integração com papéis, snapshot e AOF pertence ao coordenador de replicação.
+//! Integration with roles, snapshots, and AOF belongs to the replication coordinator.
 
 pub mod config;
 pub mod journal;
@@ -8,47 +8,47 @@ pub mod protocol;
 pub mod session;
 pub mod state;
 
-/// Uma posição só identifica estado dentro da mesma época do primário.
+/// A position identifies state only within the same primary epoch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cursor {
     pub epoch: [u8; 16],
     pub sequence: u64,
 }
 
-/// Época independente a cada inicialização de primário ou promoção explícita.
+/// Independent epoch for every primary initialization or explicit promotion.
 pub fn new_epoch() -> Result<[u8; 16], std::io::Error> {
     let mut epoch = [0; 16];
     getrandom::fill(&mut epoch).map_err(|error| std::io::Error::other(error.to_string()))?;
     if epoch == [0; 16] {
-        return Err(std::io::Error::other("época aleatória inválida"));
+        return Err(std::io::Error::other("invalid random epoch"));
     }
     Ok(epoch)
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("I/O de replicação: {0}")]
+    #[error("replication I/O: {0}")]
     Io(#[from] std::io::Error),
-    #[error("protocolo de replicação: {0}")]
+    #[error("replication protocol: {0}")]
     Protocol(#[from] protocol::Error),
-    #[error("persistência da replicação: {0}")]
+    #[error("replication persistence: {0}")]
     Persistence(#[from] crate::persistence::AofError),
-    #[error("worker da replicação: {0}")]
+    #[error("replication worker: {0}")]
     Database(#[from] crate::storage::worker::DbError),
-    #[error("snapshot da replicação: {0}")]
+    #[error("replication snapshot: {0}")]
     Snapshot(#[from] crate::storage::snapshot::SnapshotError),
-    #[error("replay da replicação: {0}")]
+    #[error("replication replay: {0}")]
     Replay(#[from] crate::storage::ReplayError),
-    #[error("configuração da replicação: {0}")]
+    #[error("replication configuration: {0}")]
     Config(#[from] crate::ConfigError),
-    #[error("histórico da replicação: {0}")]
+    #[error("replication history: {0}")]
     Journal(#[from] journal::Error),
-    #[error("tarefa de replicação: {0}")]
+    #[error("replication task: {0}")]
     Task(#[from] tokio::task::JoinError),
-    #[error("sessão de replicação obsoleta")]
+    #[error("stale replication session")]
     Stale,
-    #[error("sequência de replicação inválida")]
+    #[error("invalid replication sequence")]
     Sequence,
-    #[error("limite de replicação excedido")]
+    #[error("replication limit exceeded")]
     Limit,
 }

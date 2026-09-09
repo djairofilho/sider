@@ -1,10 +1,10 @@
-//! Estado operacional de cardinalidade fixa, sem caminhos nem conteúdo persistido.
+//! Fixed-cardinality operational state, without paths or persisted content.
 
 use std::sync::{Arc, Mutex};
 
 use super::AofError;
 
-/// Fotografia do escritor; sequências vêm do estado durável, sem contagem paralela.
+/// Writer snapshot; sequences come from durable state, without parallel counting.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AofDiagnostics {
     pub running: bool,
@@ -31,11 +31,14 @@ pub(super) struct Shared(pub(super) Arc<Mutex<AofDiagnostics>>);
 
 impl Shared {
     pub(super) fn update(&self, update: impl FnOnce(&mut AofDiagnostics)) {
-        update(&mut self.0.lock().expect("diagnóstico AOF envenenado"));
+        update(&mut self.0.lock().expect("AOF diagnostics lock poisoned"));
     }
 
     pub(super) fn snapshot(&self) -> AofDiagnostics {
-        self.0.lock().expect("diagnóstico AOF envenenado").clone()
+        self.0
+            .lock()
+            .expect("AOF diagnostics lock poisoned")
+            .clone()
     }
 
     pub(super) fn error(&self, error: &AofError) {

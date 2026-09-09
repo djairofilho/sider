@@ -1,4 +1,4 @@
-//! Publicação atômica de prontidão, sem substituir arquivos de outro processo.
+//! Atomic readiness publication without replacing another process's files.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
@@ -8,19 +8,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
-/// Arquivo de prontidão pertencente ao processo atual.
+/// Readiness file owned by the current process.
 ///
-/// Usa um hard link no mesmo diretório para publicar o JSON completo sem
-/// substituir um destino existente. Requer filesystem com suporte a hard links.
-/// No encerramento normal remove apenas um destino cujo conteúdo ainda é seu.
-/// Término forçado pode deixar um arquivo antigo; o consumidor deve conferir PID.
+/// Uses a hard link in the same directory to publish complete JSON without
+/// replacing an existing destination. Requires a filesystem supporting hard links.
+/// On normal shutdown, removes only a destination whose content is still its own.
+/// Forced termination can leave an old file; the consumer must check the PID.
 pub struct ReadyFile {
     path: PathBuf,
     contents: Vec<u8>,
 }
 
 impl ReadyFile {
-    /// Cria o arquivo depois do bind, com o endereço efetivamente atribuído.
+    /// Creates the file after bind, with the address actually assigned.
     pub fn create(path: &Path, address: SocketAddr) -> io::Result<Self> {
         let parent = path
             .parent()
@@ -46,8 +46,8 @@ impl ReadyFile {
         file.write_all(&contents)?;
         file.sync_all()?;
         drop(file);
-        // Destino só passa a existir quando o JSON já está completo e fechado.
-        // Diferentemente de rename em Unix, não substitui um destino existente.
+        // The destination exists only after the JSON is complete and closed.
+        // Unlike Unix rename, it does not replace an existing destination.
         fs::hard_link(&cleanup.0, path)?;
         Ok(Self {
             path: path.to_owned(),

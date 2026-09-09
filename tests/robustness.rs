@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Reutilização observável das vagas de conexão, sem inferir quota ou ausência de leaks.
+//! Observable connection slot reuse, without inferring quota or absence of leaks.
 
 use std::io;
 use std::net::SocketAddr;
@@ -53,7 +53,7 @@ impl TestServer {
                 let _ = stopped.await;
             })
             .await
-            .expect("servidor deve encerrar sem erro");
+            .expect("server must shut down without error");
         });
         Self {
             address,
@@ -63,8 +63,8 @@ impl TestServer {
     }
 
     async fn admitted(&self) -> TcpStream {
-        // EOF pode preceder a liberação do permit. Repetimos somente rejeições
-        // observadas por I/O, com um prazo total, sem sleeps de escalonamento.
+        // EOF may precede permit release. We retry only rejections
+        // observed through I/O, with an overall deadline and no scheduling sleeps.
         timeout(IO_DEADLINE, async {
             loop {
                 let mut stream = TcpStream::connect(self.address).await.unwrap();
@@ -72,39 +72,42 @@ impl TestServer {
                 match stream.write_all(PING).await {
                     Ok(()) => {}
                     Err(error) if is_closed(&error) => continue,
-                    Err(error) => panic!("escrever PING de admissão: {error}"),
+                    Err(error) => panic!("write admission PING: {error}"),
                 }
                 let mut pong = [0; 7];
                 match stream.read(&mut pong[..1]).await {
                     Ok(0) => continue,
                     Ok(1) => {
-                        // Uma resposta já iniciada não pode ser descartada como
-                        // simples rejeição: truncamento ou bytes errados falham.
+                        // A response that has already started cannot be dismissed as
+                        // a simple rejection: truncation or incorrect bytes fail.
                         stream.read_exact(&mut pong[1..]).await.unwrap();
                         assert_eq!(pong, PONG);
                         return stream;
                     }
-                    Ok(_) => unreachable!("leitura limitada a um byte"),
+                    Ok(_) => unreachable!("read limited to one byte"),
                     Err(error) if is_closed(&error) => continue,
-                    Err(error) => panic!("ler PONG de admissão: {error}"),
+                    Err(error) => panic!("read admission PONG: {error}"),
                 }
             }
         })
         .await
-        .expect("todas as vagas liberadas devem poder ser reocupadas")
+        .expect("all released slots must be reusable")
     }
 
     async fn stop(mut self) {
         self.shutdown.take().unwrap().send(()).unwrap();
         timeout(IO_DEADLINE * 2, self.task.as_mut().unwrap())
             .await
-            .expect("prazo total de encerramento")
-            .expect("tarefa do servidor recolhida sem panic");
+            .expect("overall shutdown deadline")
+            .expect("server task reaped without panic");
         self.task.take();
         let result = timeout(IO_DEADLINE, TcpStream::connect(self.address))
             .await
-            .expect("prazo para conferir listener fechado");
-        assert!(result.is_err(), "shutdown não pode deixar o listener ativo");
+            .expect("deadline for verifying listener closure");
+        assert!(
+            result.is_err(),
+            "shutdown must not leave the listener active"
+        );
     }
 }
 
@@ -112,8 +115,8 @@ impl Drop for TestServer {
     fn drop(&mut self) {
         self.shutdown.take();
         if let Some(task) = self.task.take() {
-            // Cancelar serve também aborta seus JoinSets. O guard cobre panic
-            // e o cancelamento da future pelo prazo total do teste.
+            // Cancelling serve also aborts its JoinSets. The guard covers panics
+            // and future cancellation at the overall test deadline.
             task.abort();
         }
     }
@@ -131,8 +134,8 @@ fn is_closed(error: &io::Error) -> bool {
 async fn write(stream: &mut TcpStream, bytes: &[u8]) {
     timeout(IO_DEADLINE, stream.write_all(bytes))
         .await
-        .expect("prazo de escrita")
-        .expect("escrita no cliente admitido");
+        .expect("write deadline")
+        .expect("write on admitted client");
 }
 
 async fn exchange(stream: &mut TcpStream, request: &[u8], expected: &[u8]) {
@@ -143,24 +146,24 @@ async fn exchange(stream: &mut TcpStream, request: &[u8], expected: &[u8]) {
         assert_eq!(response, expected);
     })
     .await
-    .expect("prazo total da troca RESP");
+    .expect("overall RESP exchange deadline");
 }
 
 async fn expect_closed(stream: &mut TcpStream) {
     match timeout(IO_DEADLINE, stream.read(&mut [0; 1]))
         .await
-        .expect("prazo de fechamento da conexão")
+        .expect("connection closure deadline")
     {
         Ok(0) => {}
         Err(error) if is_closed(&error) => {}
-        result => panic!("esperado EOF/reset sem resposta excedente: {result:?}"),
+        result => panic!("expected EOF/reset without an extra response: {result:?}"),
     }
 }
 
 async fn half_close(stream: &mut TcpStream) {
     timeout(IO_DEADLINE, stream.shutdown())
         .await
-        .expect("prazo de half-close")
+        .expect("half-close deadline")
         .unwrap();
 }
 
@@ -169,7 +172,7 @@ async fn mixed_disconnect_waves_reuse_every_slot_and_preserve_confirmed_state() 
     timeout(TEST_DEADLINE, async {
         let server = TestServer::start(3, TEST_DEADLINE).await;
         for wave in 0..24 {
-            // Os três PONGs comprovam ocupação simultânea das três vagas.
+            // The three PONGs prove simultaneous occupancy of all three slots.
             let mut idle = server.admitted().await;
             let mut partial = server.admitted().await;
             let mut completed = server.admitted().await;
@@ -183,8 +186,8 @@ async fn mixed_disconnect_waves_reuse_every_slot_and_preserve_confirmed_state() 
             let expected = format!("$7\r\nwave-{wave:02}\r\n");
             exchange(&mut idle, GET, expected.as_bytes()).await;
 
-            // Ondas pares drenam EOF; ímpares descartam todos os sockets sem
-            // aguardar o servidor. O SET completo só conta após seu +OK.
+            // Even waves drain EOF; odd waves drop all sockets without
+            // waiting for the server. A complete SET counts only after its +OK.
             if wave % 2 == 0 {
                 half_close(&mut idle).await;
                 half_close(&mut partial).await;
@@ -207,7 +210,7 @@ async fn mixed_disconnect_waves_reuse_every_slot_and_preserve_confirmed_state() 
         expect_closed(&mut observer).await;
     })
     .await
-    .expect("prazo total das ondas de desconexão");
+    .expect("overall deadline for disconnection waves");
 }
 
 #[tokio::test]
@@ -228,8 +231,8 @@ async fn expired_slow_frames_release_all_slots_without_applying_partial_sets() {
             exchange(&mut second, GET, b"$4\r\nsafe\r\n").await;
             write(&mut first, PARTIAL_SET).await;
             write(&mut second, PARTIAL_SET).await;
-            // O fechamento é o evento de sincronização. Não avançamos relógio
-            // artificial nem dormimos para presumir que o timeout ocorreu.
+            // Closure is the synchronization event. We neither advance an artificial
+            // clock nor sleep to assume that the timeout occurred.
             tokio::join!(expect_closed(&mut first), expect_closed(&mut second));
         }
         let mut first = server.admitted().await;
@@ -241,5 +244,5 @@ async fn expired_slow_frames_release_all_slots_without_applying_partial_sets() {
         expect_closed(&mut second).await;
     })
     .await
-    .expect("prazo total de recuperação após clientes lentos");
+    .expect("overall recovery deadline after slow clients");
 }

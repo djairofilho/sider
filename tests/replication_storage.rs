@@ -1,4 +1,4 @@
-//! Barreira, readonly, TTL e publicação durável com workers e AOF reais.
+//! Barrier, readonly, TTL, and durable publication with real workers and AOF.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -399,7 +399,7 @@ async fn global_snapshot_plus_subscription_has_no_gap_while_independent_shards_w
         let sider::replication::protocol::Message::Batch { batch, .. } =
             sider::replication::protocol::decode(entry.frame, Default::default()).unwrap()
         else {
-            panic!("lote ausente")
+            panic!("missing batch")
         };
         assert_eq!(batch.mutations.len(), 2);
         copy.replay(&batch.mutations).unwrap();
@@ -544,7 +544,7 @@ async fn repeated_full_installations_never_expose_mixed_shard_generations() {
                     .iter()
                     .map(|mutation| match mutation {
                         Mutation::Put { value, .. } => value,
-                        _ => panic!("snapshot com remoção"),
+                        _ => panic!("snapshot containing a deletion"),
                     })
                     .collect();
                 assert!(values.iter().all(|value| *value == values[0]));

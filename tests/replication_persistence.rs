@@ -1,4 +1,4 @@
-//! AOF com papel/época atômicos e journal alimentado pelo escritor real.
+//! AOF with atomic role/epoch and a journal fed by the real writer.
 
 #[path = "common/process.rs"]
 mod process;
@@ -228,7 +228,7 @@ struct FailOnce {
 impl FaultInjector for FailOnce {
     fn hit(&self, point: &'static str) -> std::io::Result<()> {
         if self.point == point && self.armed.swap(false, Ordering::SeqCst) {
-            return Err(std::io::Error::other("falha de instalação injetada"));
+            return Err(std::io::Error::other("injected installation failure"));
         }
         Ok(())
     }
@@ -309,7 +309,7 @@ impl FaultInjector for PauseInstall {
 }
 
 #[test]
-#[ignore = "helper de crash chamado exclusivamente pelo teste pai"]
+#[ignore = "crash helper called exclusively by the parent test"]
 fn replication_install_process_child() {
     let directory = PathBuf::from(std::env::var_os("SIDER_TEST_REPLICATION_DIRECTORY").unwrap());
     let point = std::env::var("SIDER_TEST_REPLICATION_POINT").unwrap();
@@ -319,7 +319,7 @@ fn replication_install_process_child() {
     {
         "primary" => Role::Primary,
         "replica" => Role::Replica,
-        _ => panic!("papel do teste"),
+        _ => panic!("test role"),
     };
     let mut config = AofConfig::new(directory.clone());
     config.layout.shard_count = 4;
@@ -404,7 +404,7 @@ fn replication_real_process_kill_installs_data_and_role_as_one_generation() {
             let deadline = std::time::Instant::now() + timeout;
             while !directory.0.join("paused").is_file() {
                 child.assert_alive().unwrap();
-                assert!(std::time::Instant::now() < deadline, "crash em {point}");
+                assert!(std::time::Instant::now() < deadline, "crash at {point}");
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
             child.terminate(timeout).unwrap();

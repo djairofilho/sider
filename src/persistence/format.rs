@@ -1,4 +1,4 @@
-//! Formato AOF v1: cabeçalho, registros limitados e CRC-32/ISO-HDLC.
+//! AOF v1 format: header, bounded records, and CRC-32/ISO-HDLC.
 
 use std::io::{self, Read, Write};
 
@@ -33,15 +33,15 @@ impl Default for Limits {
 
 #[derive(Debug, Error)]
 pub enum FormatError {
-    #[error("falha de I/O: {0}")]
+    #[error("I/O failure: {0}")]
     Io(#[from] io::Error),
-    #[error("cabeçalho AOF inválido ou incompleto")]
+    #[error("invalid or incomplete AOF header")]
     Header,
-    #[error("versão AOF não suportada: {0}")]
+    #[error("unsupported AOF version: {0}")]
     Version(u32),
-    #[error("registro AOF excede os limites")]
+    #[error("AOF record exceeds limits")]
     Limit,
-    #[error("registro AOF corrompido: {0}")]
+    #[error("corrupt AOF record: {0}")]
     Corrupt(&'static str),
 }
 
@@ -89,7 +89,7 @@ pub fn read_header(mut input: impl Read) -> Result<u64, FormatError> {
     Ok(read_header_with_layout(&mut input)?.sequence)
 }
 
-/// Novos arquivos registram a configuração; `write_header` conserva o encoder legado v1.
+/// New files record configuration; `write_header` retains the legacy v1 encoder.
 pub fn write_header_with_layout(
     output: impl Write,
     sequence: u64,
@@ -98,7 +98,7 @@ pub fn write_header_with_layout(
     write_header_with_replication(output, sequence, layout, None)
 }
 
-/// Metadados de papel pertencem à mesma publicação atômica que o dataset.
+/// Role metadata belongs to the same atomic publication as the dataset.
 pub fn write_header_with_replication(
     mut output: impl Write,
     sequence: u64,
@@ -107,7 +107,7 @@ pub fn write_header_with_replication(
 ) -> Result<(), FormatError> {
     layout
         .validate()
-        .map_err(|_| FormatError::Corrupt("configuração de shards"))?;
+        .map_err(|_| FormatError::Corrupt("shard configuration"))?;
     let mut header = Vec::with_capacity(LAYOUT_HEADER_BYTES);
     header.extend_from_slice(MAGIC);
     let version = if replication.is_some() {
@@ -172,16 +172,16 @@ pub fn read_header_with_layout(mut input: impl Read) -> Result<Header, FormatErr
     };
     layout
         .validate()
-        .map_err(|_| FormatError::Corrupt("configuração de shards"))?;
+        .map_err(|_| FormatError::Corrupt("shard configuration"))?;
     let replication = if version == REPLICATION_VERSION {
         if header[29..32] != [0; 3] {
-            return Err(FormatError::Corrupt("reservado da replicação"));
+            return Err(FormatError::Corrupt("replication reserved field"));
         }
         Some(ReplicationMetadata {
             role: match header[28] {
                 1 => Role::Primary,
                 2 => Role::Replica,
-                _ => return Err(FormatError::Corrupt("papel da replicação")),
+                _ => return Err(FormatError::Corrupt("replication role")),
             },
             epoch: header[32..48].try_into().unwrap(),
         })
@@ -225,7 +225,7 @@ fn value_size(value: &Value) -> Result<usize, FormatError> {
         Value::String(value) => blob_size(value),
         Value::SortedSet(members) => {
             if members.is_empty() || members.len() > u32::MAX as usize {
-                return Err(FormatError::Corrupt("quantidade de membros ordenados"));
+                return Err(FormatError::Corrupt("sorted member count"));
             }
             members.iter().try_fold(4usize, |size, (_, member)| {
                 size.checked_add(blob_size(member)?)
@@ -235,7 +235,7 @@ fn value_size(value: &Value) -> Result<usize, FormatError> {
         }
         Value::Set(members) => {
             if members.is_empty() || members.len() > u32::MAX as usize {
-                return Err(FormatError::Corrupt("quantidade de membros"));
+                return Err(FormatError::Corrupt("member count"));
             }
             members.iter().try_fold(4usize, |size, member| {
                 size.checked_add(blob_size(member)?)
@@ -244,7 +244,7 @@ fn value_size(value: &Value) -> Result<usize, FormatError> {
         }
         Value::List(values) => {
             if values.is_empty() || values.len() > u32::MAX as usize {
-                return Err(FormatError::Corrupt("quantidade de elementos"));
+                return Err(FormatError::Corrupt("element count"));
             }
             values.iter().try_fold(4usize, |size, value| {
                 size.checked_add(blob_size(value)?)
@@ -253,7 +253,7 @@ fn value_size(value: &Value) -> Result<usize, FormatError> {
         }
         Value::Hash(fields) => {
             if fields.is_empty() || fields.len() > u32::MAX as usize {
-                return Err(FormatError::Corrupt("quantidade de campos"));
+                return Err(FormatError::Corrupt("field count"));
             }
             fields.iter().try_fold(4usize, |size, (field, value)| {
                 size.checked_add(blob_size(field)?)
@@ -392,7 +392,7 @@ fn encode_blob(output: &mut Vec<u8>, value: &Bytes) {
     output.extend_from_slice(value);
 }
 
-/// Comprimento e seu complemento são validados antes da alocação; checksum antes do decode.
+/// Length and its complement are validated before allocation; checksum before decoding.
 pub fn read_record(mut input: impl Read, limits: Limits) -> Result<Next, FormatError> {
     let mut prefix = [0; 12];
     loop {
@@ -412,7 +412,7 @@ pub fn read_record(mut input: impl Read, limits: Limits) -> Result<Next, FormatE
     }
     let size = u32::from_le_bytes(prefix[..4].try_into().unwrap());
     if !size != u32::from_le_bytes(prefix[4..8].try_into().unwrap()) {
-        return Err(FormatError::Corrupt("comprimento"));
+        return Err(FormatError::Corrupt("length"));
     }
     let size = size as usize;
     if size == 0 || size > limits.max_record_bytes || size > MAX_RECORD_BYTES {
@@ -442,7 +442,7 @@ impl Cursor {
             .offset
             .checked_add(count)
             .filter(|end| *end <= self.bytes.len())
-            .ok_or(FormatError::Corrupt("comprimento interno"))?;
+            .ok_or(FormatError::Corrupt("internal length"))?;
         let bytes = self.bytes.slice(self.offset..end);
         self.offset = end;
         Ok(bytes)
@@ -474,7 +474,7 @@ impl Cursor {
                 } else if tag == 6 {
                     let count = self.u32()? as usize;
                     if count == 0 || count > (self.bytes.len() - self.offset) / 12 {
-                        return Err(FormatError::Corrupt("quantidade de membros ordenados"));
+                        return Err(FormatError::Corrupt("sorted member count"));
                     }
                     let mut members = crate::storage::SortedSet::default();
                     for _ in 0..count {
@@ -482,26 +482,26 @@ impl Cursor {
                         let score = crate::command::Score::new(f64::from_bits(self.u64()?))
                             .ok_or(FormatError::Corrupt("score NaN"))?;
                         if !members.insert(member, score).0 {
-                            return Err(FormatError::Corrupt("membro ordenado duplicado"));
+                            return Err(FormatError::Corrupt("duplicate sorted-set member"));
                         }
                     }
                     Value::SortedSet(std::sync::Arc::new(members))
                 } else if tag == 5 {
                     let count = self.u32()? as usize;
                     if count == 0 || count > (self.bytes.len() - self.offset) / 4 {
-                        return Err(FormatError::Corrupt("quantidade de membros"));
+                        return Err(FormatError::Corrupt("member count"));
                     }
                     let mut members = std::collections::BTreeSet::new();
                     for _ in 0..count {
                         if !members.insert(self.blob()?) {
-                            return Err(FormatError::Corrupt("membro duplicado"));
+                            return Err(FormatError::Corrupt("duplicate member"));
                         }
                     }
                     Value::Set(std::sync::Arc::new(members))
                 } else if tag == 4 {
                     let count = self.u32()? as usize;
                     if count == 0 || count > (self.bytes.len() - self.offset) / 4 {
-                        return Err(FormatError::Corrupt("quantidade de elementos"));
+                        return Err(FormatError::Corrupt("element count"));
                     }
                     let mut values = std::collections::VecDeque::new();
                     for _ in 0..count {
@@ -511,14 +511,14 @@ impl Cursor {
                 } else {
                     let count = self.u32()? as usize;
                     if count == 0 || count > (self.bytes.len() - self.offset) / 8 {
-                        return Err(FormatError::Corrupt("quantidade de campos"));
+                        return Err(FormatError::Corrupt("field count"));
                     }
                     let mut fields = std::collections::BTreeMap::new();
                     for _ in 0..count {
                         let field = self.blob()?;
                         let value = self.blob()?;
                         if fields.insert(field, value).is_some() {
-                            return Err(FormatError::Corrupt("campo duplicado"));
+                            return Err(FormatError::Corrupt("duplicate field"));
                         }
                     }
                     Value::Hash(std::sync::Arc::new(fields))
@@ -537,7 +537,7 @@ impl Cursor {
                 })
             }
             2 => Ok(Mutation::Delete { key }),
-            _ => Err(FormatError::Corrupt("tipo de mutação")),
+            _ => Err(FormatError::Corrupt("mutation type")),
         }
     }
 }
@@ -556,7 +556,7 @@ fn decode(bytes: Bytes, limits: Limits) -> Result<Record, FormatError> {
             let origin = match cursor.byte()? {
                 1 => MutationOrigin::Client,
                 2 => MutationOrigin::Expiration,
-                _ => return Err(FormatError::Corrupt("origem")),
+                _ => return Err(FormatError::Corrupt("source")),
             };
             let count = cursor.u32()? as usize;
             if count == 0
@@ -574,7 +574,7 @@ fn decode(bytes: Bytes, limits: Limits) -> Result<Record, FormatError> {
                 batch: ResolvedBatch { origin, mutations },
             }
         }
-        _ => return Err(FormatError::Corrupt("tipo de registro")),
+        _ => return Err(FormatError::Corrupt("record type")),
     };
     if cursor.offset != cursor.bytes.len() {
         return Err(FormatError::Corrupt("bytes extras"));
@@ -582,7 +582,7 @@ fn decode(bytes: Bytes, limits: Limits) -> Result<Record, FormatError> {
     Ok(record)
 }
 
-/// CRC-32/ISO-HDLC, polinômio refletido 0xedb88320; detecta corrupção, não autentica conteúdo.
+/// CRC-32/ISO-HDLC, reflected polynomial 0xedb88320; detects corruption but does not authenticate content.
 pub fn checksum(bytes: &[u8]) -> u32 {
     const TABLE: [u32; 256] = {
         let mut table = [0; 256];
@@ -610,7 +610,7 @@ pub fn checksum(bytes: &[u8]) -> u32 {
     !crc
 }
 
-/// Encadeia checksums de registros completos, além da contagem do snapshot.
+/// Chains checksums of complete records in addition to the snapshot count.
 pub fn snapshot_digest(previous: u32, encoded: &[u8]) -> u32 {
     checksum(&[previous.to_le_bytes(), checksum(encoded).to_le_bytes()].concat())
 }

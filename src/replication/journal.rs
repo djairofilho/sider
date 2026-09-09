@@ -1,4 +1,4 @@
-//! Retenção por bytes; sockets lentos nunca aguardam no caminho de publicação.
+//! Byte-based retention; slow sockets never wait in the publication path.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -17,15 +17,15 @@ pub struct Limits {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    #[error("limite do histórico inválido")]
+    #[error("invalid history limit")]
     Limit,
-    #[error("época de replicação divergente")]
+    #[error("divergent replication epoch")]
     Epoch,
-    #[error("sequência de replicação inválida")]
+    #[error("invalid replication sequence")]
     Sequence,
-    #[error("histórico insuficiente; sincronização completa necessária")]
+    #[error("insufficient history; full synchronization required")]
     Lagged,
-    #[error("histórico encerrado")]
+    #[error("history closed")]
     Closed,
 }
 
@@ -82,8 +82,8 @@ impl Journal {
         })))
     }
 
-    /// O escritor chama esta operação após registrar um lote já codificado e validado.
-    /// Ela não faz I/O nem espera assinantes. Recusas preservam head e retenção.
+    /// The writer calls this operation after recording an already encoded, validated batch.
+    /// It does not perform I/O or wait for subscribers. Rejections retain head and retention.
     pub fn publish(&self, sequence: u64, frame: Bytes) -> Result<(), Error> {
         if frame.is_empty() || frame.len() > self.0.limits.max_frame_bytes {
             return Err(Error::Limit);
@@ -98,7 +98,7 @@ impl Journal {
         while state.bytes > self.0.limits.max_bytes - frame.len()
             || state.entries.len() >= self.0.limits.max_batches
         {
-            let removed = state.entries.pop_front().expect("retenção não vazia");
+            let removed = state.entries.pop_front().expect("non-empty retention");
             state.bytes -= removed.frame.len();
         }
         state.head.sequence = sequence;
@@ -122,7 +122,7 @@ impl Journal {
         })
     }
 
-    /// `cursor` é a última posição já entregue, não a próxima posição solicitada.
+    /// `cursor` is the last position already delivered, not the next requested position.
     pub fn subscribe(&self, cursor: Cursor) -> Result<Subscriber, Error> {
         let state = self.0.state.lock().map_err(|_| Error::Closed)?;
         next(&state, cursor)?;
@@ -133,7 +133,7 @@ impl Journal {
         })
     }
 
-    /// Encerra a época, inclusive assinantes que estavam aguardando um novo lote.
+    /// Closes the epoch, including subscribers that were waiting for a new batch.
     pub fn close(&self) {
         if let Ok(mut state) = self.0.state.lock() {
             state.closed = true;
@@ -176,8 +176,8 @@ pub struct Subscriber {
 }
 
 impl Subscriber {
-    /// A posição de envio só avança quando o consumidor recebe o frame inteiro.
-    /// Confirmação remota e prazo de escrita pertencem à sessão de transporte.
+    /// The send position advances only when the consumer receives the whole frame.
+    /// Remote confirmation and write timeout belong to the transport session.
     pub async fn next(&mut self) -> Result<Entry, Error> {
         loop {
             self.changed.borrow_and_update();

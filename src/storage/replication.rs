@@ -1,4 +1,4 @@
-//! Publicação global de snapshots e lotes recebidos com workers proprietários.
+//! Global publication of snapshots and received batches with owner workers.
 
 use std::sync::Arc;
 
@@ -45,7 +45,7 @@ pub struct Snapshot {
 }
 
 impl DbHandle {
-    /// Captura e assina ainda sob a mesma barreira; serialização ocorre fora dela.
+    /// Captures and signs under the same barrier; serialization occurs outside it.
     pub async fn replication_snapshot(
         &self,
         context: &Context,
@@ -73,7 +73,7 @@ impl DbHandle {
         })
     }
 
-    /// A barreira espera também uma aplicação aceita cuja sessão foi desconectada.
+    /// The barrier also waits for an accepted application whose session disconnected.
     pub async fn replication_position(&self, runtime: &Runtime) -> Result<Cursor, Error> {
         let _guard = self.barrier.clone().write_owned().await;
         if *self.shutdown.borrow() {
@@ -82,8 +82,8 @@ impl DbHandle {
         Ok(runtime.status().applied)
     }
 
-    /// A tarefa possui a barreira até o último worker trocar o mapa, mesmo se o
-    /// consumidor da resposta abandonar a future após a publicação no disco.
+    /// The task owns the barrier until the last worker swaps the map, even if the
+    /// reply consumer abandons the future after disk publication.
     pub async fn install_replica(
         &self,
         context: Context,
@@ -137,7 +137,7 @@ impl DbHandle {
                     },
                 )
                 .await?;
-            // Após o rename, qualquer falha obriga a parar: o disco já seleciona o snapshot novo.
+            // After rename, any failure requires stopping: disk already selects the new snapshot.
             for (control, store) in database.controls.iter().zip(stores) {
                 let (reply, response) = oneshot::channel();
                 control
@@ -199,7 +199,7 @@ impl DbHandle {
         .await?
     }
 
-    /// Também inicializa a época de um primário recuperado antes da admissão de clientes.
+    /// Also initializes the epoch of a recovered primary before admitting clients.
     pub async fn promote_replica(
         &self,
         context: Context,

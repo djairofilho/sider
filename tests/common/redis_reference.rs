@@ -1,4 +1,4 @@
-//! Referência Redis descartável, independente do codec e do servidor Sider.
+//! Disposable Redis reference, independent of the Sider codec and server.
 
 #![forbid(unsafe_code)]
 
@@ -37,14 +37,14 @@ impl ReferenceConfig {
                 .as_str()
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned)
-                .ok_or_else(|| format!("reference.{name} ausente ou inválido"))
+                .ok_or_else(|| format!("missing or invalid reference.{name}"))
         };
         let image = field("image")?;
         let platform = field("platform")?;
         let redis_version = field("redis_version")?;
         let redis_cli_version = field("redis_cli_version")?;
         if platform != "linux/amd64" {
-            return Err("a referência deve usar linux/amd64".into());
+            return Err("the reference must use linux/amd64".into());
         }
         for version in [&redis_version, &redis_cli_version] {
             let parts: Vec<_> = version.split('.').collect();
@@ -53,14 +53,14 @@ impl ReferenceConfig {
                     .iter()
                     .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
             {
-                return Err("versão da referência deve ter três componentes numéricos".into());
+                return Err("reference version must have three numeric components".into());
             }
         }
         let prefix = format!("redis:{redis_version}@sha256:");
         let digest = image
             .strip_prefix(&prefix)
             .filter(|digest| valid_hex_id(digest))
-            .ok_or("imagem deve fixar a tag Redis declarada e um digest SHA-256 completo")?;
+            .ok_or("image must pin the declared Redis tag and a complete SHA-256 digest")?;
         Ok(Self {
             digest: format!("sha256:{digest}"),
             image,
@@ -74,11 +74,11 @@ impl ReferenceConfig {
         let value: Value = serde_json::from_slice(output).map_err(|e| e.to_string())?;
         let image = single_inspection(&value)?;
         if image["Os"] != "linux" || image["Architecture"] != "amd64" {
-            return Err("imagem local não corresponde a linux/amd64".into());
+            return Err("local image does not match linux/amd64".into());
         }
         let digests = image["RepoDigests"]
             .as_array()
-            .ok_or("imagem local sem RepoDigests")?;
+            .ok_or("local image has no RepoDigests")?;
         let expected = [
             format!("redis@{}", self.digest),
             format!("docker.io/library/redis@{}", self.digest),
@@ -88,17 +88,17 @@ impl ReferenceConfig {
                 .as_str()
                 .is_some_and(|v| expected.iter().any(|e| e == v))
         }) {
-            return Err("RepoDigests não contém o digest Redis fixado".into());
+            return Err("RepoDigests does not contain the pinned Redis digest".into());
         }
-        let id = image["Id"].as_str().ok_or("imagem sem ID")?;
+        let id = image["Id"].as_str().ok_or("image has no ID")?;
         if !id.strip_prefix("sha256:").is_some_and(valid_hex_id) {
-            return Err("ID de imagem inválido".into());
+            return Err("invalid image ID".into());
         }
         Ok(id.to_owned())
     }
 }
 
-/// Dono de uma única instância Docker, acessível apenas em loopback.
+/// Owns one Docker instance, accessible only on loopback.
 pub struct RedisReference {
     container: ContainerGuard,
     address: SocketAddr,
@@ -106,32 +106,34 @@ pub struct RedisReference {
 }
 
 impl RedisReference {
-    /// Falha explicitamente se Docker, imagem, digest ou versões não corresponderem.
+    /// Fails explicitly if Docker, image, digest, or versions do not match.
     pub fn start() -> Self {
         Self::start_mode(None)
     }
 
-    /// Usa o namespace de rede de um runner Linux isolado, sem publicar portas.
-    /// O chamador deve executar nesse runner e serializar uma referência por vez.
-    #[allow(dead_code)] // A referência host também inclui este módulo comum.
+    /// Uses the network namespace of an isolated Linux runner, without publishing ports.
+    /// The caller must run inside that runner and serialize execution to one reference at a time.
+    #[allow(dead_code)] // The host reference also includes this shared module.
     pub fn start_shared(runner_id: &str) -> Self {
         assert!(
             valid_hex_id(runner_id),
-            "runner exige ID Docker completo, não nome ou prefixo"
+            "runner requires a full Docker ID, not a name or prefix"
         );
         let runner = checked(
             docker(&["container", "inspect", runner_id]),
-            "inspecionar runner compartilhado",
+            "inspect shared runner",
         );
         inspect_runner(&runner.stdout, runner_id)
-            .expect("runner Linux deve ter rede privada sem portas publicadas");
+            .expect("Linux runner must have a private network without published ports");
         let address = SocketAddr::from(([127, 0, 0, 1], 6379));
         match TcpStream::connect_timeout(&address, Duration::from_millis(200)) {
             Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {}
             Ok(_) => {
-                panic!("loopback 6379 do runner já está ocupado; não reutilizar outra referência")
+                panic!("runner loopback 6379 is already occupied; do not reuse another reference")
             }
-            Err(error) => panic!("não foi possível confirmar loopback livre no runner: {error}"),
+            Err(error) => {
+                panic!("could not confirm an available loopback port in the runner: {error}")
+            }
         }
         Self::start_mode(Some(runner_id))
     }
@@ -141,27 +143,24 @@ impl RedisReference {
             env!("CARGO_MANIFEST_DIR"),
             "/releases/plan.json"
         )))
-        .expect("referência inválida em releases/plan.json");
+        .expect("invalid reference in releases/plan.json");
         let inspected = docker(&["image", "inspect", &config.image]);
         let inspected = inspected.unwrap_or_else(|error| {
-            panic!("Docker indisponível: {error}. Instale/inicie Docker antes deste teste")
+            panic!("Docker unavailable: {error}. Install/start Docker before this test")
         });
         assert!(
             inspected.status.success(),
-            "imagem de referência indisponível; execute explicitamente: docker pull --platform {} {}\n{}",
+            "reference image unavailable; explicitly run: docker pull --platform {} {}\n{}",
             config.platform,
             config.image,
             String::from_utf8_lossy(&inspected.stderr)
         );
         let image_id = config
             .inspect_image(&inspected.stdout)
-            .expect("identidade da imagem de referência divergente");
+            .expect("reference image identity mismatch");
 
         let mut container = ContainerGuard::new();
-        let cidfile = container
-            .cidfile
-            .to_str()
-            .expect("caminho UTF-8 do cidfile");
+        let cidfile = container.cidfile.to_str().expect("UTF-8 cidfile path");
         let network = runner_id.map(|id| format!("container:{id}"));
         let mut arguments = vec![
             "run",
@@ -204,41 +203,41 @@ impl RedisReference {
             arguments.extend_from_slice(&["--bind", "127.0.0.1"]);
         }
         let started = docker(&arguments);
-        // O cidfile exclusivo permite recuperar o ID até após timeout do cliente Docker.
+        // The dedicated cidfile allows ID recovery even after the Docker client times out.
         container.capture_id();
-        let started = checked(started, "iniciar Redis descartável");
+        let started = checked(started, "start disposable Redis");
         let id = container
             .id
             .as_deref()
-            .expect("Docker não gravou um ID válido");
+            .expect("Docker did not write a valid ID");
         assert_eq!(
             String::from_utf8_lossy(&started.stdout).trim(),
             id,
-            "ID retornado pelo Docker difere do cidfile exclusivo"
+            "ID returned by Docker differs from the dedicated cidfile"
         );
-        let inspected = checked(docker(&["container", "inspect", id]), "inspecionar Redis");
+        let inspected = checked(docker(&["container", "inspect", id]), "inspect Redis");
         let address = match runner_id {
             Some(runner) => inspect_shared_container(&inspected.stdout, id, &image_id, runner),
             None => inspect_container(&inspected.stdout, id, &image_id),
         }
-        .expect("container deve usar a imagem verificada e uma porta efêmera em loopback");
+        .expect("container must use the verified image and an ephemeral loopback port");
 
         let server = checked(
             docker(&["exec", id, "redis-server", "--version"]),
-            "consultar versão do Redis",
+            "query Redis version",
         );
         let cli = checked(
             docker(&["exec", id, "redis-cli", "--version"]),
-            "consultar versão do redis-cli",
+            "query redis-cli version",
         );
         assert!(
             server_version_matches(&server.stdout, &config.redis_version),
-            "versão Redis divergente: {}",
+            "Redis version mismatch: {}",
             String::from_utf8_lossy(&server.stdout)
         );
         assert!(
             cli_version_matches(&cli.stdout, &config.redis_cli_version),
-            "versão redis-cli divergente: {}",
+            "redis-cli version mismatch: {}",
             String::from_utf8_lossy(&cli.stdout)
         );
         let deadline = Instant::now() + READY_TIMEOUT;
@@ -246,13 +245,16 @@ impl RedisReference {
             match TcpStream::connect_timeout(&address, Duration::from_millis(200)) {
                 Ok(_) => break,
                 Err(error) => {
-                    assert!(Instant::now() < deadline, "Redis não ficou pronto: {error}");
+                    assert!(
+                        Instant::now() < deadline,
+                        "Redis did not become ready: {error}"
+                    );
                     thread::sleep(Duration::from_millis(25));
                 }
             }
         }
         eprintln!(
-            "referência Redis={} redis-cli={} platform={} image={} image_id={} container={} address={}",
+            "reference Redis={} redis-cli={} platform={} image={} image_id={} container={} address={}",
             config.redis_version,
             config.redis_cli_version,
             config.platform,
@@ -269,18 +271,18 @@ impl RedisReference {
         assert_eq!(
             result.cli(&["PING"]),
             b"PONG\n",
-            "Redis deve responder pelo protocolo"
+            "Redis must respond over the protocol"
         );
-        let id = result.container.id.as_deref().expect("container ativo");
+        let id = result.container.id.as_deref().expect("active container");
         let inspected = checked(
             docker(&["container", "inspect", id]),
-            "confirmar Redis após prontidão",
+            "confirm Redis after readiness",
         );
         match runner_id {
             Some(runner) => inspect_shared_container(&inspected.stdout, id, &image_id, runner),
             None => inspect_container(&inspected.stdout, id, &image_id),
         }
-        .expect("referência ainda deve estar ativa e isolada após PING");
+        .expect("reference must still be running and isolated after PING");
         result
     }
 
@@ -288,24 +290,24 @@ impl RedisReference {
         self.address
     }
 
-    /// Executa redis-cli em RESP2, sem TTY e com saída bruta, no container isolado.
+    /// Runs redis-cli in RESP2 mode, without a TTY and with raw output, in the isolated container.
     pub fn cli(&self, args: &[&str]) -> Vec<u8> {
-        let id = self.container.id.as_deref().expect("container ativo");
+        let id = self.container.id.as_deref().expect("active container");
         let mut command = vec!["exec", id, "redis-cli", "-2", "--raw"];
         command.extend_from_slice(args);
-        checked(docker(&command), "executar redis-cli").stdout
+        checked(docker(&command), "run redis-cli").stdout
     }
 
-    /// Consulta um Sider no mesmo namespace de rede, apenas em loopback.
-    #[allow(dead_code)] // Utilizado pela suíte diferencial, não pela referência host.
+    /// Queries Sider in the same network namespace, only over loopback.
+    #[allow(dead_code)] // Used by the differential suite, not the host reference.
     pub fn cli_at(&self, address: SocketAddr, args: &[&str]) -> Vec<u8> {
         validate_cli_address(self.shared_runner.as_deref(), address)
-            .expect("redis-cli externo ao Redis exige modo compartilhado e loopback");
+            .expect("redis-cli outside Redis requires shared mode and loopback");
         assert!(
             args.first().is_some_and(|arg| !arg.starts_with('-')),
-            "primeiro argumento deve ser um comando, não opção da CLI"
+            "first argument must be a command, not a CLI option"
         );
-        let id = self.container.id.as_deref().expect("container ativo");
+        let id = self.container.id.as_deref().expect("active container");
         let host = address.ip().to_string();
         let port = address.port().to_string();
         let mut command = vec![
@@ -320,19 +322,15 @@ impl RedisReference {
             &port,
         ];
         command.extend_from_slice(args);
-        checked(
-            docker(&command),
-            "executar redis-cli contra Sider compartilhado",
-        )
-        .stdout
+        checked(docker(&command), "run redis-cli against shared Sider").stdout
     }
 
-    /// Confirma a remoção no caminho de sucesso; Drop também limpa em falhas de teste.
+    /// Confirms removal on success; Drop also cleans up on test failures.
     pub fn finish(mut self) {
-        let id = self.container.id.as_deref().expect("container ativo");
+        let id = self.container.id.as_deref().expect("active container");
         checked(
             docker(&["rm", "--force", "--volumes", id]),
-            "remover Redis descartável",
+            "remove disposable Redis",
         );
         let remaining = checked(
             docker(&[
@@ -344,19 +342,19 @@ impl RedisReference {
                 "--filter",
                 &format!("id={id}"),
             ]),
-            "confirmar remoção do Redis",
+            "confirm Redis removal",
         );
         assert!(
             remaining.stdout.iter().all(u8::is_ascii_whitespace),
-            "container Redis ainda aparece após remoção"
+            "Redis container still appears after removal"
         );
         self.container.removed = true;
-        eprintln!("container Redis removido: {id}");
+        eprintln!("Redis container removed: {id}");
         let cidfile = self.container.cidfile.clone();
         let directory = self.container.directory.clone();
         drop(self);
-        assert!(!cidfile.exists(), "cidfile próprio deve ser removido");
-        assert!(!directory.exists(), "diretório próprio deve ser removido");
+        assert!(!cidfile.exists(), "owned cidfile must be removed");
+        assert!(!directory.exists(), "owned directory must be removed");
     }
 }
 
@@ -371,14 +369,14 @@ impl ContainerGuard {
     fn new() -> Self {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("relógio após epoch");
+            .expect("clock after epoch");
         let directory = std::env::temp_dir().join(format!(
             "sider-redis-reference-{}-{}-{}",
             std::process::id(),
             nonce.as_nanos(),
             TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
-        fs::create_dir(&directory).expect("criar diretório temporário exclusivo");
+        fs::create_dir(&directory).expect("create a dedicated temporary directory");
         Self {
             cidfile: directory.join("container.cid"),
             directory,
@@ -405,7 +403,7 @@ impl Drop for ContainerGuard {
                 let _ = docker(&["rm", "--force", "--volumes", id]);
             }
         }
-        // Apenas os dois caminhos criados por este guard, sem limpeza recursiva.
+        // Only the two paths created by this guard, without recursive cleanup.
         let _ = fs::remove_file(&self.cidfile);
         let _ = fs::remove_dir(&self.directory);
     }
@@ -421,9 +419,9 @@ fn valid_hex_id(value: &str) -> bool {
 fn single_inspection(value: &Value) -> Result<&Value, String> {
     let values = value
         .as_array()
-        .ok_or("inspeção Docker deve ser um array")?;
+        .ok_or("Docker inspection must be an array")?;
     if values.len() != 1 {
-        return Err("inspeção Docker deve conter exatamente um objeto".into());
+        return Err("Docker inspection must contain exactly one object".into());
     }
     Ok(&values[0])
 }
@@ -432,24 +430,24 @@ fn inspect_container(output: &[u8], id: &str, image_id: &str) -> Result<SocketAd
     let value: Value = serde_json::from_slice(output).map_err(|e| e.to_string())?;
     let container = single_inspection(&value)?;
     if !valid_hex_id(id) || container["Id"] != id || container["Image"] != image_id {
-        return Err("identidade do container ou imagem divergente".into());
+        return Err("container or image identity mismatch".into());
     }
     if container["State"]["Running"] != true {
-        return Err("container Redis não está em execução".into());
+        return Err("Redis container is not running".into());
     }
     let ports = container["NetworkSettings"]["Ports"]["6379/tcp"]
         .as_array()
-        .ok_or("Redis sem porta TCP publicada")?;
+        .ok_or("Redis has no published TCP port")?;
     if ports.len() != 1 || ports[0]["HostIp"] != "127.0.0.1" {
-        return Err("porta Redis deve estar publicada exclusivamente em 127.0.0.1".into());
+        return Err("Redis port must be published exclusively on 127.0.0.1".into());
     }
     let port: u16 = ports[0]["HostPort"]
         .as_str()
-        .ok_or("porta publicada ausente")?
+        .ok_or("missing published port")?
         .parse()
-        .map_err(|_| "porta publicada inválida")?;
+        .map_err(|_| "invalid published port")?;
     if port == 0 {
-        return Err("porta publicada não pode ser zero".into());
+        return Err("published port must not be zero".into());
     }
     Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
 }
@@ -471,18 +469,18 @@ fn inspect_runner(output: &[u8], id: &str) -> Result<(), String> {
         || runner["State"]["Running"] != true
         || runner["Platform"] != "linux"
     {
-        return Err("runner deve ser container Linux ativo com ID completo correspondente".into());
+        return Err("runner must be an active Linux container with the matching full ID".into());
     }
     let network = runner["HostConfig"]["NetworkMode"]
         .as_str()
-        .ok_or("runner sem modo de rede")?;
+        .ok_or("runner has no network mode")?;
     if network.is_empty()
         || matches!(network, "host" | "none")
         || network.starts_with("container:")
         || !no_published_ports(&runner["HostConfig"]["PortBindings"])
         || !no_published_ports(&runner["NetworkSettings"]["Ports"])
     {
-        return Err("runner exige namespace de rede privado sem portas publicadas".into());
+        return Err("runner requires a private network namespace without published ports".into());
     }
     Ok(())
 }
@@ -501,14 +499,14 @@ fn inspect_shared_container(
         || container["Image"] != image_id
         || container["State"]["Running"] != true
     {
-        return Err("identidade/estado do Redis compartilhado divergente".into());
+        return Err("shared Redis identity/state mismatch".into());
     }
     if container["HostConfig"]["NetworkMode"] != format!("container:{runner_id}")
         || !no_published_ports(&container["HostConfig"]["PortBindings"])
         || !no_published_ports(&container["NetworkSettings"]["Ports"])
     {
         return Err(
-            "Redis deve compartilhar somente a rede do runner indicado, sem publicar portas".into(),
+            "Redis must share only the specified runner network, without publishing ports".into(),
         );
     }
     Ok(SocketAddr::from(([127, 0, 0, 1], 6379)))
@@ -516,7 +514,7 @@ fn inspect_shared_container(
 
 fn validate_cli_address(runner: Option<&str>, address: SocketAddr) -> Result<(), String> {
     if !runner.is_some_and(valid_hex_id) || !address.ip().is_loopback() || address.port() == 0 {
-        return Err("redis-cli só acessa loopback no runner compartilhado verificado".into());
+        return Err("redis-cli accesses only loopback in the verified shared runner".into());
     }
     Ok(())
 }
@@ -545,7 +543,7 @@ fn checked(output: Result<Output, String>, operation: &str) -> Output {
     let output = output.unwrap_or_else(|error| panic!("{operation}: {error}"));
     assert!(
         output.status.success(),
-        "{operation}: Docker retornou {}\n{}",
+        "{operation}: Docker returned {}\n{}",
         output.status,
         String::from_utf8_lossy(&output.stderr)
     );
@@ -562,7 +560,7 @@ fn capture(mut stream: impl Read) -> io::Result<Vec<u8>> {
         }
         let retain = count.min(OUTPUT_LIMIT.saturating_sub(output.len()));
         output.extend_from_slice(&buffer[..retain]);
-        // Continua drenando depois do limite, sem alocação ilimitada ou deadlock.
+        // Continues draining after the limit, without unbounded allocation or deadlock.
     }
 }
 
@@ -574,9 +572,9 @@ fn docker(args: &[&str]) -> Result<Output, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| format!("não foi possível executar Docker: {error}"))?;
-    let stdout = child.stdout.take().expect("stdout configurado como pipe");
-    let stderr = child.stderr.take().expect("stderr configurado como pipe");
+        .map_err(|error| format!("could not execute Docker: {error}"))?;
+    let stdout = child.stdout.take().expect("stdout configured as a pipe");
+    let stderr = child.stderr.take().expect("stderr configured as a pipe");
     let (stdout_sender, stdout_receiver) = mpsc::sync_channel(1);
     let (stderr_sender, stderr_receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
@@ -591,8 +589,8 @@ fn docker(args: &[&str]) -> Result<Output, String> {
             Ok(None) if Instant::now() < deadline => thread::sleep(
                 Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
             ),
-            Ok(None) => break Err("comando Docker excedeu 30 segundos".to_owned()),
-            Err(error) => break Err(format!("falha ao aguardar Docker: {error}")),
+            Ok(None) => break Err("Docker command exceeded 30 seconds".to_owned()),
+            Err(error) => break Err(format!("failed to wait for Docker: {error}")),
         }
     };
     let status = match status {
@@ -606,7 +604,7 @@ fn docker(args: &[&str]) -> Result<Output, String> {
                         .min(reap_deadline.saturating_duration_since(Instant::now())),
                 );
             }
-            // Não aguarda leitores: outro processo pode ter herdado os pipes.
+            // Does not wait for readers: another process may have inherited the pipes.
             return Err(error);
         }
     };
@@ -626,8 +624,8 @@ fn receive_capture(
 ) -> Result<Vec<u8>, String> {
     receiver
         .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-        .map_err(|error| format!("ler {stream} dentro do prazo Docker: {error}"))?
-        .map_err(|error| format!("ler {stream}: {error}"))
+        .map_err(|error| format!("read {stream} within Docker deadline: {error}"))?
+        .map_err(|error| format!("read {stream}: {error}"))
 }
 
 #[cfg(test)]

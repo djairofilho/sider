@@ -1,7 +1,7 @@
-//! Processos pertencentes aos testes, com saída e espera limitadas.
+//! Test-owned processes, with bounded output and waits.
 
 #![forbid(unsafe_code)]
-// Cada binário de integração usa uma parte diferente desta API comum.
+// Each integration binary uses a different part of this shared API.
 #![allow(dead_code)]
 
 use std::io::{self, Read};
@@ -18,7 +18,7 @@ const DROP_TIMEOUT: Duration = Duration::from_millis(500);
 
 type Capture = Receiver<io::Result<Vec<u8>>>;
 
-/// Um filho específico; nunca encerra processos por nome ou árvore global.
+/// One specific child; never terminates processes by name or a global process tree.
 pub struct OwnedChild {
     child: Child,
     stdout: Option<Capture>,
@@ -34,14 +34,14 @@ impl OwnedChild {
 
     fn spawn_with_stdout_limit(command: &mut Command, stdout_limit: usize) -> Result<Self, String> {
         if stdout_limit == 0 || stdout_limit > 128 * 1024 * 1024 {
-            return Err("limite de captura stdout inválido".into());
+            return Err("invalid stdout capture limit".into());
         }
         let child = command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|error| format!("iniciar processo de teste: {error}"))?;
+            .map_err(|error| format!("start test process: {error}"))?;
         let exceeded = Arc::new(AtomicBool::new(false));
         let mut owned = Self {
             child,
@@ -69,11 +69,11 @@ impl OwnedChild {
 
     pub fn assert_alive(&mut self) -> Result<(), String> {
         if self.exceeded.load(Ordering::Relaxed) {
-            return Err("processo excedeu limite de stdout/stderr".into());
+            return Err("process exceeded the stdout/stderr limit".into());
         }
         match self.poll()? {
             None => Ok(()),
-            Some(status) => Err(format!("processo terminou prematuramente: {status}")),
+            Some(status) => Err(format!("process exited prematurely: {status}")),
         }
     }
 
@@ -82,7 +82,7 @@ impl OwnedChild {
             self.status = self
                 .child
                 .try_wait()
-                .map_err(|e| format!("aguardar processo: {e}"))?;
+                .map_err(|e| format!("wait for process: {e}"))?;
         }
         Ok(self.status)
     }
@@ -90,39 +90,39 @@ impl OwnedChild {
     pub fn wait(&mut self, timeout: Duration) -> Result<Output, String> {
         let deadline = Instant::now()
             .checked_add(timeout)
-            .ok_or("prazo de processo inválido")?;
+            .ok_or("invalid process deadline")?;
         let status = loop {
             if self.exceeded.load(Ordering::Relaxed) {
-                return Err("processo excedeu limite de stdout/stderr".into());
+                return Err("process exceeded the stdout/stderr limit".into());
             }
             if let Some(status) = self.poll()? {
                 break status;
             }
             if Instant::now() >= deadline {
-                return Err("processo excedeu prazo de execução".into());
+                return Err("process exceeded the execution deadline".into());
             }
             pause(deadline);
         };
         self.output(status, deadline)
     }
 
-    /// Mata somente o filho guardado e comprova que ele foi recolhido.
+    /// Kills only the guarded child and verifies that it was reaped.
     pub fn terminate(&mut self, timeout: Duration) -> Result<Output, String> {
         let deadline = Instant::now()
             .checked_add(timeout)
-            .ok_or("prazo de término inválido")?;
+            .ok_or("invalid termination deadline")?;
         if self.poll()?.is_none()
             && let Err(error) = self.child.kill()
             && self.poll()?.is_none()
         {
-            return Err(format!("encerrar filho {}: {error}", self.id()));
+            return Err(format!("terminate child {}: {error}", self.id()));
         }
         let status = loop {
             if let Some(status) = self.poll()? {
                 break status;
             }
             if Instant::now() >= deadline {
-                return Err("filho não foi recolhido dentro do prazo".into());
+                return Err("child was not reaped before the deadline".into());
             }
             pause(deadline);
         };
@@ -131,17 +131,17 @@ impl OwnedChild {
 
     fn output(&mut self, status: ExitStatus, deadline: Instant) -> Result<Output, String> {
         let stdout = receive(
-            self.stdout.take().ok_or("stdout já consumido")?,
+            self.stdout.take().ok_or("stdout already consumed")?,
             "stdout",
             deadline,
         )?;
         let stderr = receive(
-            self.stderr.take().ok_or("stderr já consumido")?,
+            self.stderr.take().ok_or("stderr already consumed")?,
             "stderr",
             deadline,
         )?;
         if self.exceeded.load(Ordering::Relaxed) {
-            return Err("processo excedeu limite de stdout/stderr".into());
+            return Err("process exceeded the stdout/stderr limit".into());
         }
         Ok(Output {
             status,
@@ -161,18 +161,18 @@ impl Drop for OwnedChild {
         while matches!(self.poll(), Ok(None)) && Instant::now() < deadline {
             pause(deadline);
         }
-        // Sem join ilimitado: um descendente pode ter herdado um pipe. Cada
-        // leitor retém no máximo seu limite de captura e não impede o término do teste.
+        // No unbounded join: a descendant may have inherited a pipe. Each
+        // reader retains at most its capture limit and does not prevent the test from finishing.
     }
 }
 
-/// Prazo inclui execução e EOF dos dois streams; status não zero é preservado.
+/// The deadline includes execution and EOF on both streams; nonzero status is preserved.
 pub fn run(command: &mut Command, timeout: Duration) -> Result<Output, String> {
     let mut child = OwnedChild::spawn(command)?;
     child.wait(timeout)
 }
 
-/// Captura de um membro de pacote com limite explícito; stderr mantém OUTPUT_LIMIT.
+/// Captures a package member with an explicit limit; stderr retains OUTPUT_LIMIT.
 pub fn run_with_stdout_limit(
     command: &mut Command,
     timeout: Duration,
@@ -197,7 +197,7 @@ fn capture_thread(
         .spawn(move || {
             let _ = sender.send(capture(stream, &exceeded, limit));
         })
-        .map_err(|e| format!("criar leitor de saída: {e}"))?;
+        .map_err(|e| format!("create output reader: {e}"))?;
     Ok(receiver)
 }
 
@@ -220,8 +220,8 @@ fn capture(mut stream: impl Read, exceeded: &AtomicBool, limit: usize) -> io::Re
 fn receive(capture: Capture, name: &str, deadline: Instant) -> Result<Vec<u8>, String> {
     capture
         .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-        .map_err(|e| format!("capturar {name} dentro do prazo: {e}"))?
-        .map_err(|e| format!("capturar {name}: {e}"))
+        .map_err(|e| format!("capture {name} within deadline: {e}"))?
+        .map_err(|e| format!("capture {name}: {e}"))
 }
 
 #[cfg(test)]

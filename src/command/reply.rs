@@ -1,11 +1,11 @@
-//! Resposta sem dependência de sockets ou canais.
+//! Reply without socket or channel dependencies.
 
 use bytes::Bytes;
 use thiserror::Error;
 
 use crate::resp::Frame;
 
-/// Erros recuperáveis de execução, sem encerrar a conexão ou o worker.
+/// Recoverable execution errors that do not close the connection or worker.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ExecutionError {
     #[error("READONLY You can't write against a read only replica.")]
@@ -26,27 +26,27 @@ pub enum ExecutionError {
     OutOfMemory,
     #[error("ERR AOF record limit exceeded")]
     AofRecordLimit,
-    /// Pub/Sub depende do contexto da conexão e não executa no mapa.
+    /// Pub/Sub depends on connection context and does not execute in the map.
     #[error("ERR command requires connection context")]
     ConnectionOnly,
 }
 
-/// Resultado da execução síncrona no armazenamento.
+/// Result of synchronous execution in storage.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Reply {
-    /// PING sem argumento.
+    /// PING without an argument.
     Pong,
-    /// Mutação SET aceita.
+    /// Accepted SET mutation.
     Ok,
-    /// Mensagem/valor binário ou chave ausente.
+    /// Binary message/value or missing key.
     Bulk(Option<Bytes>),
-    /// Quantidade de chaves removidas.
+    /// Number of removed keys.
     Integer(i64),
-    /// Respostas ordenadas de comandos multichave.
+    /// Ordered replies from multi-key commands.
     Array(Vec<Reply>),
-    /// EXEC invalidado por alteração ou expiração de chave observada.
+    /// EXEC invalidated by a watched-key change or expiry.
     NullArray,
-    /// Rejeição sem efeitos no armazenamento.
+    /// Rejection without storage effects.
     Error(ExecutionError),
 }
 

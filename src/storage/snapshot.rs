@@ -1,4 +1,4 @@
-//! Barreira global para observar workers proprietários sem compartilhar seus mapas.
+//! Global barrier for observing owner workers without sharing their maps.
 
 use std::time::Duration;
 
@@ -10,7 +10,7 @@ use crate::persistence::{AofError, AofHandle};
 use super::Mutation;
 use super::worker::{DbError, DbHandle};
 
-/// Estado ordenado de todos os shards e sequência durável no mesmo instante lógico.
+/// Ordered state for all shards and durable sequence at the same logical instant.
 #[derive(Debug)]
 pub struct Snapshot {
     pub mutations: Vec<Mutation>,
@@ -19,9 +19,9 @@ pub struct Snapshot {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
-    #[error("snapshot indisponível: {0}")]
+    #[error("snapshot unavailable: {0}")]
     Database(#[from] DbError),
-    #[error("snapshot durável: {0}")]
+    #[error("durable snapshot: {0}")]
     Persistence(#[from] AofError),
 }
 
@@ -32,8 +32,8 @@ impl DbHandle {
         if *self.shutdown.borrow() {
             return Err(DbError::ShuttingDown);
         }
-        // Nenhum worker espera por esta trava. Pedidos normais já aceitos possuem
-        // read guards e terminam antes daqui; expiração apenas tenta a admissão.
+        // No worker waits for this lock. Already accepted normal requests hold read
+        // guards and finish first; expiry merely attempts admission.
         let guard = self.barrier.clone().write_owned().await;
         let mut responses = Vec::with_capacity(self.snapshots.len());
         for sender in &self.snapshots {
@@ -49,8 +49,8 @@ impl DbHandle {
         Ok((guard, mutations))
     }
 
-    /// Aguarda pedidos aceitos e captura todos os shards, incluindo deadlines.
-    /// O mesmo prazo total limita a barreira, coleta e flush do escritor.
+    /// Waits for accepted requests and captures all shards, including deadlines.
+    /// The same total timeout limits the barrier, collection, and writer flush.
     pub async fn snapshot(&self, aof: Option<&AofHandle>) -> Result<Snapshot, SnapshotError> {
         timeout(self.request_timeout, async {
             let (_guard, mutations) = self.freeze().await?;
@@ -67,8 +67,8 @@ impl DbHandle {
         .map_err(|_| DbError::Timeout)?
     }
 
-    /// Enfileira a barreira AOF ainda sob exclusão de mutações. Depois permite
-    /// novos pedidos; o escritor captura o delta durante a compactação.
+    /// Queues the AOF barrier while mutations remain excluded. Then allows new
+    /// requests; the writer captures the delta during compaction.
     pub async fn begin_compaction(
         &self,
         aof: &AofHandle,
@@ -81,7 +81,7 @@ impl DbHandle {
         .map_err(|_| DbError::Timeout)?
     }
 
-    /// Coordena compactação automática global. Zero desabilita o agendamento.
+    /// Coordinates global automatic compaction. Zero disables scheduling.
     pub async fn run_compaction(self, aof: AofHandle, threshold: u64) {
         let mut shutdown = self.shutdown.clone();
         let mut ticker = interval(Duration::from_millis(100));
@@ -100,8 +100,8 @@ impl DbHandle {
                 _ = ticker.tick(), if threshold > 0 => {
                     if let Some(pending) = &mut completion {
                         match pending.try_recv() {
-                            Ok(Ok(())) => tracing::info!("compactação global concluída"),
-                            Ok(Err(error)) => tracing::warn!(%error, "compactação global abortada"),
+                            Ok(Ok(())) => tracing::info!("global compaction completed"),
+                            Ok(Err(error)) => tracing::warn!(%error, "global compaction aborted"),
                             Err(oneshot::error::TryRecvError::Empty) => continue,
                             Err(oneshot::error::TryRecvError::Closed) => break,
                         }
@@ -111,7 +111,7 @@ impl DbHandle {
                         Ok((_, bytes, false)) if bytes >= threshold => {
                             match self.begin_compaction(&aof).await {
                                 Ok(pending) => completion = Some(pending),
-                                Err(error) => tracing::warn!(%error, "snapshot global não iniciado"),
+                                Err(error) => tracing::warn!(%error, "global snapshot not started"),
                             }
                         }
                         Err(_) => break,
@@ -179,7 +179,7 @@ mod tests {
             })
             .await;
         }
-        // Quem mantém a admissão é o envelope já aceito, não a future do cliente.
+        // The already accepted envelope retains admission, not the client future.
         assert!(database.barrier.try_write().is_err());
         let running = tokio::spawn(worker.run());
         let snapshot = database.snapshot(None).await.unwrap();
@@ -269,7 +269,7 @@ mod tests {
                     Mutation::Put { value: right, .. },
                 ] = pair
                 else {
-                    panic!("snapshot contém remoção")
+                    panic!("snapshot contains a removal")
                 };
                 assert_eq!(left, right);
             }

@@ -1,4 +1,4 @@
-//! Histórico assíncrono com consumidores reais de frames e orçamento explícito.
+//! Asynchronous history with real frame consumers and an explicit budget.
 
 use bytes::Bytes;
 use sider::replication::Cursor;
@@ -50,7 +50,7 @@ async fn slow_subscriber_loses_history_without_blocking_healthy_replay() {
             batch,
         } = protocol::decode(entry.frame, protocol::Limits::default()).unwrap()
         else {
-            panic!("lote ausente")
+            panic!("missing batch")
         };
         assert_eq!(actual, sequence);
         target.replay(&batch.mutations).unwrap();

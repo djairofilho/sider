@@ -1,4 +1,4 @@
-//! Exercícios operacionais opt-in dos quatro executáveis extraídos, sem recibo de release.
+//! Opt-in operational tests of the four extracted executables, without a release receipt.
 #![forbid(unsafe_code)]
 #[path = "common/process.rs"]
 mod process;
@@ -68,7 +68,7 @@ fn inventory(directory: &Path) -> Value {
         let help = process::run(command(&path).arg("--help"), TIMEOUT).unwrap();
         assert!(help.status.success(), "{name}: {:?}", help.stderr);
         let text = String::from_utf8(help.stdout).unwrap();
-        assert!(text.contains(&format!("Uso: {name}")));
+        assert!(text.contains(&format!("Usage: {name}")));
         let version = if matches!(name, "sider" | "sider-backup") {
             let result = process::run(command(&path).arg("--version"), TIMEOUT).unwrap();
             assert!(result.status.success());
@@ -109,7 +109,7 @@ fn fields(bytes: &[u8]) -> BTreeMap<String, String> {
         if let Some((key, value)) = line.split_once(':') {
             assert!(
                 fields.insert(key.to_owned(), value.to_owned()).is_none(),
-                "campo duplicado"
+                "duplicate field"
             );
         }
     }
@@ -117,7 +117,7 @@ fn fields(bytes: &[u8]) -> BTreeMap<String, String> {
 }
 fn info(stream: &mut TcpStream) -> BTreeMap<String, String> {
     let Response::Bulk(Some(bytes)) = exchange(stream, &[b"INFO"]) else {
-        panic!("INFO ausente")
+        panic!("missing INFO")
     };
     assert!(!bytes.windows(6).any(|part| part == b"secret"));
     fields(&bytes)
@@ -138,7 +138,7 @@ fn await_metric(
         }
         assert!(
             Instant::now() < deadline,
-            "indicador {name} não convergiu: {current:?}"
+            "metric {name} did not converge: {current:?}"
         );
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -206,7 +206,7 @@ fn quota(binary: &Path) -> Value {
     assert_eq!(metric(&before, "dataset_keys"), 1);
     assert_eq!(metric(&before, "dataset_quota_bytes"), 4096);
     let Response::Error(rejection) = exchange(&mut client, &[b"SET", key, &vec![7; 8192]]) else {
-        panic!("quota não recusou")
+        panic!("quota did not reject the operation")
     };
     assert!(rejection.starts_with(b"OOM"));
     assert_eq!(exchange(&mut client, &[b"GET", key]), bulk(original));
@@ -267,7 +267,7 @@ fn connection_limit(binary: &Path) -> Value {
                 error.kind(),
                 std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
             ) => {}
-        other => panic!("conexão excedente não foi rejeitada: {other:?}"),
+        other => panic!("excess connection was not rejected: {other:?}"),
     }
     let refused = await_metric(&mut control, "rejected_connections", |count| count > before);
     assert_eq!(metric(&refused, "connected_clients"), 4);
@@ -315,12 +315,12 @@ fn slow_client(binary: &Path) -> Value {
             for sequence in expected {
                 let Response::Array(Some(parts)) = wire::read_response(&mut fast).unwrap().value
                 else {
-                    panic!("notificação ausente")
+                    panic!("missing notification")
                 };
                 assert_eq!(parts[0], bulk(b"message"));
                 assert_eq!(parts[1], bulk(channel));
                 let Response::Bulk(Some(payload)) = &parts[2] else {
-                    panic!("payload ausente")
+                    panic!("missing payload")
                 };
                 assert_eq!(payload.len(), 65536);
                 assert_eq!(&payload[..8], &sequence.to_le_bytes());
@@ -351,7 +351,7 @@ fn slow_client(binary: &Path) -> Value {
         }
         drop(expect);
         reader.join().unwrap();
-        observed.expect("assinante lento não foi removido dentro da carga limitada")
+        observed.expect("slow subscriber was not removed within the bounded load")
     });
     drop(slow);
     await_metric(&mut publisher, "pubsub_subscriptions", |count| count == 0);
@@ -445,17 +445,17 @@ fn filesystem(binary: &Path, directory: &Path) -> Value {
 }
 
 #[test]
-#[ignore = "opt-in: quatro CLIs extraídas em SIDER_OPERATIONAL_PACKAGE_DIR e saída nova em SIDER_OPERATIONAL_OUTPUT_DIR"]
+#[ignore = "opt-in: four extracted CLIs in SIDER_OPERATIONAL_PACKAGE_DIR and new output in SIDER_OPERATIONAL_OUTPUT_DIR"]
 fn operational_extracted_package() {
     let package =
-        PathBuf::from(std::env::var_os("SIDER_OPERATIONAL_PACKAGE_DIR").expect("pacote explícito"));
+        PathBuf::from(std::env::var_os("SIDER_OPERATIONAL_PACKAGE_DIR").expect("explicit package"));
     let output =
-        PathBuf::from(std::env::var_os("SIDER_OPERATIONAL_OUTPUT_DIR").expect("saída nova"));
+        PathBuf::from(std::env::var_os("SIDER_OPERATIONAL_OUTPUT_DIR").expect("new output"));
     assert!(package.is_absolute() && output.is_absolute());
     let metadata = fs::symlink_metadata(&package).unwrap();
     assert!(metadata.is_dir() && !metadata.file_type().is_symlink());
     let package = package.canonicalize().unwrap();
-    fs::create_dir(&output).expect("não sobrescrever evidências anteriores");
+    fs::create_dir(&output).expect("do not overwrite previous evidence");
     let before = inventory(&package);
     let binary = package.join(format!("sider{}", std::env::consts::EXE_SUFFIX));
     let began = Instant::now();
@@ -478,17 +478,17 @@ fn operational_extracted_package() {
     assert_eq!(
         inventory(&package),
         before,
-        "executáveis mudaram durante o ensaio"
+        "executables changed during the test"
     );
     observations.sync_all().unwrap();
     let report = json!({"schema_version":1,"task":"R10-05","version":env!("CARGO_PKG_VERSION"),
         "platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
         "duration_seconds":began.elapsed().as_secs_f64(),"executables":before,"cases":cases,
-        "scope":"diagnóstico, quota, limite de conexões, isolamento de cliente lento, abertura AOF e recuperação",
-        "limitations":["não comprova identidade com manifesto de release; conferir pacote externamente",
-            "obstrução de caminho não simula ENOSPC nem falha de write em arquivo já aberto",
-            "falha de write/atomicidade permanece coberta pelas suítes nativas de injeção",
-            "migração, backup/restauração e shutdown cooperativo pertencem ao ensaio de baseline"],
+        "scope":"diagnostics, quota, connection limit, slow client isolation, AOF opening, and recovery",
+        "limitations":["does not establish identity against a release manifest; verify the package externally",
+            "path obstruction does not simulate ENOSPC or a write failure on an already open file",
+            "write failures and atomicity remain covered by the native fault injection suites",
+            "migration, backup/restore, and cooperative shutdown belong to the baseline test"],
         "cleanup_confirmed":true,"release_gate_approved":false});
     let mut file = OpenOptions::new()
         .create_new(true)

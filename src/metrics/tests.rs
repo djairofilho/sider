@@ -214,7 +214,7 @@ fn metrics_replication_reports_only_observed_positions_and_guards_stale_sessions
     assert_eq!(read()["replication_lag_known"], "0");
     assert!(
         !read().contains_key("replication_lag_batches"),
-        "não saturar uma observação defasada em zero"
+        "do not saturate a stale observation at zero"
     );
     runtime.disconnected(generation);
     assert_eq!(read()["replication_connected"], "0");
@@ -439,7 +439,7 @@ async fn metrics_four_shards_remain_observable_during_snapshot_waiting_for_apply
     assert_eq!(observed["worker_queue_capacity"], "4");
     assert_eq!(
         observed["dataset_keys"], "1",
-        "aceitação não publica estado antes de apply"
+        "acceptance does not publish state before apply"
     );
     assert_eq!(observed["dataset_quota_bytes"], "1200");
     running.spawn(slow.run());

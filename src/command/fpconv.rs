@@ -1,5 +1,5 @@
-//! Adaptação Rust segura do gerador Grisu2 de `redis/8.10.1/deps/fpconv`.
-//! Mantém a seleção de potências e o arredondamento da referência.
+//! Safe Rust adaptation of the Grisu2 generator in `redis/8.10.1/deps/fpconv`.
+//! Preserves the reference power selection and rounding.
 //!
 //! Copyright (c) 2021, Redis Labs
 //! Copyright (c) 2013-2019, night-shift <as.smljk at gmail dot com>
@@ -58,12 +58,12 @@ fn round(digits: &mut [u8], delta: u64, mut remainder: u64, unit: u64, distance:
         && delta - remainder >= unit
         && (remainder + unit < distance || distance - remainder > remainder + unit - distance)
     {
-        *digits.last_mut().expect("ao menos um dígito") -= 1;
+        *digits.last_mut().expect("at least one digit") -= 1;
         remainder += unit;
     }
 }
 
-/// Dígitos significativos e potência de dez para um número positivo e finito.
+/// Significant digits and power of ten for a positive, finite number.
 pub(super) fn digits(value: f64) -> (String, i32) {
     debug_assert!(value > 0.0 && value.is_finite());
     let bits = value.to_bits();
@@ -130,7 +130,7 @@ pub(super) fn digits(value: f64) -> (String, i32) {
             decimal_power += remaining;
             round(&mut digits, delta, remainder, divisor << shift, distance);
             return (
-                String::from_utf8(digits).expect("dígitos ASCII"),
+                String::from_utf8(digits).expect("ASCII digits"),
                 decimal_power,
             );
         }
@@ -150,7 +150,7 @@ pub(super) fn digits(value: f64) -> (String, i32) {
             decimal_power += remaining;
             round(&mut digits, delta, fractional, one, distance * unit);
             return (
-                String::from_utf8(digits).expect("dígitos ASCII"),
+                String::from_utf8(digits).expect("ASCII digits"),
                 decimal_power,
             );
         }

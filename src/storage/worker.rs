@@ -1,4 +1,4 @@
-//! Worker proprietário do armazenamento, com fila limitada e respostas individuais.
+//! Storage owner worker with a bounded queue and individual replies.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,21 +19,21 @@ use super::{Store, WatchToken, routing::ShardRouter};
 #[path = "transaction_tests.rs"]
 mod transaction_tests;
 
-/// Falha de transporte ou de ciclo de vida, distinta de uma resposta do banco.
+/// Transport or lifecycle failure, distinct from a database reply.
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum DbError {
-    /// O worker ou o canal de resposta terminou inesperadamente.
-    #[error("worker indisponível")]
+    /// The worker or reply channel ended unexpectedly.
+    #[error("worker unavailable")]
     Unavailable,
-    /// O prazo total expirou; um comando aceito pode ter sido aplicado.
-    #[error("prazo do worker excedido; resultado da operação desconhecido")]
+    /// The total timeout expired; an accepted command may have been applied.
+    #[error("worker timeout exceeded; operation result unknown")]
     Timeout,
-    /// A parada começou antes de aceitar este pedido.
-    #[error("servidor em encerramento")]
+    /// Shutdown started before accepting this request.
+    #[error("server shutting down")]
     ShuttingDown,
 }
 
-/// Envelope interno; o enum de comandos continua independente dos canais.
+/// Internal envelope; the command enum remains independent of channels.
 pub(crate) enum Request {
     Execute {
         command: Command,
@@ -72,7 +72,7 @@ fn encode_reply(reply: Reply, limits: RespLimits) -> Result<bytes::Bytes, Encode
     Ok(bytes.freeze())
 }
 
-/// Acesso clonável ao mesmo armazenamento, sem compartilhar o mapa diretamente.
+/// Cloneable access to the same storage without directly sharing the map.
 #[derive(Clone)]
 pub struct DbHandle {
     pub(crate) metrics: Metrics,
@@ -86,7 +86,7 @@ pub struct DbHandle {
     replication: Option<crate::replication::state::Runtime>,
 }
 
-/// Proprietário único do mapa e do lado receptor da fila.
+/// Sole owner of the map and the queue's receiving side.
 pub struct Worker {
     metrics: Metrics,
     shard: usize,
@@ -103,16 +103,16 @@ pub struct Worker {
     replication: Option<crate::replication::state::Runtime>,
 }
 
-/// Cria um mapa vazio e seu canal limitado, sem iniciar uma tarefa.
+/// Creates an empty map and its bounded channel without starting a task.
 ///
-/// O chamador deve executar [`Worker::run`] em um runtime Tokio com timers.
-/// `true` no canal de parada, ou o fechamento de todos os seus emissores, inicia
-/// o encerramento. A capacidade conta mensagens, não bytes ou memória do dataset.
+/// The caller must run [`Worker::run`] in a Tokio runtime with timers.
+/// `true` on the shutdown channel, or closing all its senders, starts
+/// shutdown. Capacity counts messages, not dataset bytes or memory.
 ///
-/// # Erros
+/// # Errors
 ///
-/// Recusa capacidade zero ou acima do limite de canais Tokio, timeout zero e
-/// duração que não pode ser representada como prazo do relógio monotônico.
+/// Rejects zero capacity or capacity above the Tokio-channel limit, zero timeout, and
+/// duration that cannot be represented as a monotonic-clock deadline.
 pub fn channel(
     capacity: usize,
     request_timeout: Duration,
@@ -121,7 +121,7 @@ pub fn channel(
     channel_with_store(capacity, request_timeout, shutdown, Store::new())
 }
 
-/// Cria o canal para um armazenamento já configurado ou recuperado.
+/// Creates the channel for already configured or recovered storage.
 pub fn channel_with_store(
     capacity: usize,
     request_timeout: Duration,
@@ -133,7 +133,7 @@ pub fn channel_with_store(
     Ok((handle, workers.remove(0)))
 }
 
-/// Cada Store é movido para um único worker; filas e mapas permanecem separados.
+/// Each Store moves to one worker; queues and maps remain separate.
 pub fn channel_with_stores(
     capacity: usize,
     request_timeout: Duration,
@@ -143,7 +143,7 @@ pub fn channel_with_stores(
     let router = ShardRouter::new(stores.len())?;
     if capacity == 0 || capacity > Semaphore::MAX_PERMITS {
         return Err(ConfigError::InvalidServerLimits {
-            reason: "capacidade da fila deve estar entre 1 e Semaphore::MAX_PERMITS",
+            reason: "queue capacity must be between 1 and Semaphore::MAX_PERMITS",
         });
     }
     if request_timeout.is_zero()
@@ -152,7 +152,7 @@ pub fn channel_with_stores(
             .is_none()
     {
         return Err(ConfigError::InvalidServerLimits {
-            reason: "timeout do worker deve ser positivo e representável pelo relógio",
+            reason: "worker timeout must be positive and representable by the clock",
         });
     }
 
@@ -227,22 +227,22 @@ impl DbHandle {
             .is_some_and(|runtime| runtime.readonly())
     }
 
-    /// Observador sem canais de requisição, disco ou referências fortes ao AOF.
+    /// Observer without request channels, disk, or strong AOF references.
     pub fn replication_observer(&self) -> Option<crate::replication::state::Runtime> {
         self.replication.clone()
     }
-    /// Envia um comando e espera sua resposta dentro de um único prazo total.
+    /// Sends a command and waits for its reply within one total timeout.
     ///
-    /// A conclusão do envio à fila é a fronteira de aceitação. Cancelar antes
-    /// disso não modifica o banco. Depois da aceitação, descartar esta future,
-    /// expirar o prazo ou iniciar a parada não cancela o comando no worker.
-    /// Falha na entrega da resposta não desfaz operações e não provoca repetição.
-    /// A drenagem só é garantida enquanto o worker não for abortado pelo supervisor.
+    /// Queue-send completion is the acceptance boundary. Cancelling before it does
+    /// not change the database. After acceptance, abandoning this future, expiry of
+    /// the timeout, or beginning shutdown does not cancel the command in the worker.
+    /// Reply-delivery failure does not undo operations or cause retries.
+    /// Draining is guaranteed only while the supervisor has not aborted the worker.
     ///
-    /// # Erros
+    /// # Errors
     ///
-    /// [`DbError::Timeout`] nunca promete ausência de efeitos. A parada cancela
-    /// somente envios ainda não aceitos; respostas aceitas mantêm seu prazo original.
+    /// [`DbError::Timeout`] never promises the absence of effects. Shutdown cancels
+    /// only sends not yet accepted; accepted replies keep their original deadline.
     pub async fn execute(&self, command: Command) -> Result<Reply, DbError> {
         let shard = match self.router.route(&command) {
             Ok(shard) => shard,
@@ -256,12 +256,12 @@ impl DbHandle {
         .await
     }
 
-    /// Roteador imutável para validar a fila antes de reter um comando.
+    /// Immutable router for validating the queue before retaining a command.
     pub fn router(&self) -> ShardRouter {
         self.router
     }
 
-    /// Executa o lote em um shard e libera as observações em todos os resultados.
+    /// Executes the batch in one shard and releases observations in all results.
     pub async fn execute_batch(
         &self,
         commands: Vec<Command>,
@@ -322,7 +322,7 @@ impl DbHandle {
         .await
     }
 
-    /// O chamador valida as chaves no roteador antes de enviar WATCH.
+    /// The caller validates keys in the router before sending WATCH.
     pub(crate) async fn watch(
         &self,
         keys: Vec<bytes::Bytes>,
@@ -383,8 +383,8 @@ impl DbHandle {
             }
         }
 
-        // Não observar shutdown aqui: o pedido já pertence ao worker. O prazo
-        // é o mesmo usado no envio, incluindo toda a espera por capacidade.
+        // Do not observe shutdown here: the request already belongs to the worker.
+        // The timeout is the same one used for sending, including all capacity waiting.
         tokio::select! {
             biased;
             () = sleep_until(deadline) => Err(DbError::Timeout),
@@ -404,8 +404,8 @@ impl Worker {
             .as_ref()
             .is_some_and(|runtime| runtime.readonly())
     }
-    /// Compactação local só existe com um shard. Com vários, o limiar local é
-    /// desabilitado e [`DbHandle::run_compaction`] coordena o snapshot completo.
+    /// Local compaction exists only with one shard. With multiple shards, the local threshold is
+    /// disabled and [`DbHandle::run_compaction`] coordinates the complete snapshot.
     pub fn with_aof(
         mut self,
         aof: crate::persistence::AofHandle,
@@ -413,7 +413,7 @@ impl Worker {
     ) -> Self {
         self.metrics.aof(aof.diagnostics_handle());
         self.aof = Some(aof);
-        // Compactação local só é válida quando este worker é o único shard.
+        // Local compaction is valid only when this worker is the sole shard.
         self.compact_after_bytes = if self.shard_count == 1 {
             compact_after_bytes
         } else {
@@ -421,11 +421,11 @@ impl Worker {
         };
         self
     }
-    /// Processa comandos em ordem de recepção, sem suspender uma mutação.
+    /// Processes commands in receipt order without suspending a mutation.
     ///
-    /// Na parada, fecha a admissão e drena tudo que foi aceito. Também termina
-    /// naturalmente quando todos os handles são descartados e a fila esvazia.
-    /// Uma resposta sem destinatário não impede a execução nem encerra o worker.
+    /// On shutdown, closes admission and drains everything accepted. It also ends
+    /// naturally when all handles are dropped and the queue empties.
+    /// A reply without a recipient neither prevents execution nor terminates the worker.
     pub async fn run(mut self) {
         let mut expiration = interval(Duration::from_millis(100));
         expiration.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -469,7 +469,7 @@ impl Worker {
         if let Some(aof) = &self.aof
             && let Err(error) = aof.flush().await
         {
-            tracing::error!(%error, "falha ao sincronizar AOF na parada");
+            tracing::error!(%error, "failed to synchronize AOF during shutdown");
         }
     }
 
@@ -626,7 +626,7 @@ impl Worker {
             ) {
                 return Ok(Some(Reply::Error(ExecutionError::AofRecordLimit)));
             }
-            tracing::error!(%error, "mutação não aplicada por falha do AOF");
+            tracing::error!(%error, "mutation not applied because AOF failed");
             self.requests.close();
             return Err(DbError::Unavailable);
         }
@@ -682,11 +682,11 @@ impl Worker {
     async fn compact_if_due(&mut self) {
         if let Some(completion) = &mut self.compaction {
             match completion.try_recv() {
-                Ok(Ok(())) => tracing::info!("compactação AOF concluída"),
-                Ok(Err(error)) => tracing::warn!(%error, "compactação AOF abortada"),
+                Ok(Ok(())) => tracing::info!("AOF compaction completed"),
+                Ok(Err(error)) => tracing::warn!(%error, "AOF compaction aborted"),
                 Err(oneshot::error::TryRecvError::Empty) => return,
                 Err(oneshot::error::TryRecvError::Closed) => {
-                    tracing::warn!("compactador AOF indisponível")
+                    tracing::warn!("AOF compactor unavailable")
                 }
             }
             self.compaction = None;
@@ -698,11 +698,11 @@ impl Worker {
             && let Ok((_, bytes, false)) = aof.status().await
             && bytes >= self.compact_after_bytes
         {
-            // Enfileira a barreira antes de aceitar outra mutação neste worker.
+            // Queues the barrier before accepting another mutation in this worker.
             match aof.begin_compaction(self.store.snapshot()).await {
                 Ok(completion) => self.compaction = Some(completion),
                 Err(error) => {
-                    tracing::warn!(%error, "não foi possível iniciar compactação AOF")
+                    tracing::warn!(%error, "could not start AOF compaction")
                 }
             }
         }
@@ -805,7 +805,7 @@ mod tests {
             vec![Store::new(), Store::new()],
         )
         .unwrap();
-        // FNV-1a(a) termina em bit zero; FNV-1a(b) termina em bit um.
+        // FNV-1a(a) ends in bit zero; FNV-1a(b) ends in bit one.
         assert_eq!(handle.router.shard_for(b"a"), 0);
         assert_eq!(handle.router.shard_for(b"b"), 1);
         let cold = workers.pop().unwrap();
@@ -820,7 +820,7 @@ mod tests {
             handle.execute(set(b"b", b"independent")).await,
             Ok(Reply::Ok)
         );
-        // O shard quente progride assim que seu worker volta a ser escalonado.
+        // The hot shard progresses as soon as its worker is scheduled again.
         let hot_task = tokio::spawn(hot.run());
         assert_eq!(first.await, Ok(Reply::Ok));
         assert_eq!(second.await, Ok(Reply::Ok));
@@ -1072,7 +1072,7 @@ mod tests {
         assert_eq!(waiting.await, Err(DbError::ShuttingDown));
         assert_pending(accepted.as_mut()).await;
         assert_pending(observed.as_mut()).await;
-        // O handle continua vivo: fechar a admissão deve bastar para drenar.
+        // The handle remains alive: closing admission must be enough to drain.
         worker.run().await;
         assert_eq!(accepted.await, Ok(Reply::Ok));
         assert_eq!(observed.await, Ok(bulk(b"kept")));

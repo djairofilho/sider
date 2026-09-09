@@ -1,15 +1,15 @@
-//! Relógios injetáveis; expirações em andamento dependem somente do monotônico.
+//! Injectable clocks; pending expiries depend only on the monotonic clock.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::Instant;
 
-/// A origem de tempo permite testes sem sleeps e futura conversão de deadlines AOF.
+/// The time source enables tests without sleeps and future AOF deadline conversion.
 pub trait Clock: Send + Sync {
     fn now(&self) -> Instant;
     fn unix_millis(&self) -> i64;
 }
 
-/// Relógio do runtime; testes Tokio podem pausar seu componente monotônico.
+/// Runtime clock; Tokio tests can pause its monotonic component.
 #[derive(Default)]
 pub struct SystemClock;
 

@@ -33,7 +33,7 @@ impl ExportOptions {
         self.limits.validate()?;
         require_hex(&self.source_sha, 40)?;
         if self.source.port() == 0 {
-            return Err(Error::Invalid("porta de origem precisa ser explícita"));
+            return Err(Error::Invalid("source port must be explicit"));
         }
         Ok(())
     }
@@ -46,7 +46,7 @@ fn remaining(deadline: Instant) -> Result<Duration, Error> {
         .ok_or(Error::Timeout)
 }
 
-/// Conecta ao listener interno e recebe somente um snapshot, sem ACK ou fluxo incremental.
+/// Connects to the internal listener and receives only one snapshot, without ACK or incremental flow.
 pub async fn export(options: ExportOptions, clock: Arc<dyn Clock>) -> Result<Manifest, Error> {
     options.validate()?;
     let deadline = Instant::now() + options.limits.timeout;
@@ -56,7 +56,7 @@ pub async fn export(options: ExportOptions, clock: Arc<dyn Clock>) -> Result<Man
     receive(&mut stream, options, clock, deadline).await
 }
 
-/// Transporte injetável para testes; aplica os mesmos limites e contrato do cliente TCP.
+/// Injectable transport for tests; applies the same limits and contract as the TCP client.
 pub async fn export_stream(
     stream: &mut (impl AsyncRead + AsyncWrite + Unpin),
     options: ExportOptions,
@@ -89,7 +89,7 @@ async fn receive(
     let Message::Hello(hello) = protocol::read(stream, transport, remaining(deadline)?).await?
     else {
         return Err(Error::Invalid(
-            "origem recusou exportação ou não enviou Hello",
+            "source rejected export or did not send Hello",
         ));
     };
     if hello.sider_version.as_ref() != env!("CARGO_PKG_VERSION").as_bytes()
@@ -99,7 +99,7 @@ async fn receive(
         || hello.max_snapshot_bytes > limits.max_snapshot_bytes
     {
         return Err(Error::Invalid(
-            "versão ou capacidade incompatível com a origem",
+            "version or capacity incompatible with the source",
         ));
     }
     let layout = DurableLayout {
@@ -110,14 +110,12 @@ async fn receive(
     let Message::FullStart { cursor, entries } =
         protocol::read(stream, transport, remaining(deadline)?).await?
     else {
-        return Err(Error::Invalid("FullStart ausente"));
+        return Err(Error::Invalid("missing FullStart"));
     };
     if hello.cursor != Some(cursor)
         || entries > limits.max_snapshot_bytes / (protocol::HEADER_BYTES as u64 + 12)
     {
-        return Err(Error::Invalid(
-            "cursor ou quantidade de entradas incompatível",
-        ));
+        return Err(Error::Invalid("incompatible cursor or entry count"));
     }
     let mut directory = OwnedDirectory::new(&options.destination)?;
     let path = directory.path.join(SNAPSHOT);
@@ -136,21 +134,21 @@ async fn receive(
         let (raw, message) =
             protocol::read_with_frame(stream, transport, remaining(deadline)?).await?;
         let Message::SnapshotEntry(mutation @ Mutation::Put { .. }) = message else {
-            return Err(Error::Invalid("snapshot incompleto ou mensagem inesperada"));
+            return Err(Error::Invalid("incomplete snapshot or unexpected message"));
         };
         if previous.as_ref().is_some_and(|key| key >= mutation.key()) {
             return Err(Error::Invalid(
-                "snapshot fora de ordem ou com chave duplicada",
+                "snapshot out of order or with a duplicate key",
             ));
         }
         previous = Some(mutation.key().clone());
         transport_bytes = transport_bytes
             .checked_add(raw.len() as u64)
             .filter(|bytes| *bytes <= limits.max_snapshot_bytes)
-            .ok_or(Error::Invalid("snapshot excede orçamento de transferência"))?;
+            .ok_or(Error::Invalid("snapshot exceeds transfer budget"))?;
         quotas.add(&mutation)?;
         digest = format::snapshot_digest(digest, &raw);
-        // O corpo do frame já contém exatamente um registro AOF validado pelo codec.
+        // The frame body already contains exactly one AOF record validated by the codec.
         let record = &raw[protocol::HEADER_BYTES..];
         aof_digest = format::snapshot_digest(aof_digest, record);
         file.write_all(record)?;
@@ -162,9 +160,7 @@ async fn receive(
             digest,
         })
     {
-        return Err(Error::Invalid(
-            "cursor, contagem ou digest final divergente",
-        ));
+        return Err(Error::Invalid("divergent cursor, count, or final digest"));
     }
     let mut extra = [0u8; 1];
     if timeout(remaining(deadline)?, stream.read(&mut extra))
@@ -172,7 +168,7 @@ async fn receive(
         .map_err(|_| Error::Timeout)??
         != 0
     {
-        return Err(Error::Invalid("dados depois do FullEnd"));
+        return Err(Error::Invalid("data after FullEnd"));
     }
     file.write_all(&format::encode(
         &Record::Seal {

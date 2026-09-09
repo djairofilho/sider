@@ -1,4 +1,4 @@
-//! Backup por exportação consistente e restauração sem sobrescrever dados existentes.
+//! Backup through consistent export and restoration without overwriting existing data.
 
 mod archive;
 pub mod cli;
@@ -25,7 +25,7 @@ pub struct Limits {
     pub max_mutations: usize,
     pub max_snapshot_bytes: u64,
     pub max_dataset_bytes: usize,
-    /// Prazo total de transferência, incluindo conexão, cabeçalhos e EOF.
+    /// Total transfer timeout, including connection, headers, and EOF.
     pub timeout: Duration,
 }
 
@@ -54,7 +54,7 @@ impl Limits {
                 .checked_add(self.timeout)
                 .is_none()
         {
-            return Err(Error::Invalid("limites de backup"));
+            return Err(Error::Invalid("backup limits"));
         }
         Ok(())
     }
@@ -84,20 +84,20 @@ pub struct RestoreOptions {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("backup inválido: {0}")]
+    #[error("invalid backup: {0}")]
     Invalid(&'static str),
-    #[error("I/O de backup: {0}")]
+    #[error("backup I/O: {0}")]
     Io(#[from] std::io::Error),
-    #[error("formato de backup: {0}")]
+    #[error("backup format: {0}")]
     Format(#[from] format::FormatError),
-    #[error("transporte de backup: {0}")]
+    #[error("backup transport: {0}")]
     Transport(#[from] crate::replication::protocol::Error),
-    #[error("manifesto de backup inválido")]
+    #[error("invalid backup manifest")]
     Manifest(#[from] serde_json::Error),
-    #[error("persistência de backup: {0}")]
+    #[error("backup persistence: {0}")]
     Persistence(#[from] super::AofError),
-    #[error("configuração de backup: {0}")]
+    #[error("backup configuration: {0}")]
     Configuration(#[from] crate::ConfigError),
-    #[error("prazo total do backup excedido")]
+    #[error("total backup timeout exceeded")]
     Timeout,
 }

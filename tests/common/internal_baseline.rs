@@ -1,4 +1,4 @@
-//! Congelamento R10 e migração da candidata, com originais somente para leitura.
+//! R10 baseline freezing and candidate migration, with read-only originals.
 
 use super::baseline_manifest as manifest;
 #[path = "baseline_package.rs"]
@@ -15,15 +15,15 @@ use manifest::Result;
 use serde_json::{Value, json};
 
 fn absolute(name: &str) -> Result<PathBuf> {
-    let path = PathBuf::from(std::env::var_os(name).ok_or_else(|| format!("{name} ausente"))?);
+    let path = PathBuf::from(std::env::var_os(name).ok_or_else(|| format!("missing {name}"))?);
     if !path.is_absolute() {
-        return Err(format!("{name} precisa de caminho absoluto"));
+        return Err(format!("{name} requires an absolute path"));
     }
     Ok(path)
 }
 fn number(name: &str, default: u64) -> Result<u64> {
     std::env::var(name).ok().map_or(Ok(default), |value| {
-        value.parse().map_err(|_| format!("{name} inválido"))
+        value.parse().map_err(|_| format!("invalid {name}"))
     })
 }
 fn source_root() -> PathBuf {
@@ -70,7 +70,7 @@ fn write_manifest(path: &Path, value: &Value) -> Result<String> {
 
 pub fn freeze_from_env() -> Result<Value> {
     if env!("CARGO_PKG_VERSION") != "0.1.0" {
-        return Err("baseline R10 exige pacote interno0.1.0".into());
+        return Err("R10 baseline requires internal package 0.1.0".into());
     }
     let root = source_root();
     let identity = package::identities(&root)?;
@@ -78,11 +78,11 @@ pub fn freeze_from_env() -> Result<Value> {
     let output = absolute("SIDER_INTERNAL_BASELINE_DIR")?;
     let long_ms = number("SIDER_BASELINE_LONG_TTL_MS", 7 * 24 * 60 * 60 * 1000)?;
     if !(24 * 60 * 60 * 1000..=365 * 24 * 60 * 60 * 1000).contains(&long_ms) {
-        return Err("TTL longo deve ficar entre1 e365dias".into());
+        return Err("long TTL must be between 1 and 365 days".into());
     }
     let result = freeze(&root, &input, &output, &identity, long_ms, 60_000)?;
     if package::identities(&root)? != identity {
-        return Err("checkout ou toolchain mudou durante congelamento".into());
+        return Err("checkout or toolchain changed during freeze".into());
     }
     Ok(result)
 }
@@ -142,7 +142,7 @@ fn freeze(
             || aof["sequence"] != status["sequence"]
             || aof["role"] != status["role"]
         {
-            return Err("estado AOF diverge do status confirmado antes da parada".into());
+            return Err("AOF state differs from status confirmed before shutdown".into());
         }
         if deadlines
             .iter()
@@ -151,7 +151,7 @@ fn freeze(
                 value["unix_ms"].as_i64().unwrap() <= stopped["stopped_unix_ms"].as_i64().unwrap()
             })
         {
-            return Err("TTL curto expirou antes de concluir a parada".into());
+            return Err("short TTL expired before shutdown completed".into());
         }
         let scratch = scenario::Scratch::new()?;
         scenario::backup_action(
@@ -164,7 +164,7 @@ fn freeze(
         let mut restored =
             scenario::Node::start(&package, &scratch.0.join("restored"), shards, None)?;
         if scenario::check_state(&restored, &tags)?.1 != expected {
-            return Err("restauração R10 diverge".into());
+            return Err("R10 restore mismatch".into());
         }
         restored.stop()?;
         scenarios.push(json!({
@@ -176,7 +176,7 @@ fn freeze(
     }
     input.verify(identity, "0.1.0")?;
     if package::identities(root)? != *identity {
-        return Err("checkout ou toolchain mudou antes de salvar a baseline".into());
+        return Err("checkout or toolchain changed before saving the baseline".into());
     }
     let value = json!({"schema_version":1,"task":"R10","source_sha":identity.0,"source_clean":true,"target":package::target(),"binary_version":"0.1.0","toolchain":identity.1,"created_unix_ms":scenario::now(),"package_root":"package","archive":archive_name,"provenance":"build-provenance.json","files":manifest::tree(output)?,"scenarios":scenarios});
     manifest::validate(&value, package::target())?;
@@ -190,13 +190,13 @@ fn freeze(
 pub fn migrate_from_env() -> Result<Value> {
     let baseline = absolute("SIDER_INTERNAL_BASELINE_DIR")?;
     let expected = std::env::var("SIDER_INTERNAL_BASELINE_SHA256")
-        .map_err(|_| "hash externo da baseline ausente")?;
+        .map_err(|_| "missing external baseline hash")?;
     let input = PackageInput::from_env("MIGRATION")?;
     let output = absolute("SIDER_MIGRATION_OUTPUT_DIR")?;
     let identity = package::identities(&source_root())?;
     let result = migrate(&baseline, &expected, &input, &output, &identity)?;
     if package::identities(&source_root())? != identity {
-        return Err("checkout mudou durante migração".into());
+        return Err("checkout changed during migration".into());
     }
     Ok(result)
 }
@@ -215,16 +215,16 @@ fn migrate(
         .file_type()
         .is_symlink()
     {
-        return Err("baseline não pode ser symlink".into());
+        return Err("baseline must not be a symlink".into());
     }
     let baseline = baseline.canonicalize().map_err(|error| error.to_string())?;
     let destination_parent = output
         .parent()
-        .ok_or("destino sem pai")?
+        .ok_or("destination has no parent")?
         .canonicalize()
         .map_err(|error| error.to_string())?;
     if destination_parent.starts_with(&baseline) {
-        return Err("destino não pode alterar a baseline congelada".into());
+        return Err("destination must not modify the frozen baseline".into());
     }
     let frozen = manifest::verify(&baseline, expected_hash, package::target())?;
     let old_package = baseline.join(frozen["package_root"].as_str().unwrap());
@@ -244,7 +244,10 @@ fn migrate(
             let expired = deadline["unix_ms"].as_i64().unwrap() <= scenario::now();
             let short = deadline["key"].as_str().unwrap().ends_with(":short");
             if short != expired {
-                return Err("migração exige TTL curto expirado e TTL longo ainda vivo".into());
+                return Err(
+                    "migration requires an expired short TTL and a long TTL that is still live"
+                        .into(),
+                );
             }
         }
     }
@@ -284,7 +287,7 @@ fn migrate(
         let (count, state) = scenario::check_state(&primary, &tags)?;
         comparisons += count;
         if state != frozen_case["expected_state_sha256"].as_str().unwrap() {
-            return Err("cópia migrada diverge da baseline".into());
+            return Err("migrated copy differs from the baseline".into());
         }
         scenario::check_ttl(&primary, deadlines, true)?;
         let mut replica = scenario::Node::start(
@@ -297,20 +300,20 @@ fn migrate(
         let (count, state) = scenario::check_state(&replica, &tags)?;
         comparisons += count;
         if state != frozen_case["expected_state_sha256"].as_str().unwrap() {
-            return Err("nova réplica diverge".into());
+            return Err("new replica mismatch".into());
         }
         scenario::check_ttl(&replica, deadlines, true)?;
         let key = format!("{}:new-version", tags[0]);
         if !matches!(replica.call(&[b"SET",key.as_bytes(),b"forbidden"])? ,super::wire::Response::Error(error) if error.starts_with(b"READONLY"))
         {
-            return Err("nova réplica aceitou escrita".into());
+            return Err("new replica accepted a write".into());
         }
         primary.call(&[b"SET", key.as_bytes(), b"new-version"])?;
         catch_up(&current, &primary, &replica)?;
         if replica.call(&[b"GET", key.as_bytes()])?
             != super::wire::Response::Bulk(Some(b"new-version".to_vec()))
         {
-            return Err("delta da nova versão não chegou".into());
+            return Err("delta from the new version did not arrive".into());
         }
         let candidate_backup = directory.join("candidate-backup");
         scenario::export(&current, &primary, &candidate_backup, new_sha)?;
@@ -331,7 +334,7 @@ fn migrate(
         if candidate_restored.call(&[b"GET", key.as_bytes()])?
             != super::wire::Response::Bulk(Some(b"new-version".to_vec()))
         {
-            return Err("backup novo perdeu escrita da candidata".into());
+            return Err("new backup lost a candidate write".into());
         }
         scenario::check_ttl(&candidate_restored, deadlines, true)?;
         candidate_restored.stop()?;
@@ -349,7 +352,7 @@ fn migrate(
         let (count, state) = scenario::check_state(&old_backup_new_server, &tags)?;
         comparisons += count;
         if state != frozen_case["expected_state_sha256"].as_str().unwrap() {
-            return Err("backup antigo migrado diverge".into());
+            return Err("migrated old backup differs from expected".into());
         }
         scenario::check_ttl(&old_backup_new_server, deadlines, true)?;
         old_backup_new_server.stop()?;
@@ -382,7 +385,7 @@ fn catch_up(package: &Path, primary: &scenario::Node, replica: &scenario::Node) 
             return Ok(());
         }
         if Instant::now() >= deadline {
-            return Err("nova réplica não alcançou o primário".into());
+            return Err("new replica did not catch up with the primary".into());
         }
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -402,7 +405,7 @@ fn reject_dataset(
         .collect::<Vec<_>>();
     aof.sort_unstable_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
     if corrupt {
-        let path = destination.join(aof.last().ok_or("AOF ausente")?["path"].as_str().unwrap());
+        let path = destination.join(aof.last().ok_or("missing AOF")?["path"].as_str().unwrap());
         let mut file = OpenOptions::new()
             .write(true)
             .open(path)
@@ -425,17 +428,17 @@ fn reject_dataset(
         || control.0.join("resp.json").exists()
         || control.0.join("internal.json").exists()
     {
-        return Err("dados inválidos produziram prontidão".into());
+        return Err("invalid data produced readiness".into());
     }
     if before != manifest::tree(destination)? {
-        return Err("recusa modificou dados de entrada".into());
+        return Err("rejection modified input data".into());
     }
     Ok(())
 }
 
 pub fn rehearse_from_env() -> Result<Value> {
     if env!("CARGO_PKG_VERSION") != "0.1.0" {
-        return Err("ensaio curto exige a versão interna0.1.0".into());
+        return Err("short test requires internal version 0.1.0".into());
     }
     let root = source_root();
     let identity = package::identities(&root)?;
@@ -469,7 +472,7 @@ pub fn rehearse_from_env() -> Result<Value> {
     )?;
     result["scope"] = json!("same_version_short_rehearsal_not_frozen_baseline");
     if package::identities(&root)? != identity {
-        return Err("checkout mudou durante ensaio".into());
+        return Err("checkout changed during rehearsal".into());
     }
     Ok(result)
 }

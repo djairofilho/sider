@@ -1,4 +1,4 @@
-//! Regressões dos processos descartáveis; não dependem de Docker disponível.
+//! Disposable process regressions; do not depend on Docker availability.
 
 #![forbid(unsafe_code)]
 
@@ -28,8 +28,8 @@ fn helper(mode: &str) -> Command {
     command
 }
 
-// Chamado normalmente sem efeitos, ou como filho com um modo explicitamente
-// injetado. Não há teste ignorado contado como validação desses caminhos.
+// Normally called without effects, or as a child with an explicitly
+// injected mode. No ignored test counts as validation of these paths.
 #[test]
 fn process_child() {
     let Some(mode) = std::env::var_os("SIDER_HARNESS_CHILD") else {
@@ -107,7 +107,7 @@ fn process_runner_captures_both_streams_and_preserves_failure_status() {
 fn process_runner_rejects_excessive_output_instead_of_truncated_success() {
     for mode in ["flood", "flood_stderr"] {
         let error = run(&mut helper(mode), TIMEOUT).unwrap_err();
-        assert!(error.contains("limite"), "{mode}: {error}");
+        assert!(error.contains("limit"), "{mode}: {error}");
     }
 }
 
@@ -130,7 +130,7 @@ fn deadline_fails_and_owned_child_can_be_confirmed_reaped() {
     child.assert_alive().unwrap();
     let start = Instant::now();
     let error = child.wait(Duration::from_millis(50)).unwrap_err();
-    assert!(error.contains("prazo"), "{error}");
+    assert!(error.contains("deadline"), "{error}");
     let output = child.terminate(TIMEOUT).unwrap();
     assert!(!output.status.success());
     assert!(child.assert_alive().is_err());
@@ -152,7 +152,7 @@ fn sider_rejects_wrong_binary_version_before_launching_server() {
         "not-the-package-version",
     );
     let error = result.err().expect("version mismatch must fail");
-    assert!(error.contains("versão"), "{error}");
+    assert!(error.contains("version"), "{error}");
 }
 
 #[test]

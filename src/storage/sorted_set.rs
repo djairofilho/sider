@@ -1,4 +1,4 @@
-//! Índices de membros e ordem por score/binários, atualizados como uma unidade.
+//! Member indexes and score/binary ordering, updated as one unit.
 
 use super::*;
 use crate::command::{Score, SortedSetCommand};
@@ -23,7 +23,7 @@ impl SortedSet {
         self.ordered.iter()
     }
 
-    /// Retorna se o membro foi criado e se houve alteração de estado.
+    /// Returns whether the member was created and whether state changed.
     pub fn insert(&mut self, member: Bytes, score: Score) -> (bool, bool) {
         let previous = self.members.get(&member).copied();
         if previous == Some(score) {

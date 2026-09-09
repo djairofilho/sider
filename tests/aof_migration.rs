@@ -1,4 +1,4 @@
-//! Identidade de shards e migração offline com origem legada preservada.
+//! Shard identity and offline migration with the legacy source preserved.
 #![forbid(unsafe_code)]
 
 #[path = "common/process.rs"]

@@ -1,4 +1,4 @@
-//! Contratos de strings adicionais, com parsing real e respostas RESP.
+//! Additional string contracts, with real parsing and RESP responses.
 
 #![forbid(unsafe_code)]
 

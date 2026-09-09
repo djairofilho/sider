@@ -1,10 +1,10 @@
-//! Valores tipados com snapshots compartilhados e consumo lógico por tipo.
+//! Typed values with shared snapshots and logical consumption by type.
 
 use bytes::Bytes;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
-/// Payload persistível; a entrada contém TTL e geração comuns a todos os tipos.
+/// Persistable payload; the entry holds TTL and generation shared by all types.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
     String(Bytes),
@@ -28,7 +28,7 @@ impl Value {
         }
     }
 
-    /// Bytes lógicos do payload; a taxa por chave fica no Store.
+    /// Logical payload bytes; the per-key charge belongs to the Store.
     pub fn logical_bytes(&self) -> Option<usize> {
         match self {
             Self::String(value) => Some(value.len()),

@@ -1,4 +1,4 @@
-//! Dados e operações reais sobre executáveis extraídos; nenhuma alteração global de ambiente.
+//! Real data and operations on extracted executables; no global environment changes.
 
 use std::fs::{self, File};
 use std::io::Write;
@@ -110,12 +110,12 @@ impl Node {
             if child.assert_alive().is_err() {
                 let output = child.wait(package::TIMEOUT)?;
                 return Err(format!(
-                    "servidor recusou inicialização: {}",
+                    "server refused to start: {}",
                     String::from_utf8_lossy(&output.stderr)
                 ));
             }
             if Instant::now() >= deadline {
-                return Err("prontidão excedeu prazo".into());
+                return Err("readiness exceeded the deadline".into());
             }
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -128,13 +128,13 @@ impl Node {
                 || value["pid"] != child.id()
                 || value["host"] != "127.0.0.1"
             {
-                return Err("prontidão não pertence ao filho iniciado".into());
+                return Err("readiness does not belong to the started child".into());
             }
             let port = value["port"]
                 .as_u64()
                 .and_then(|port| u16::try_from(port).ok())
                 .filter(|port| *port != 0)
-                .ok_or("porta inválida")?;
+                .ok_or("invalid port")?;
             Ok(SocketAddr::from(([127, 0, 0, 1], port)))
         };
         let address = read("resp.json")?;
@@ -173,7 +173,7 @@ impl Node {
         serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
     }
     pub fn stop(&mut self) -> Result<Value> {
-        let mut child = self.child.take().ok_or("processo já encerrado")?;
+        let mut child = self.child.take().ok_or("process already stopped")?;
         #[cfg(unix)]
         let (output, method) = {
             package::run(
@@ -186,7 +186,7 @@ impl Node {
                 || self.control.0.join("resp.json").exists()
                 || self.control.0.join("internal.json").exists()
             {
-                return Err("SIGTERM não encerrou cooperativamente".into());
+                return Err("SIGTERM did not cause cooperative shutdown".into());
             }
             (output, "sigterm")
         };
@@ -199,12 +199,12 @@ impl Node {
                 serde_json::from_slice(&fs::read(&path).map_err(|error| error.to_string())?)
                     .map_err(|error| error.to_string())?;
             if value["pid"] != child.id() {
-                return Err("prontidão deixou de pertencer ao filho".into());
+                return Err("readiness no longer belongs to the child".into());
             }
             fs::remove_file(path).map_err(|error| error.to_string())?;
         }
         if TcpStream::connect_timeout(&self.address, Duration::from_millis(100)).is_ok() {
-            return Err("listener permaneceu aberto após parada".into());
+            return Err("listener remained open after shutdown".into());
         }
         Ok(
             json!({"stopped_unix_ms":now(),"shutdown_method":method,"shutdown_exit_code":output.status.code()}),
@@ -232,7 +232,7 @@ pub fn call(stream: &mut TcpStream, args: &[&[u8]]) -> Result<Response> {
 fn expect(actual: Response, expected: Response) -> Result<()> {
     if actual != expected {
         return Err(format!(
-            "resposta divergente: esperado {expected:?}, observado {actual:?}"
+            "response mismatch: expected {expected:?}, observed {actual:?}"
         ));
     }
     Ok(())
@@ -265,7 +265,7 @@ pub fn tags(shards: u32) -> Result<Vec<String>> {
             return Ok(tags);
         }
     }
-    Err("não foi possível distribuir a fixture entre shards".into())
+    Err("could not distribute the fixture across shards".into())
 }
 
 pub fn seed(node: &Node, tags: &[String], long_ms: u64) -> Result<()> {
@@ -300,14 +300,14 @@ pub fn seed(node: &Node, tags: &[String], long_ms: u64) -> Result<()> {
             )?;
         }
         let Response::Array(Some(values)) = call(&mut connection, &[b"EXEC"])? else {
-            return Err("EXEC não retornou array".into());
+            return Err("EXEC did not return an array".into());
         };
         if values.len() != 8
             || !matches!(&values[6], Response::Error(error) if error.starts_with(b"WRONGTYPE"))
             || values[0] != Response::Simple(b"OK".to_vec())
             || values[7] != Response::Simple(b"OK".to_vec())
         {
-            return Err("EXEC não preservou erro individual e escrita posterior".into());
+            return Err("EXEC did not preserve the individual error and subsequent write".into());
         }
     }
     expect(
@@ -322,7 +322,7 @@ pub fn seed(node: &Node, tags: &[String], long_ms: u64) -> Result<()> {
     )
 }
 
-/// Semeado depois das comparações de dados, imediatamente antes do export final.
+/// Seeded after data comparisons, immediately before the final export.
 pub fn seed_short_ttl(node: &Node, tags: &[String], short_ms: u64) -> Result<()> {
     expect(
         node.call(&[
@@ -336,7 +336,7 @@ pub fn seed_short_ttl(node: &Node, tags: &[String], short_ms: u64) -> Result<()>
     )
 }
 
-/// Hash de respostas normalizadas por consultas com ordem definida, sem PTTL variável.
+/// Hash of responses normalized through ordered queries, without variable PTTL.
 pub fn check_state(node: &Node, tags: &[String]) -> Result<(u64, String)> {
     let mut hash = Sha256::new();
     let mut comparisons = 0;
@@ -377,7 +377,7 @@ pub fn check_state(node: &Node, tags: &[String]) -> Result<(u64, String)> {
                     .map(|value| value.to_vec())
                     .collect::<Vec<_>>(),
             ));
-            // A resposta esperada foi conferida; hash independente de formatação Debug.
+            // The expected response was verified; the hash is independent of Debug formatting.
             let mut stream = node.connect()?;
             stream
                 .write_all(&wire::request(
@@ -456,21 +456,21 @@ pub fn deadlines(backup: &Path) -> Result<Vec<Value>> {
                 deadlines.push(json!({"key":std::str::from_utf8(&key).map_err(|error|error.to_string())?,"unix_ms":deadline}));
             }
             format::Next::End => break,
-            format::Next::IncompleteTail => return Err("backup truncado".into()),
+            format::Next::IncompleteTail => return Err("truncated backup".into()),
             _ => {}
         }
     }
     deadlines.sort_unstable_by(|a, b| a["key"].as_str().cmp(&b["key"].as_str()));
     if deadlines.len() != 2 {
-        return Err("deadlines da fixture ausentes".into());
+        return Err("missing fixture deadlines".into());
     }
     Ok(deadlines)
 }
 
 pub fn check_ttl(node: &Node, deadlines: &[Value], short_expired: bool) -> Result<()> {
     for deadline in deadlines {
-        let key = deadline["key"].as_str().ok_or("chave TTL ausente")?;
-        let absolute = deadline["unix_ms"].as_i64().ok_or("deadline ausente")?;
+        let key = deadline["key"].as_str().ok_or("missing TTL key")?;
+        let absolute = deadline["unix_ms"].as_i64().ok_or("missing deadline")?;
         let before = now();
         let actual = node.call(&[b"PTTL", key.as_bytes()])?;
         let after = now();
@@ -479,10 +479,10 @@ pub fn check_ttl(node: &Node, deadlines: &[Value], short_expired: bool) -> Resul
             expect(node.call(&[b"GET", key.as_bytes()])?, Response::Bulk(None))?;
         } else {
             let Response::Integer(ttl) = actual else {
-                return Err("PTTL não retornou inteiro".into());
+                return Err("PTTL did not return an integer".into());
             };
             if ttl <= 0 || ttl < absolute - after - 50 || ttl > absolute - before + 50 {
-                return Err("deadline absoluto não foi preservado".into());
+                return Err("absolute deadline was not preserved".into());
             }
         }
     }
@@ -505,11 +505,11 @@ pub fn aof_metadata(directory: &Path) -> Result<Value> {
     let latest = files
         .iter()
         .rfind(|file| file["path"].as_str().unwrap().ends_with(".aof"))
-        .ok_or("geração AOF ausente")?;
+        .ok_or("missing AOF generation")?;
     let mut file = File::open(directory.join(latest["path"].as_str().unwrap()))
         .map_err(|error| error.to_string())?;
     let header = format::read_header_with_layout(&mut file).map_err(|error| error.to_string())?;
-    let role = header.replication.ok_or("papel AOF ausente")?;
+    let role = header.replication.ok_or("missing AOF role")?;
     let mut sequence = header.sequence;
     loop {
         match format::read_record(&mut file, format::Limits::default())
@@ -517,12 +517,12 @@ pub fn aof_metadata(directory: &Path) -> Result<Value> {
         {
             format::Next::Record(format::Record::Batch { sequence: next, .. }) => {
                 if sequence.checked_add(1) != Some(next) {
-                    return Err("sequência AOF descontínua".into());
+                    return Err("discontinuous AOF sequence".into());
                 }
                 sequence = next;
             }
             format::Next::End => break,
-            format::Next::IncompleteTail => return Err("AOF de origem truncada".into()),
+            format::Next::IncompleteTail => return Err("truncated source AOF".into()),
             _ => {}
         }
     }

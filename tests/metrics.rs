@@ -1,4 +1,4 @@
-//! Indicadores lidos por consumidores reais, sem payloads ou labels dinâmicos.
+//! Metrics read by real consumers, without payloads or dynamic labels.
 #![forbid(unsafe_code)]
 
 use std::{
@@ -140,7 +140,7 @@ async fn metrics_tcp_reports_admission_effective_configuration_and_private_datas
     assert_eq!(
         fields.len(),
         text.lines().filter(|line| line.contains(':')).count(),
-        "cada indicador precisa ter nome único mesmo em INFO all"
+        "each metric must have a unique name even in INFO all"
     );
     assert_eq!(fields["shards"], "4");
     assert_eq!(fields["dataset_keys"], "1");
@@ -197,7 +197,7 @@ async fn metrics_aof_reports_confirmed_sequences_and_compaction_without_io_reads
     task.await.unwrap().unwrap();
     assert!(
         !observer.snapshot().running,
-        "observador não impede encerramento"
+        "observer does not prevent shutdown"
     );
 }
 
@@ -250,7 +250,7 @@ async fn metrics_tcp_info_in_exec_reads_real_aof_without_appending_a_record() {
     assert!(text.contains("aof_records_written_total:1\r\n"));
     assert!(
         text.contains("aof_queue_capacity:32\r\n"),
-        "o escritor é global, sem multiplicar a capacidade por shard"
+        "the writer is global; capacity is not multiplied per shard"
     );
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();

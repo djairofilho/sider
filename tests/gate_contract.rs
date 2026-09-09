@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Contratos dos recibos com contexto injetado, sem modificar o ambiente ou Git.
+//! Receipt contracts with injected context, without modifying the environment or Git.
 
 #[path = "common/gate_receipt.rs"]
 mod gate_receipt;
@@ -199,7 +199,7 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        // Somente arquivos nos dois diretórios exclusivos criados por esta fixture.
+        // Only files in the two dedicated directories created by this fixture.
         if let Ok(entries) = fs::read_dir(&self.out) {
             for entry in entries.flatten() {
                 let _ = fs::remove_file(entry.path());
@@ -274,7 +274,7 @@ fn unknown_gate_rejects_path_traversal_before_observing() {
                 gate,
                 fixture.root.clone(),
                 |_| None,
-                |_| panic!("não deve observar gate desconhecido")
+                |_| panic!("must not observe an unknown gate")
             )
             .is_err()
         );
@@ -573,7 +573,7 @@ fn last_revalidation_failure_removes_temporary_without_publishing() {
         move |name| env.get(name).cloned(),
         move |_| {
             if calls.fetch_add(1, Ordering::SeqCst) >= 2 {
-                Err("checkout mudou na conferência final".into())
+                Err("checkout changed during the final check".into())
             } else {
                 Ok(observed.clone())
             }

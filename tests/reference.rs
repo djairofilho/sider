@@ -1,4 +1,4 @@
-//! Referência externa opt-in. Não declara suporte no Sider antes de R01-05.
+//! Opt-in external reference. Does not declare Sider support before R01-05.
 
 #![forbid(unsafe_code)]
 
@@ -16,8 +16,8 @@ use std::time::Duration;
 use redis_reference::RedisReference;
 use resp_fixtures::CASES;
 
-// Validação independente e deliberadamente restrita aos requests literais.
-// Não é o decoder do produto, nem gera os bytes das respostas esperadas.
+// Independent validation deliberately restricted to literal requests.
+// Neither the product decoder nor a generator of expected response bytes.
 fn literal_arguments(wire: &[u8]) -> Vec<Vec<u8>> {
     fn length(cursor: &mut Cursor<&[u8]>, marker: u8) -> usize {
         let mut line = Vec::new();
@@ -102,28 +102,25 @@ fn reference_fails_explicitly_when_docker_is_unavailable() {
         ])
         .env("PATH", "")
         .output()
-        .expect("executar teste filho sem Docker no PATH");
-    assert!(
-        !output.status.success(),
-        "referência ausente não pode passar"
-    );
+        .expect("run child test without Docker in PATH");
+    assert!(!output.status.success(), "missing reference must not pass");
     let error = String::from_utf8_lossy(&output.stderr);
-    assert!(error.contains("Docker indisponível"), "{error}");
+    assert!(error.contains("Docker unavailable"), "{error}");
 }
 
 fn exchange(stream: &mut TcpStream, request: &[u8], expected: &[u8], context: &str) {
-    stream.write_all(request).expect("escrita da fixture");
+    stream.write_all(request).expect("fixture write");
     let mut actual = vec![0; expected.len()];
     stream.read_exact(&mut actual).expect(context);
     assert_eq!(actual, expected, "{context}");
 }
 
 #[test]
-#[ignore = "requer Docker ativo e pull da imagem fixada; execute com --ignored --nocapture"]
+#[ignore = "requires running Docker and pulling the pinned image; run with --ignored --nocapture"]
 fn redis_8_10_1_matches_literal_fixtures() {
     let reference = RedisReference::start();
     let mut stream = TcpStream::connect_timeout(&reference.address(), Duration::from_secs(5))
-        .expect("conexão com Redis descartável");
+        .expect("connection to disposable Redis");
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
@@ -143,7 +140,7 @@ fn redis_8_10_1_matches_literal_fixtures() {
             );
             exchanges += 1;
         }
-        // Repete o caso como pipeline sem usar encoder ou decoder do Sider.
+        // Repeats the case as a pipeline without using the Sider encoder or decoder.
         let request: Vec<u8> = case
             .exchanges
             .iter()
@@ -161,11 +158,11 @@ fn redis_8_10_1_matches_literal_fixtures() {
             &mut stream,
             b"*1\r\n$4\r\nPING\r\n",
             b"+PONG\r\n",
-            "sentinela após pipeline",
+            "sentinel after pipeline",
         );
     }
 
-    // Evidência separada da CLI. A saída textual não é o oráculo binário.
+    // Separate CLI evidence. Text output is not the binary oracle.
     assert_eq!(reference.cli(&["PING"]), b"PONG\n");
     assert_eq!(reference.cli(&["ECHO", "hello"]), b"hello\n");
     assert_eq!(reference.cli(&["SET", "cli-key", "value"]), b"OK\n");
@@ -174,14 +171,14 @@ fn redis_8_10_1_matches_literal_fixtures() {
     stream.shutdown(Shutdown::Write).unwrap();
     let mut trailing = [0; 1];
     assert_eq!(
-        stream.read(&mut trailing).expect("EOF após half-close"),
+        stream.read(&mut trailing).expect("EOF after half-close"),
         0,
-        "bytes excedentes após a última resposta: {trailing:?}"
+        "extra bytes after the last response: {trailing:?}"
     );
     drop(stream);
     reference.finish();
     println!(
-        "Referência aprovada: {} casos, {exchanges} trocas sequenciais, {} pipelines, cinco comandos via CLI. Sider ainda não comparado.",
+        "Reference passed: {} cases, {exchanges} sequential exchanges, {} pipelines, five commands through the CLI. Sider has not yet been compared.",
         CASES.len(),
         CASES.len()
     );

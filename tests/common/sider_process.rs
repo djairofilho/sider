@@ -1,7 +1,7 @@
-//! Binário Sider descartável, validado por versão, PID, prontidão e PING literal.
+//! Disposable Sider binary, validated by version, PID, readiness, and literal PING.
 
 #![forbid(unsafe_code)]
-// Os consumidores de gates e de integração usam subconjuntos desta API.
+// Gate and integration consumers use subsets of this API.
 #![allow(dead_code)]
 
 use std::ffi::OsString;
@@ -28,14 +28,14 @@ pub struct SiderProcess {
 impl SiderProcess {
     pub fn start(binary: &Path, expected_version: &str) -> Self {
         Self::try_start(binary, expected_version)
-            .unwrap_or_else(|e| panic!("iniciar Sider descartável: {e}"))
+            .unwrap_or_else(|e| panic!("start disposable Sider: {e}"))
     }
 
     pub fn try_start(binary: &Path, expected_version: &str) -> Result<Self, String> {
         Self::try_start_configured(binary, expected_version, &[])
     }
 
-    /// Configuração injetada no filho; nunca altera o ambiente global dos testes.
+    /// Configuration injected into the child; never changes the global test environment.
     pub fn try_start_configured(
         binary: &Path,
         expected_version: &str,
@@ -46,7 +46,7 @@ impl SiderProcess {
             || version.stdout != format!("sider {expected_version}\n").as_bytes()
         {
             return Err(format!(
-                "versão do binário divergente: status={} stdout={:?}",
+                "binary version mismatch: status={} stdout={:?}",
                 version.status,
                 String::from_utf8_lossy(&version.stdout)
             ));
@@ -55,7 +55,7 @@ impl SiderProcess {
         let mut command = sider(binary);
         for (name, value) in overrides {
             if !name.starts_with("SIDER_") || matches!(*name, "SIDER_ADDR" | "SIDER_READY_FILE") {
-                return Err("override de teste inválido".into());
+                return Err("invalid test override".into());
             }
             command.env(name, value);
         }
@@ -68,7 +68,7 @@ impl SiderProcess {
         let address = await_readiness(&mut child, &directory.ready())?;
         child.assert_alive()?;
         eprintln!(
-            "Sider descartável: version={expected_version} pid={} address={address}",
+            "Disposable Sider: version={expected_version} pid={} address={address}",
             child.id()
         );
         Ok(Self {
@@ -89,19 +89,19 @@ impl SiderProcess {
     pub fn assert_alive(&mut self) {
         self.child
             .assert_alive()
-            .expect("Sider deve permanecer ativo");
+            .expect("Sider must remain running");
     }
 
     pub fn finish(mut self) {
         let pid = self.child.id();
         self.child
             .terminate(TIMEOUT)
-            .expect("recolher Sider descartável");
+            .expect("reap disposable Sider");
         self.directory
             .cleanup(Some(pid))
-            .expect("remover arquivos próprios do Sider");
-        assert!(!self.directory.0.exists(), "diretório Sider removido");
-        eprintln!("processo Sider recolhido: {pid}");
+            .expect("remove Sider-owned files");
+        assert!(!self.directory.0.exists(), "Sider directory removed");
+        eprintln!("Sider process reaped: {pid}");
     }
 }
 
@@ -139,10 +139,10 @@ impl Directory {
             match fs::create_dir(&path) {
                 Ok(()) => return Ok(Self(path, None)),
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(e) => return Err(format!("criar diretório Sider exclusivo: {e}")),
+                Err(e) => return Err(format!("create a dedicated Sider directory: {e}")),
             }
         }
-        Err("não foi possível reservar diretório Sider exclusivo".into())
+        Err("could not reserve a dedicated Sider directory".into())
     }
 
     fn ready(&self) -> PathBuf {
@@ -178,27 +178,27 @@ fn remove_if_present(path: &Path) -> io::Result<()> {
 
 fn parse_readiness(bytes: &[u8], pid: u32) -> Result<SocketAddr, String> {
     if bytes.len() as u64 > READY_LIMIT {
-        return Err("prontidão excedeu limite de bytes".into());
+        return Err("readiness exceeded the byte limit".into());
     }
     let value: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|e| format!("JSON de prontidão inválido: {e}"))?;
+        serde_json::from_slice(bytes).map_err(|e| format!("invalid readiness JSON: {e}"))?;
     if value.as_object().is_none_or(|o| o.len() != 3)
         || value["pid"].as_u64() != Some(u64::from(pid))
     {
-        return Err("prontidão não identifica exclusivamente o PID esperado".into());
+        return Err("readiness does not uniquely identify the expected PID".into());
     }
     let ip: IpAddr = value["host"]
         .as_str()
-        .ok_or("host de prontidão ausente")?
+        .ok_or("missing readiness host")?
         .parse()
-        .map_err(|_| "host de prontidão não é IP literal")?;
+        .map_err(|_| "readiness host is not an IP literal")?;
     let port = value["port"]
         .as_u64()
         .and_then(|n| u16::try_from(n).ok())
         .filter(|p| *p != 0)
-        .ok_or("porta de prontidão inválida")?;
+        .ok_or("invalid readiness port")?;
     if ip != IpAddr::from([127, 0, 0, 1]) {
-        return Err("prontidão deve usar 127.0.0.1".into());
+        return Err("readiness must use 127.0.0.1".into());
     }
     Ok(SocketAddr::new(ip, port))
 }
@@ -212,10 +212,10 @@ fn await_readiness(child: &mut OwnedChild, path: &Path) -> Result<SocketAddr, St
                 let mut bytes = Vec::new();
                 file.take(READY_LIMIT + 1)
                     .read_to_end(&mut bytes)
-                    .map_err(|e| format!("ler prontidão: {e}"))?;
+                    .map_err(|e| format!("read readiness: {e}"))?;
                 let address = parse_readiness(&bytes, child.id())?;
                 let mut stream = TcpStream::connect_timeout(&address, remaining(deadline)?)
-                    .map_err(|e| format!("conectar ao Sider pronto: {e}"))?;
+                    .map_err(|e| format!("connect to ready Sider: {e}"))?;
                 let mut request = b"*1\r\n$4\r\nPING\r\n".as_slice();
                 while !request.is_empty() {
                     stream
@@ -223,9 +223,9 @@ fn await_readiness(child: &mut OwnedChild, path: &Path) -> Result<SocketAddr, St
                         .map_err(|e| e.to_string())?;
                     let count = stream
                         .write(request)
-                        .map_err(|e| format!("PING de prontidão: {e}"))?;
+                        .map_err(|e| format!("readiness PING: {e}"))?;
                     if count == 0 {
-                        return Err("escrita de PING interrompida".into());
+                        return Err("PING write interrupted".into());
                     }
                     request = &request[count..];
                 }
@@ -237,19 +237,19 @@ fn await_readiness(child: &mut OwnedChild, path: &Path) -> Result<SocketAddr, St
                         .map_err(|e| e.to_string())?;
                     let count = stream
                         .read(&mut response[offset..])
-                        .map_err(|e| format!("PONG de prontidão: {e}"))?;
+                        .map_err(|e| format!("readiness PONG: {e}"))?;
                     if count == 0 {
-                        return Err("Sider fechou antes de PONG completo".into());
+                        return Err("Sider closed before a complete PONG".into());
                     }
                     offset += count;
                 }
                 if &response != b"+PONG\r\n" {
-                    return Err("PONG de prontidão divergente".into());
+                    return Err("readiness PONG mismatch".into());
                 }
                 return Ok(address);
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("abrir prontidão: {e}")),
+            Err(e) => return Err(format!("open readiness: {e}")),
         }
         let remaining = remaining(deadline)?;
         std::thread::sleep(Duration::from_millis(10).min(remaining));
@@ -260,7 +260,7 @@ fn remaining(deadline: Instant) -> Result<Duration, String> {
     deadline
         .checked_duration_since(Instant::now())
         .filter(|d| !d.is_zero())
-        .ok_or_else(|| "Sider excedeu prazo de prontidão".into())
+        .ok_or_else(|| "Sider exceeded the readiness deadline".into())
 }
 
 #[cfg(test)]

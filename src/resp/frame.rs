@@ -1,18 +1,18 @@
-//! Os cinco tipos RESP2. Todos os payloads preservam bytes, sem exigir UTF-8.
+//! The five RESP2 types. All payloads retain bytes without requiring UTF-8.
 
 use bytes::Bytes;
 
-/// Um frame de protocolo, ainda sem validação como comando executável.
+/// A protocol frame, not yet validated as an executable command.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Frame {
-    /// Simple string; não pode conter CR ou LF.
+    /// Simple string; cannot contain CR or LF.
     Simple(Bytes),
-    /// Erro de protocolo/aplicação; não pode conter CR ou LF.
+    /// Protocol/application error; cannot contain CR or LF.
     Error(Bytes),
-    /// Inteiro decimal assinado de 64 bits.
+    /// Signed 64-bit decimal integer.
     Integer(i64),
-    /// Bulk binário; `None` é nulo, diferente de um payload vazio.
+    /// Binary bulk; `None` is null, unlike an empty payload.
     Bulk(Option<Bytes>),
-    /// Array heterogêneo; `None` é nulo, diferente de um array vazio.
+    /// Heterogeneous array; `None` is null, unlike an empty array.
     Array(Option<Vec<Frame>>),
 }

@@ -1,4 +1,4 @@
-//! Preparação de um EXEC inteiro sobre as chaves tocadas, com relógio congelado.
+//! Preparation of a whole EXEC over touched keys, with a frozen clock.
 
 use super::*;
 
@@ -16,8 +16,8 @@ impl Clock for TransactionClock {
 }
 
 impl Store {
-    /// Resolve o lote sem alterar o Store real. Erros individuais não interrompem os demais comandos.
-    /// Todas as pós-imagens formam um único registro, incluindo tombstones de criações desfeitas no lote.
+    /// Resolves the batch without changing the real Store. Individual errors do not interrupt other commands.
+    /// All post-images form one record, including tombstones from creations undone in the batch.
     pub fn prepare_batch(&self, commands: Vec<Command>) -> Prepared {
         let mut keys = BTreeSet::new();
         for command in &commands {
@@ -33,7 +33,7 @@ impl Store {
                 unix_ms: self.clock.unix_millis(),
             }),
         )
-        .expect("configuração já validada");
+        .expect("configuration already validated");
         shadow.used_bytes = self.used_bytes;
         shadow.generation = self.generation;
         for key in &keys {
@@ -46,9 +46,9 @@ impl Store {
                 }
             }
         }
-        // O trace usa o mesmo hook das escritas reais, mas registro separado do Store original.
+        // The trace uses the same hook as real writes, but records separately from the original Store.
         let trace = shadow.watch(keys.iter().cloned().collect());
-        // UNWATCH em MULTI só executa depois da verificação inicial das observações.
+        // UNWATCH in MULTI runs only after the initial observation check.
         let replies = commands
             .into_iter()
             .map(|command| match command {
@@ -146,7 +146,7 @@ mod tests {
             }
             assert!(!store.watches_valid(&watched));
             drop(watched);
-            // Nova observação começa depois de limpar o tombstone expirado.
+            // A new observation starts after clearing the expired tombstone.
             store.execute(Command::Get {
                 key: Bytes::from_static(b"k"),
             });

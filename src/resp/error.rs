@@ -1,36 +1,36 @@
-//! Erros de framing não carregam chaves nem valores do cliente.
+//! Framing errors do not carry client keys or values.
 
 use thiserror::Error;
 
 use crate::ConfigError;
 
-/// Falha terminal do decoder; o chamador deve descartar a conexão/decoder.
+/// Terminal decoder failure; the caller must discard the connection/decoder.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ProtocolError {
-    /// Sintaxe RESP2 inválida.
-    #[error("RESP inválido: {0}")]
+    /// Invalid RESP2 syntax.
+    #[error("invalid RESP: {0}")]
     Malformed(&'static str),
-    /// Frame excede um orçamento configurado.
-    #[error("limite RESP excedido: {0}")]
+    /// Frame exceeds a configured budget.
+    #[error("RESP limit exceeded: {0}")]
     LimitExceeded(&'static str),
-    /// O buffer foi reduzido enquanto um frame estava incompleto.
-    #[error("buffer RESP alterado durante decodificação incompleta")]
+    /// The buffer was shortened while a frame was incomplete.
+    #[error("RESP buffer changed during incomplete decoding")]
     BufferChanged,
-    /// O decoder já retornou erro e não pode recuperar sincronização.
-    #[error("decoder RESP já encerrado por erro")]
+    /// The decoder has already failed and cannot recover synchronization.
+    #[error("RESP decoder already terminated by an error")]
     Poisoned,
 }
 
-/// O encoder valida tudo antes de alterar a saída.
+/// The encoder validates everything before changing the output.
 #[derive(Debug, Error)]
 pub enum EncodeError {
-    /// Conteúdo inválido para seu tipo RESP2.
-    #[error("frame RESP inválido: {0}")]
+    /// Content invalid for its RESP2 type.
+    #[error("invalid RESP frame: {0}")]
     InvalidFrame(&'static str),
-    /// Frame excede um orçamento configurado.
-    #[error("limite RESP excedido: {0}")]
+    /// Frame exceeds a configured budget.
+    #[error("RESP limit exceeded: {0}")]
     LimitExceeded(&'static str),
-    /// Configuração precisa ser válida mesmo para um frame pequeno.
+    /// Configuration must be valid even for a small frame.
     #[error(transparent)]
     InvalidLimits(#[from] ConfigError),
 }

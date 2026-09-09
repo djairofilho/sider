@@ -1,4 +1,4 @@
-//! Oráculo RESP2 pequeno e limitado, sem importar o codec do produto.
+//! Small, bounded RESP2 oracle that does not import the product codec.
 
 use std::io::{self, Read, Write};
 
@@ -22,7 +22,7 @@ pub struct Observed {
     pub bytes: Vec<u8>,
 }
 
-/// Codifica somente requisições de arrays de bulk strings, independentemente do Sider.
+/// Encodes only arrays of bulk strings as requests, independently of Sider.
 pub fn request(args: &[Vec<u8>]) -> Vec<u8> {
     let mut wire = Vec::new();
     write!(&mut wire, "*{}\r\n", args.len()).unwrap();
@@ -47,7 +47,7 @@ fn invalid(reason: &'static str) -> io::Error {
 
 fn take(reader: &mut impl Read, wire: &mut Vec<u8>, count: usize) -> io::Result<Vec<u8>> {
     if count > MAX_BYTES - wire.len() {
-        return Err(invalid("resposta excede o orçamento de bytes"));
+        return Err(invalid("response exceeds the byte budget"));
     }
     let mut bytes = vec![0; count];
     reader.read_exact(&mut bytes)?;
@@ -59,17 +59,17 @@ fn line(reader: &mut impl Read, wire: &mut Vec<u8>) -> io::Result<Vec<u8>> {
     let mut result = Vec::new();
     loop {
         if result.len() >= MAX_LINE {
-            return Err(invalid("linha RESP excede o limite"));
+            return Err(invalid("RESP line exceeds the limit"));
         }
         let byte = take(reader, wire, 1)?[0];
         match byte {
             b'\r' => {
                 if take(reader, wire, 1)? != b"\n" {
-                    return Err(invalid("CR não seguido de LF"));
+                    return Err(invalid("CR not followed by LF"));
                 }
                 return Ok(result);
             }
-            b'\n' => return Err(invalid("LF sem CR")),
+            b'\n' => return Err(invalid("LF without CR")),
             _ => result.push(byte),
         }
     }
@@ -78,12 +78,12 @@ fn line(reader: &mut impl Read, wire: &mut Vec<u8>) -> io::Result<Vec<u8>> {
 fn integer(bytes: &[u8]) -> io::Result<i64> {
     let digits = bytes.strip_prefix(b"-").unwrap_or(bytes);
     if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return Err(invalid("inteiro RESP inválido"));
+        return Err(invalid("invalid RESP integer"));
     }
     std::str::from_utf8(bytes)
         .ok()
         .and_then(|text| text.parse().ok())
-        .ok_or_else(|| invalid("overflow de inteiro RESP"))
+        .ok_or_else(|| invalid("RESP integer overflow"))
 }
 
 fn read_value(
@@ -94,7 +94,7 @@ fn read_value(
 ) -> io::Result<Response> {
     *nodes += 1;
     if *nodes > MAX_NODES {
-        return Err(invalid("resposta excede o orçamento de nós"));
+        return Err(invalid("response exceeds the node budget"));
     }
     let marker = take(reader, wire, 1)?[0];
     let header = line(reader, wire)?;
@@ -112,19 +112,19 @@ fn read_value(
                 });
             }
             let length = usize::try_from(length)
-                .map_err(|_| invalid("comprimento RESP negativo ou grande demais"))?;
+                .map_err(|_| invalid("negative or excessively large RESP length"))?;
             if marker == b'$' {
                 if length > MAX_BYTES - wire.len() || MAX_BYTES - wire.len() - length < 2 {
-                    return Err(invalid("bulk excede o orçamento de bytes"));
+                    return Err(invalid("bulk exceeds the byte budget"));
                 }
                 let payload = take(reader, wire, length)?;
                 if take(reader, wire, 2)? != b"\r\n" {
-                    return Err(invalid("terminador bulk inválido"));
+                    return Err(invalid("invalid bulk terminator"));
                 }
                 Ok(Response::Bulk(Some(payload)))
             } else {
                 if depth >= MAX_DEPTH || length > MAX_NODES - *nodes {
-                    return Err(invalid("array excede os limites de profundidade/nós"));
+                    return Err(invalid("array exceeds the depth/node limits"));
                 }
                 let mut values = Vec::new();
                 for _ in 0..length {
@@ -133,7 +133,7 @@ fn read_value(
                 Ok(Response::Array(Some(values)))
             }
         }
-        _ => Err(invalid("prefixo RESP desconhecido")),
+        _ => Err(invalid("unknown RESP prefix")),
     }
 }
 

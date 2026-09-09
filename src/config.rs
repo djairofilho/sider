@@ -1,4 +1,4 @@
-//! Configuração de rede, codec e worker, validada sem alterar o ambiente.
+//! Network, codec, and worker configuration, validated without changing the environment.
 
 use std::ffi::OsString;
 use std::net::SocketAddr;
@@ -9,52 +9,52 @@ use std::time::{Duration, Instant};
 use crate::ConfigError;
 use crate::resp::RespLimits;
 
-/// Configuração do servidor TCP e dos recursos limitados de cada conexão.
+/// Configuration for the TCP server and each connection's bounded resources.
 ///
-/// Campos públicos permitem configurar testes sem ambiente global. Quem constrói
-/// a estrutura diretamente deve chamar [`Self::validate`] antes de usar os limites.
-/// Limites de rede não representam uma quota do dataset ou do RSS do processo.
+/// Public fields allow tests to configure it without the global environment. Callers
+/// constructing this structure directly must call [`Self::validate`] before using its limits.
+/// Network limits do not represent a dataset quota or the process RSS.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerConfig {
-    /// IP literal e porta; o padrão mantém o serviço em loopback.
+    /// Literal IP address and port; the default keeps the service on loopback.
     pub bind_addr: SocketAddr,
-    /// Orçamento individual de cada frame recebido.
+    /// Per-frame budget for each received frame.
     pub resp_limits: RespLimits,
-    /// Conexões simultâneas admitidas; excedentes não criam tarefas persistentes.
+    /// Allowed concurrent connections; excess connections create no persistent tasks.
     pub max_connections: usize,
-    /// Quantidade de comandos aceitos que podem aguardar na fila do worker.
+    /// Number of accepted commands that can wait in the worker queue.
     pub worker_queue_capacity: usize,
-    /// Quantidade fixa de workers proprietários; não admite resharding online.
+    /// Fixed number of owner workers; online resharding is not supported.
     pub shards: usize,
-    /// Quantidade máxima de canais distintos por assinante Pub/Sub.
+    /// Maximum number of distinct channels per Pub/Sub subscriber.
     pub pubsub_max_channels: usize,
-    /// Notificações pendentes por assinante; lotação encerra a conexão.
+    /// Pending notifications per subscriber; saturation closes the connection.
     pub pubsub_queue_capacity: usize,
-    /// Comandos retidos por conexão entre MULTI e EXEC/DISCARD.
+    /// Commands retained per connection between MULTI and EXEC/DISCARD.
     pub transaction_max_commands: usize,
-    /// Soma dos bytes RESP dos comandos retidos na fila transacional.
+    /// Sum of RESP bytes in commands retained in the transaction queue.
     pub transaction_max_bytes: usize,
-    /// Chaves distintas observadas por conexão.
+    /// Distinct keys watched per connection.
     pub watch_max_keys: usize,
-    /// Bytes não consumidos que uma conexão pode manter no buffer de entrada.
+    /// Unconsumed bytes that a connection can retain in its input buffer.
     pub max_input_buffer_bytes: usize,
-    /// Bytes de uma resposta completa, incluindo framing.
+    /// Bytes in a complete reply, including framing.
     pub max_response_bytes: usize,
-    /// Bytes lógicos do dataset, incluindo a taxa fixa por entrada, sem eviction.
+    /// Logical dataset bytes, including the fixed charge per entry, without eviction.
     pub max_dataset_bytes: usize,
-    /// Prazo de formação do frame, contado desde seu primeiro byte.
+    /// Frame-formation timeout, measured from its first byte.
     pub frame_timeout: Duration,
-    /// Prazo total para enviar ao worker e receber sua resposta.
+    /// Total timeout to send to the worker and receive its reply.
     pub request_timeout: Duration,
-    /// Prazo para escrever uma resposta completa.
+    /// Timeout to write a complete reply.
     pub write_timeout: Duration,
-    /// Prazo de drenagem após o sinal de encerramento.
+    /// Drain timeout after the shutdown signal.
     pub shutdown_timeout: Duration,
-    /// Caminho nativo opcional para o registro de prontidão do binário.
+    /// Optional native path for the binary's readiness record.
     pub ready_file: Option<PathBuf>,
-    /// Persistência opcional; ausência mantém o modo em memória.
+    /// Optional persistence; absence keeps in-memory mode.
     pub aof: Option<crate::persistence::AofConfig>,
-    /// Listener Sider interno; configuração exige AOF nos dois lados.
+    /// Internal Sider listener; configuration requires AOF on both sides.
     pub replication: Option<crate::replication::config::Config>,
 }
 
@@ -86,8 +86,8 @@ impl Default for ServerConfig {
 }
 
 impl ServerConfig {
-    /// Versão e configuração efetiva sem caminhos, valores de ambiente ou I/O.
-    /// Não testa prontidão, acesso ao disco nem recuperação do banco.
+    /// Version and effective configuration without paths, environment values, or I/O.
+    /// Does not test readiness, disk access, or database recovery.
     pub fn diagnostic(&self) -> String {
         format!(
             "sider_version:{}\r\ndiagnostic_scope:configuration_only\r\nbind_addr:{}\r\n{}",
@@ -96,16 +96,16 @@ impl ServerConfig {
             crate::metrics::configuration(self)
         )
     }
-    /// Lê as variáveis `SIDER_*` do ambiente sem modificá-lo.
+    /// Reads `SIDER_*` variables from the environment without changing it.
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::from_lookup(|name| std::env::var_os(name))
     }
 
-    /// Interpreta e valida opções a partir de uma fonte de valores injetável.
+    /// Parses and validates options from an injectable value source.
     ///
-    /// Ausência usa o padrão. Endereço e números rejeitam espaços extras; números
-    /// aceitam somente dígitos ASCII, sem sinal, e os prazos usam milissegundos.
-    /// `SIDER_READY_FILE` preserva o caminho nativo, inclusive fora de UTF-8.
+    /// Absence uses the default. Addresses and numbers reject extra whitespace; numbers
+    /// accept only unsigned ASCII digits, and timeouts use milliseconds.
+    /// `SIDER_READY_FILE` retains the native path, including non-UTF-8 paths.
     pub fn from_lookup(
         mut lookup: impl FnMut(&str) -> Option<OsString>,
     ) -> Result<Self, ConfigError> {
@@ -172,7 +172,7 @@ impl ServerConfig {
                     }
                     _ => {
                         return Err(ConfigError::InvalidServerLimits {
-                            reason: "SIDER_AOF_SYNC aceita always ou everysec",
+                            reason: "SIDER_AOF_SYNC accepts always or everysec",
                         });
                     }
                 };
@@ -188,15 +188,15 @@ impl ServerConfig {
         Ok(config)
     }
 
-    /// Recusa limites nulos, relações incoerentes e valores técnicos inseguros.
+    /// Rejects zero limits, inconsistent relationships, and unsafe technical values.
     ///
-    /// A resposta deve comportar mensagens internas curtas (128 bytes) e o maior
-    /// bulk configurado com seu framing. Limites de linha de entrada não limitam
-    /// mensagens internas de saída. A porta zero continua válida para bind efêmero.
+    /// The reply must fit short internal messages (128 bytes) and the largest configured
+    /// bulk with its framing. Input-line limits do not limit internal output messages.
+    /// Port zero remains valid for an ephemeral bind.
     pub fn validate(&self) -> Result<(), ConfigError> {
         if let Some(replication) = &self.replication {
             let aof = self.aof.as_ref().ok_or(ConfigError::InvalidServerLimits {
-                reason: "replicação exige SIDER_AOF_DIR",
+                reason: "replication requires SIDER_AOF_DIR",
             })?;
             replication.validate(aof)?;
         }
@@ -204,7 +204,7 @@ impl ServerConfig {
             aof.validate()?;
             if aof.layout.shard_count as usize != self.shards {
                 return Err(ConfigError::InvalidServerLimits {
-                    reason: "quantidade de shards do AOF difere do servidor",
+                    reason: "AOF shard count differs from the server",
                 });
             }
         }
@@ -217,45 +217,45 @@ impl ServerConfig {
         let invalid = |reason| ConfigError::InvalidServerLimits { reason };
         if self.max_dataset_bytes < self.shards {
             return Err(invalid(
-                "a quota total precisa reservar ao menos um byte por shard",
+                "the total quota must reserve at least one byte per shard",
             ));
         }
         for (value, reason) in [
             (
                 self.transaction_max_commands,
-                "transaction_max_commands precisa ser maior que zero",
+                "transaction_max_commands must be greater than zero",
             ),
             (
                 self.transaction_max_bytes,
-                "transaction_max_bytes precisa ser maior que zero",
+                "transaction_max_bytes must be greater than zero",
             ),
             (
                 self.watch_max_keys,
-                "watch_max_keys precisa ser maior que zero",
+                "watch_max_keys must be greater than zero",
             ),
             (
                 self.pubsub_max_channels,
-                "pubsub_max_channels precisa ser maior que zero",
+                "pubsub_max_channels must be greater than zero",
             ),
             (
                 self.pubsub_queue_capacity,
-                "pubsub_queue_capacity precisa ser maior que zero",
+                "pubsub_queue_capacity must be greater than zero",
             ),
             (
                 self.max_connections,
-                "SIDER_MAX_CONNECTIONS (max_connections) precisa ser maior que zero",
+                "SIDER_MAX_CONNECTIONS (max_connections) must be greater than zero",
             ),
             (
                 self.worker_queue_capacity,
-                "SIDER_WORKER_QUEUE_CAPACITY (worker_queue_capacity) precisa ser maior que zero",
+                "SIDER_WORKER_QUEUE_CAPACITY (worker_queue_capacity) must be greater than zero",
             ),
             (
                 self.max_input_buffer_bytes,
-                "SIDER_MAX_INPUT_BUFFER_BYTES (max_input_buffer_bytes) precisa ser maior que zero",
+                "SIDER_MAX_INPUT_BUFFER_BYTES (max_input_buffer_bytes) must be greater than zero",
             ),
             (
                 self.max_response_bytes,
-                "SIDER_MAX_RESPONSE_BYTES (max_response_bytes) precisa ser maior que zero",
+                "SIDER_MAX_RESPONSE_BYTES (max_response_bytes) must be greater than zero",
             ),
         ] {
             if value == 0 {
@@ -270,7 +270,7 @@ impl ServerConfig {
             || self.watch_max_keys > tokio::sync::Semaphore::MAX_PERMITS
         {
             return Err(invalid(
-                "conexões e capacidade da fila não podem exceder Semaphore::MAX_PERMITS",
+                "connections and queue capacity cannot exceed Semaphore::MAX_PERMITS",
             ));
         }
         if [
@@ -284,47 +284,47 @@ impl ServerConfig {
         .into_iter()
         .any(|bytes| bytes > isize::MAX as usize)
         {
-            return Err(invalid("limites de bytes não podem exceder isize::MAX"));
+            return Err(invalid("byte limits cannot exceed isize::MAX"));
         }
         if self.resp_limits.max_frame_bytes > self.max_input_buffer_bytes {
             return Err(invalid(
-                "max_frame_bytes não pode exceder max_input_buffer_bytes",
+                "max_frame_bytes cannot exceed max_input_buffer_bytes",
             ));
         }
         let bulk = self.resp_limits.max_bulk_bytes;
-        // `validate` do codec já garantiu bulk > 0. Prefixo '$', dois CRLF e
-        // dígitos do comprimento são todos contabilizados antes da alocação.
+        // The codec's `validate` already ensures bulk > 0. The '$' prefix, two CRLFs,
+        // and length digits are all counted before allocation.
         let bulk_response = bulk
             .checked_add(bulk.ilog10() as usize + 1)
             .and_then(|bytes| bytes.checked_add(5))
-            .ok_or_else(|| invalid("framing da resposta bulk excede o tamanho representável"))?;
+            .ok_or_else(|| invalid("bulk reply framing exceeds representable size"))?;
         if self.max_response_bytes < 128 {
             return Err(invalid(
-                "max_response_bytes precisa comportar ao menos 128 bytes",
+                "max_response_bytes must accommodate at least 128 bytes",
             ));
         }
         if self.max_response_bytes < bulk_response {
             return Err(invalid(
-                "max_response_bytes precisa comportar max_bulk_bytes e seu framing",
+                "max_response_bytes must accommodate max_bulk_bytes and its framing",
             ));
         }
         let now = Instant::now();
         for (timeout, reason) in [
             (
                 self.frame_timeout,
-                "frame_timeout precisa ser positivo e representável por Instant",
+                "frame_timeout must be positive and representable by Instant",
             ),
             (
                 self.request_timeout,
-                "request_timeout precisa ser positivo e representável por Instant",
+                "request_timeout must be positive and representable by Instant",
             ),
             (
                 self.write_timeout,
-                "write_timeout precisa ser positivo e representável por Instant",
+                "write_timeout must be positive and representable by Instant",
             ),
             (
                 self.shutdown_timeout,
-                "shutdown_timeout precisa ser positivo e representável por Instant",
+                "shutdown_timeout must be positive and representable by Instant",
             ),
         ] {
             if timeout.is_zero() || now.checked_add(timeout).is_none() {
@@ -336,7 +336,7 @@ impl ServerConfig {
             .as_ref()
             .is_some_and(|path| path.as_os_str().is_empty())
         {
-            return Err(invalid("SIDER_READY_FILE não pode ser um caminho vazio"));
+            return Err(invalid("SIDER_READY_FILE cannot be an empty path"));
         }
         Ok(())
     }
@@ -486,7 +486,7 @@ mod tests {
             ("SIDER_REQUEST_TIMEOUT_MS", "1002"),
             ("SIDER_WRITE_TIMEOUT_MS", "1003"),
             ("SIDER_SHUTDOWN_TIMEOUT_MS", "1004"),
-            ("SIDER_READY_FILE", "target/prontidão teste.json"),
+            ("SIDER_READY_FILE", "target/readiness-test.json"),
         ])
         .unwrap();
         assert_eq!(config.bind_addr, ServerConfig::default().bind_addr);
@@ -511,7 +511,7 @@ mod tests {
         assert_eq!(config.shutdown_timeout, Duration::from_millis(1004));
         assert_eq!(
             config.ready_file,
-            Some(PathBuf::from("target/prontidão teste.json"))
+            Some(PathBuf::from("target/readiness-test.json"))
         );
     }
 

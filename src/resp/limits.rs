@@ -1,19 +1,19 @@
-//! Orçamento de um frame; não equivale à quota do dataset ou ao RSS do processo.
+//! Budget for one frame; it is not the dataset quota or process RSS.
 
 use crate::ConfigError;
 
-/// Limites de framing aplicados antes de materializar os payloads.
+/// Framing limits applied before materializing payloads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RespLimits {
-    /// Bytes de um frame completo, incluindo prefixos, cabeçalhos e CRLF.
+    /// Bytes in a complete frame, including prefixes, headers, and CRLF.
     pub max_frame_bytes: usize,
-    /// Bytes de um único payload bulk.
+    /// Bytes in a single bulk payload.
     pub max_bulk_bytes: usize,
-    /// Bytes de uma linha inteira, incluindo prefixo e CRLF, mas não payload bulk.
+    /// Bytes in a whole line, including its prefix and CRLF but not bulk payload.
     pub max_line_bytes: usize,
-    /// Nós totais, incluindo raiz, arrays e todos os seus elementos.
+    /// Total nodes, including root, arrays, and all their elements.
     pub max_nodes: usize,
-    /// Níveis de arrays; raiz array conta como 1. Teto de segurança: 128.
+    /// Array levels; the root array counts as 1. Safety ceiling: 128.
     pub max_depth: usize,
 }
 
@@ -30,9 +30,9 @@ impl Default for RespLimits {
 }
 
 impl RespLimits {
-    /// Recusa limites nulos, relações incoerentes e profundidade excessiva.
+    /// Rejects zero limits, inconsistent relationships, and excessive depth.
     ///
-    /// O teto de profundidade também limita a destruição recursiva de `Frame`.
+    /// The depth ceiling also limits recursive `Frame` destruction.
     pub fn validate(self) -> Result<(), ConfigError> {
         let reason = if self.max_frame_bytes == 0
             || self.max_bulk_bytes == 0
@@ -40,13 +40,13 @@ impl RespLimits {
             || self.max_nodes == 0
             || self.max_depth == 0
         {
-            Some("todos os limites precisam ser maiores que zero")
+            Some("all limits must be greater than zero")
         } else if self.max_bulk_bytes > self.max_frame_bytes {
-            Some("max_bulk_bytes não pode exceder max_frame_bytes")
+            Some("max_bulk_bytes cannot exceed max_frame_bytes")
         } else if self.max_line_bytes > self.max_frame_bytes {
-            Some("max_line_bytes não pode exceder max_frame_bytes")
+            Some("max_line_bytes cannot exceed max_frame_bytes")
         } else if self.max_depth > 128 {
-            Some("max_depth não pode exceder 128")
+            Some("max_depth cannot exceed 128")
         } else {
             None
         };

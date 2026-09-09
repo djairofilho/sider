@@ -1,52 +1,52 @@
-//! Erros de configuração que podem ser apresentados na inicialização.
+//! Configuration errors that may be reported during initialization.
 
 use std::net::AddrParseError;
 
 use thiserror::Error;
 
-/// Falha ao interpretar uma variável de configuração do Sider.
+/// Failure to interpret a Sider configuration variable.
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    /// Limites de rede, canais ou prazos incoerentes são recusados na inicialização.
-    #[error("limites do servidor inválidos: {reason}")]
+    /// Inconsistent network limits, channels, or timeouts are rejected at startup.
+    #[error("invalid server limits: {reason}")]
     InvalidServerLimits {
-        /// Restrição violada, sem dados de requisições.
+        /// Violated constraint, without request data.
         reason: &'static str,
     },
 
-    /// Uma opção textual contém dados que não podem ser interpretados em UTF-8.
-    #[error("{name} precisa conter texto UTF-8 válido")]
+    /// A textual option contains data that cannot be interpreted as UTF-8.
+    #[error("{name} must contain valid UTF-8 text")]
     NonUnicodeValue {
-        /// Nome da variável de configuração.
+        /// Configuration variable name.
         name: &'static str,
     },
 
-    /// Um limite ou prazo não é um inteiro decimal representável.
-    #[error("{name} inválido: {value:?}; use somente dígitos decimais, sem sinal ou espaços")]
+    /// A limit or timeout is not a representable decimal integer.
+    #[error("{name} is invalid: {value:?}; use only decimal digits, without a sign or spaces")]
     InvalidInteger {
-        /// Nome da variável de configuração.
+        /// Configuration variable name.
         name: &'static str,
-        /// Valor recebido, preservado para diagnóstico.
+        /// Received value, preserved for diagnostics.
         value: String,
     },
 
-    /// Limites inválidos são recusados antes de criar o codec.
-    #[error("limites RESP inválidos: {reason}")]
+    /// Invalid limits are rejected before creating the codec.
+    #[error("invalid RESP limits: {reason}")]
     InvalidRespLimits {
-        /// Restrição de configuração violada, sem conteúdo do cliente.
+        /// Violated configuration constraint, without client content.
         reason: &'static str,
     },
 
-    /// O endereço contém texto que não pode ser representado em UTF-8.
-    #[error("SIDER_ADDR precisa conter texto UTF-8 válido")]
+    /// The address contains text that cannot be represented as UTF-8.
+    #[error("SIDER_ADDR must contain valid UTF-8 text")]
     NonUnicodeAddress,
 
-    /// O endereço não contém um IP literal e uma porta válida.
-    #[error("SIDER_ADDR inválido: {value:?}; use IP e porta, como 127.0.0.1:6379")]
+    /// The address does not contain a literal IP address and valid port.
+    #[error("SIDER_ADDR is invalid: {value:?}; use an IP address and port, such as 127.0.0.1:6379")]
     InvalidAddress {
-        /// Valor recebido, preservado para diagnóstico.
+        /// Received value, preserved for diagnostics.
         value: String,
-        /// Erro original do parser de endereços da biblioteca padrão.
+        /// Original error from the standard library address parser.
         #[source]
         source: AddrParseError,
     },

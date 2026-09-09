@@ -1,4 +1,4 @@
-//! Contrato TCP e diferencial Pub/Sub com oráculo RESP independente do produto.
+//! TCP contract and Pub/Sub differential tests with a product-independent RESP oracle.
 #![forbid(unsafe_code)]
 
 #[path = "common/gate_receipt.rs"]
@@ -122,7 +122,7 @@ fn scenario(address: SocketAddr) -> Vec<Vec<u8>> {
             &mut transcript,
         );
     }
-    // Duas filas reais recebem bytes idênticos, sem duplicar inscrição repetida.
+    // Two real queues receive identical bytes, without duplicating repeated subscriptions.
     for index in 0..MESSAGES {
         let payload: Vec<u8> = if index == 0 {
             vec![]
@@ -169,7 +169,7 @@ fn scenario(address: SocketAddr) -> Vec<Vec<u8>> {
         Response::Simple(b"PONG".to_vec()),
         &mut transcript,
     );
-    // EOF de resposta é a barreira de cleanup; não depende de sleeps ou de polling de PUBLISH.
+    // Response EOF is the cleanup barrier; it does not depend on sleeps or PUBLISH polling.
     second.shutdown(Shutdown::Write).unwrap();
     let mut remaining = Vec::new();
     second.read_to_end(&mut remaining).unwrap();
@@ -189,7 +189,7 @@ fn scenario(address: SocketAddr) -> Vec<Vec<u8>> {
         send(&mut publisher, &[b"PUBLISH", channel, b"after-reconnect"]);
         receive(&mut publisher, Response::Integer(0), &mut transcript);
     }
-    // Pub/Sub não cria chaves; a conexão retorna ao caminho normal do worker.
+    // Pub/Sub does not create keys; the connection returns to the normal worker path.
     send(&mut first, &[b"GET", channel]);
     receive(&mut first, Response::Bulk(None), &mut transcript);
     send(&mut publisher, &[b"SET", b"r08-independent-key", b"value"]);
@@ -227,7 +227,7 @@ fn differential() -> (u64, serde_json::Value) {
     let expected = scenario(reference.address());
     assert_eq!(
         actual, expected,
-        "transcrições RESP2 Pub/Sub devem ser idênticas"
+        "RESP2 Pub/Sub transcripts must be identical"
     );
     sider.assert_alive();
     sider.finish();
@@ -238,17 +238,17 @@ fn differential() -> (u64, serde_json::Value) {
 }
 
 #[test]
-#[ignore = "requer Docker Linux e imagem Redis fixada"]
+#[ignore = "requires Linux Docker and the pinned Redis image"]
 fn pubsub_matches_redis() {
     differential();
 }
 
 #[test]
-#[ignore = "gate externo: checkout limpo e contexto de release Linux"]
+#[ignore = "external gate: clean checkout and Linux release context"]
 fn release_pubsub_gate() {
-    let context = GateContext::from_env("pubsub").expect("contexto real do gate");
+    let context = GateContext::from_env("pubsub").expect("actual gate context");
     let started = Instant::now();
-    // O gate também executa os cenários determinísticos de filas, timeout e RAII.
+    // The gate also runs deterministic queue, timeout, and RAII scenarios.
     let output = process::run(
         std::process::Command::new("cargo")
             .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -264,11 +264,11 @@ fn release_pubsub_gate() {
     let native = String::from_utf8(output.stdout).unwrap();
     assert!(
         native.contains("test result: ok.") && !native.contains("running 0 tests"),
-        "suite nativa Pub/Sub ausente: {native}"
+        "missing native Pub/Sub suite: {native}"
     );
     let (cases, mut report) = differential();
     report["native_pubsub_output"] = native.into();
     context
         .publish(cases, started.elapsed(), report)
-        .expect("recibo somente após execução e cleanup");
+        .expect("receipt only after execution and cleanup");
 }

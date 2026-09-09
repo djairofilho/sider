@@ -1,4 +1,4 @@
-//! Coleções tipadas, quota, TTL e mutações resolvidas persistíveis.
+//! Typed collections, quota, TTL, and persistable resolved mutations.
 
 #![forbid(unsafe_code)]
 
@@ -163,7 +163,7 @@ fn prepared_hash_does_not_mutate_snapshot_and_aof_recovers_the_type() {
     let Next::Record(Record::Batch { batch, .. }) =
         format::read_record(encoded.as_slice(), Limits::default()).unwrap()
     else {
-        panic!("lote AOF esperado");
+        panic!("expected AOF batch");
     };
     let mut recovered = Store::new();
     recovered.replay(&batch.mutations).unwrap();
@@ -174,7 +174,7 @@ fn prepared_hash_does_not_mutate_snapshot_and_aof_recovers_the_type() {
         ..
     } = &original[0]
     else {
-        panic!("hash esperado");
+        panic!("expected hash");
     };
     assert_eq!(fields.get(b"f".as_slice()).unwrap(), b"old".as_slice());
     assert_eq!(run(&mut recovered, &[b"HGET", b"h", b"f"]), bulk(b"new"));
@@ -403,7 +403,7 @@ fn sets_preserve_type_through_aof_and_reject_wrongtype_and_arity() {
     let Next::Record(Record::Snapshot(mutation)) =
         format::read_record(encoded.as_slice(), Limits::default()).unwrap()
     else {
-        panic!("snapshot esperado");
+        panic!("expected snapshot");
     };
     let mut recovered = Store::new();
     recovered.replay(&[mutation]).unwrap();

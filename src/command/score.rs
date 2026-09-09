@@ -1,4 +1,4 @@
-//! Scores IEEE-754 sem NaN, com zero canônico e representação RESP2.
+//! IEEE-754 scores without NaN, with canonical zero and RESP2 representation.
 
 use std::cmp::Ordering;
 

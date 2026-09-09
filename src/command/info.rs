@@ -1,4 +1,4 @@
-/// Seleção de seções com cardinalidade fixa; nomes desconhecidos não são retidos.
+/// Selection of fixed-cardinality sections; unknown names are not retained.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InfoSections(u8);
 

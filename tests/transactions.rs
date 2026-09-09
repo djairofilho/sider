@@ -1,4 +1,4 @@
-//! Transações TCP, referência Redis fixada e persistência do lote.
+//! TCP transactions, pinned Redis reference, and batch persistence.
 #![forbid(unsafe_code)]
 
 #[path = "common/gate_receipt.rs"]
@@ -48,7 +48,7 @@ fn typed_scenario(address: SocketAddr) -> Vec<Vec<u8>> {
         step(&mut client, &[b"MULTI"], b"+OK\r\n", &mut transcript);
         step(&mut client, &[b"EXEC"], b"*-1\r\n", &mut transcript);
     }
-    // A saída de EXEC preserva o modo resultante e o caso UNSUBSCRIBE vazio.
+    // EXEC output preserves the resulting mode and the empty UNSUBSCRIBE case.
     step(&mut client, &[b"MULTI"], b"+OK\r\n", &mut transcript);
     step(
         &mut client,
@@ -109,7 +109,7 @@ fn step(client: &mut TcpStream, args: &[&[u8]], expected: &[u8], transcript: &mu
         ))
         .unwrap();
     let observed = wire::read_response(client).unwrap();
-    assert_eq!(observed.bytes, expected, "comando {args:?}");
+    assert_eq!(observed.bytes, expected, "command {args:?}");
     transcript.push(observed.bytes);
 }
 
@@ -152,7 +152,7 @@ fn data_scenario(address: SocketAddr) -> Vec<Vec<u8>> {
     c(&[b"GET", b"tx:a"], b"$3\r\nbad\r\n");
     c(&[b"MULTI"], b"+OK\r\n");
     c(&[b"EXEC"], b"*0\r\n");
-    // WATCH detecta SET idêntico, criação seguida de DEL e escrita da própria conexão.
+    // WATCH detects identical SET, creation followed by DEL, and writes from the same connection.
     for own_write in [false, true] {
         step(
             &mut client,
@@ -195,7 +195,7 @@ fn data_scenario(address: SocketAddr) -> Vec<Vec<u8>> {
     );
     step(&mut client, &[b"MULTI"], b"+OK\r\n", &mut transcript);
     step(&mut client, &[b"EXEC"], b"*-1\r\n", &mut transcript);
-    // DEL ausente não invalida; EXEC anterior liberou as observações inválidas.
+    // DEL on a missing key does not invalidate watches; the previous EXEC released invalidated watches.
     step(
         &mut client,
         &[b"WATCH", b"tx:absent"],
@@ -253,7 +253,7 @@ fn data_scenario(address: SocketAddr) -> Vec<Vec<u8>> {
             &mut transcript,
         );
     }
-    // Desconexão antes de EXEC descarta a fila; EOF confirma cleanup da conexão.
+    // Disconnecting before EXEC discards the queue; EOF confirms connection cleanup.
     let mut abandoned = connect(address);
     step(
         &mut abandoned,
@@ -328,7 +328,7 @@ fn transactions_tcp_contract() {
 }
 
 #[test]
-#[ignore = "requer Docker Linux e imagem Redis fixada"]
+#[ignore = "requires Linux Docker and the pinned Redis image"]
 fn transactions_matches_redis() {
     differential();
 }
@@ -359,10 +359,9 @@ fn differential() -> (u64, serde_json::Value) {
 }
 
 #[test]
-#[ignore = "gate externo: checkout limpo e contexto de release Linux"]
+#[ignore = "external gate: clean checkout and Linux release context"]
 fn release_transactions_gate() {
-    let context =
-        gate_receipt::GateContext::from_env("transactions").expect("contexto real do gate");
+    let context = gate_receipt::GateContext::from_env("transactions").expect("actual gate context");
     let began = Instant::now();
     let mut native_outputs = Vec::new();
     for target in [vec!["--lib"], vec!["--test", "transactions_persistence"]] {
@@ -383,7 +382,7 @@ fn release_transactions_gate() {
         let stdout = String::from_utf8(output.stdout).unwrap();
         assert!(
             stdout.contains("test result: ok.") && !stdout.contains("running 0 tests"),
-            "suíte transacional ausente: {stdout}"
+            "missing transaction suite: {stdout}"
         );
         native_outputs.push(stdout);
     }
@@ -391,5 +390,5 @@ fn release_transactions_gate() {
     report["native_outputs"] = serde_json::json!(native_outputs);
     context
         .publish(cases, began.elapsed(), report)
-        .expect("recibo após verificações reais e cleanup");
+        .expect("receipt after actual checks and cleanup");
 }

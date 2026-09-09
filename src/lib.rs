@@ -1,4 +1,4 @@
-//! Servidor Sider com núcleo síncrono e worker proprietário acessível por RESP2/TCP.
+//! Sider server with a synchronous core and an owner worker reachable over RESP2/TCP.
 
 #![forbid(unsafe_code)]
 

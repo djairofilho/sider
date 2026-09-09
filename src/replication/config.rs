@@ -1,4 +1,4 @@
-//! Limites do listener interno e da única sessão upstream.
+//! Limits for the internal listener and the single upstream session.
 
 use std::ffi::OsString;
 use std::net::SocketAddr;
@@ -53,7 +53,7 @@ impl Config {
                 .into_string()
                 .map_err(|_| ConfigError::NonUnicodeValue { name })?;
             value.parse().map_err(|_| ConfigError::InvalidServerLimits {
-                reason: "endereço de replicação exige IP literal e porta",
+                reason: "replication address requires a literal IP address and port",
             })
         };
         if let Some(value) = listen {
@@ -109,7 +109,7 @@ impl Config {
             .limits
             .max_record_bytes
             .checked_add(super::protocol::HEADER_BYTES + 12)
-            .ok_or_else(|| invalid("frame de replicação excede usize"))?;
+            .ok_or_else(|| invalid("replication frame exceeds usize"))?;
         if self.backlog_bytes < frame
             || self.backlog_bytes > isize::MAX as usize
             || self.backlog_batches == 0
@@ -117,7 +117,7 @@ impl Config {
             || self.max_connections > tokio::sync::Semaphore::MAX_PERMITS
         {
             return Err(invalid(
-                "histórico e conexões de replicação precisam de limites positivos; um registro completo deve caber no histórico",
+                "replication history and connections require positive limits; one complete record must fit in history",
             ));
         }
         for duration in [
@@ -129,7 +129,7 @@ impl Config {
             if duration < Duration::from_millis(1)
                 || std::time::Instant::now().checked_add(duration).is_none()
             {
-                return Err(invalid("prazos de replicação inválidos"));
+                return Err(invalid("invalid replication timeouts"));
             }
         }
         if self.reconnect_min > self.reconnect_max
@@ -137,7 +137,7 @@ impl Config {
             || self.sync_timeout < self.frame_timeout
             || self.upstream.is_some_and(|address| address.port() == 0)
         {
-            return Err(invalid("intervalos ou upstream da replicação inválidos"));
+            return Err(invalid("invalid replication intervals or upstream"));
         }
         Ok(())
     }
@@ -163,7 +163,7 @@ mod tests {
             ("SIDER_AOF_DIR", "aof"),
             ("SIDER_REPLICATION_ADDR", "[::1]:0"),
             ("SIDER_REPLICA_OF", "127.0.0.1:9123"),
-            ("SIDER_REPLICATION_READY_FILE", "réplica.json"),
+            ("SIDER_REPLICATION_READY_FILE", "replica.json"),
             ("SIDER_REPLICATION_MAX_CONNECTIONS", "2"),
         ])
         .unwrap()
@@ -171,7 +171,7 @@ mod tests {
         .unwrap();
         assert_eq!(actual.listen, "[::1]:0".parse().unwrap());
         assert_eq!(actual.upstream, Some("127.0.0.1:9123".parse().unwrap()));
-        assert_eq!(actual.ready_file, Some(PathBuf::from("réplica.json")));
+        assert_eq!(actual.ready_file, Some(PathBuf::from("replica.json")));
         assert_eq!(actual.max_connections, 2);
     }
 

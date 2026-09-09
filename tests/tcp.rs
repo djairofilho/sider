@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Integração TCP com bytes literais, sem usar o codec do Sider como oráculo.
+//! TCP integration with literal bytes, without using the Sider codec as an oracle.
 
 use std::io;
 use std::net::SocketAddr;
@@ -74,7 +74,7 @@ impl TestServer {
 
 impl Drop for TestServer {
     fn drop(&mut self) {
-        // Falhas dos testes não deixam o listener ou tarefas órfãs no runtime.
+        // Test failures do not leave the listener or orphaned tasks in the runtime.
         self.shutdown.take();
         if let Some(task) = self.task.take() {
             task.abort();
@@ -220,8 +220,8 @@ async fn read_until_closed(stream: &mut TcpStream) -> Vec<u8> {
                     collected.extend_from_slice(&chunk[..count]);
                     assert!(collected.len() <= 1024, "unexpected response after close");
                 }
-                // Fechar com bytes não lidos pode produzir reset, especialmente
-                // no Windows. Isso não equivale a aceitar erros de I/O genéricos.
+                // Closing with unread bytes may produce a reset, especially
+                // on Windows. This does not mean accepting arbitrary I/O errors.
                 Err(error) if is_connection_closed(&error) => return collected,
                 Err(error) => panic!("read after close: {error}"),
             }
@@ -501,7 +501,7 @@ async fn literal_reference_cases_work_sequentially_over_tcp() {
         for &(request, expected) in case.exchanges {
             exchange(&mut client, request, expected).await;
         }
-        // A sentinela detecta respostas excedentes entre os casos.
+        // The sentinel detects extra responses between cases.
         exchange(&mut client, PING, PONG).await;
     }
     half_close(&mut client).await;
@@ -546,8 +546,8 @@ async fn clients_share_state_but_not_partial_decoder_buffers() {
     exchange(&mut first, PING, PONG).await;
     exchange(&mut second, PING, PONG).await;
 
-    // O primeiro cliente interrompe seu pedido dentro do payload. A resposta
-    // do segundo sincroniza as operações sem impor uma ordem por relógio.
+    // The first client pauses its request within the payload. The response
+    // from the second synchronizes the operations without imposing clock-based ordering.
     write(&mut first, b"*3\r\n$3\r\nSET\r\n$1\r\na\r\n$5\r\n\x00\r").await;
     exchange(
         &mut second,
@@ -619,8 +619,8 @@ async fn binary_echo_survives_every_write_split_and_byte_writes() {
         tokio::task::yield_now().await;
     }
     expect_bytes(&mut client, RESPONSE).await;
-    // TCP pode agregar escritas. A fragmentação exata de cada leitura é coberta
-    // pelos testes unitários do codec e por I/O controlada da conexão.
+    // TCP may coalesce writes. The exact fragmentation of each read is covered
+    // by codec unit tests and controlled connection I/O.
     exchange(&mut client, PING, PONG).await;
     server.stop().await;
 }
@@ -728,15 +728,15 @@ async fn excess_connection_is_closed_and_disconnection_releases_the_slot() {
     let mut first = server.connect().await;
     exchange(&mut first, PING, PONG).await;
     let mut excess = server.connect().await;
-    // O PONG anterior comprova que a primeira conexão já ocupa a única vaga.
+    // The previous PONG proves that the first connection already occupies the only slot.
     assert!(read_until_closed(&mut excess).await.is_empty());
     exchange(&mut first, PING, PONG).await;
     half_close(&mut first).await;
     assert!(read_until_closed(&mut first).await.is_empty());
     drop(first);
 
-    // EOF pode ficar visível antes de a supervisão recolher a tarefa concluída.
-    // Cada tentativa é ordenada por I/O real; não usamos sleeps de escalonamento.
+    // EOF may become visible before supervision reaps the completed task.
+    // Each attempt is ordered by real I/O; we do not use scheduling sleeps.
     let mut replacement = timeout(IO_DEADLINE, async {
         loop {
             let mut candidate = server.connect().await;

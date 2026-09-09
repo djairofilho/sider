@@ -1,9 +1,9 @@
-//! Identidade durável do particionamento; mudanças exigem migração offline.
+//! Durable partitioning identity; changes require offline migration.
 
 use crate::ConfigError;
 use crate::storage::routing::ShardRouter;
 
-/// FNV-1a64 sobre a primeira hash tag não vazia; regras de `storage::routing`.
+/// FNV-1a64 over the first non-empty hash tag; `storage::routing` rules.
 pub const ROUTING_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,7 +26,7 @@ impl DurableLayout {
         ShardRouter::new(self.shard_count as usize)?;
         if self.routing_version != ROUTING_VERSION {
             return Err(ConfigError::InvalidServerLimits {
-                reason: "versão de roteamento AOF não suportada",
+                reason: "unsupported AOF routing version",
             });
         }
         Ok(())
@@ -42,7 +42,7 @@ impl DurableLayout {
         let count = self.shard_count as usize;
         if total_bytes < count || shard >= count {
             return Err(ConfigError::InvalidServerLimits {
-                reason: "quota total precisa reservar ao menos um byte por shard",
+                reason: "total quota must reserve at least one byte per shard",
             });
         }
         Ok(total_bytes / count + usize::from(shard < total_bytes % count))

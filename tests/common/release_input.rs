@@ -1,4 +1,4 @@
-//! Vínculo verificável entre checkout, manifesto preliminar, tar.gz e executável extraído.
+//! Verifiable link between checkout, preliminary manifest, tar.gz, and extracted executable.
 #![allow(dead_code)]
 
 use super::{gate_receipt::GateContext, process};
@@ -23,7 +23,7 @@ struct PackageProof {
     sha256: String,
 }
 
-/// O diretório precisa continuar controlado e imóvel; a conferência não autentica seu autor.
+/// The directory must remain controlled and unchanged; verification does not authenticate its author.
 pub struct ReleaseInput {
     directory: PathBuf,
     binary: PathBuf,
@@ -35,7 +35,7 @@ pub struct ReleaseInput {
 impl ReleaseInput {
     pub fn from_env(context: &GateContext) -> Result<Self, String> {
         let directory = PathBuf::from(
-            std::env::var_os("SIDER_PACKAGE_DIR").ok_or("SIDER_PACKAGE_DIR ausente")?,
+            std::env::var_os("SIDER_PACKAGE_DIR").ok_or("missing SIDER_PACKAGE_DIR")?,
         );
         Self::load(context, &directory)
     }
@@ -48,14 +48,14 @@ impl ReleaseInput {
                 target_env = "gnu"
             ))
         {
-            return Err("pacote de carga exige execução nativa Linux GNU x86_64".into());
+            return Err("load test package requires native Linux GNU x86_64 execution".into());
         }
         if !directory.is_absolute() {
-            return Err("SIDER_PACKAGE_DIR precisa ser absoluto".into());
+            return Err("SIDER_PACKAGE_DIR must be absolute".into());
         }
         let metadata = fs::symlink_metadata(directory).map_err(|e| e.to_string())?;
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
-            return Err("pacote extraído precisa ser diretório real".into());
+            return Err("extracted package must be a real directory".into());
         }
         let directory = directory.canonicalize().map_err(|e| e.to_string())?;
         let manifest: Value = serde_json::from_slice(&read_bounded(
@@ -73,12 +73,12 @@ impl ReleaseInput {
         if regular_size(&archive, MAX_ARCHIVE)? != package.size
             || sha256(&archive)? != package.sha256
         {
-            return Err("tar.gz diverge do hash ou tamanho no manifesto".into());
+            return Err("tar.gz differs from the manifest hash or size".into());
         }
         let binary = directory.join("sider");
         let binary_size = regular_size(&binary, MAX_BINARY)?;
         if binary_size == 0 {
-            return Err("executável extraído vazio".into());
+            return Err("empty extracted executable".into());
         }
         for (name, expected) in [
             (
@@ -88,7 +88,7 @@ impl ReleaseInput {
             ("LICENSE", include_bytes!("../../LICENSE").as_slice()),
         ] {
             if read_bounded(&directory.join(name), expected.len() as u64)? != expected {
-                return Err(format!("{name} extraído diverge do checkout"));
+                return Err(format!("extracted {name} differs from the checkout"));
             }
         }
         let member = format!("sider-v{}-{}/sider", context.version(), context.target());
@@ -118,7 +118,7 @@ impl ReleaseInput {
             binary_size as usize,
         )?;
         if !extracted.status.success() || extracted.stdout != read_bounded(&binary, binary_size)? {
-            return Err("executável não corresponde ao membro único do tar.gz".into());
+            return Err("executable does not match the single tar.gz member".into());
         }
         let binary_sha256 = sha256(&binary)?;
         Ok(Self {
@@ -146,7 +146,7 @@ impl ReleaseInput {
             || current.binary_size != self.binary_size
             || current.binary_sha256 != self.binary_sha256
         {
-            return Err("pacote ou executável mudou durante a validação".into());
+            return Err("package or executable changed during validation".into());
         }
         Ok(())
     }
@@ -170,27 +170,27 @@ fn manifest_package(
             .as_array()
             .is_some_and(|targets| targets.contains(&json!(target)))
     {
-        return Err("identidade do manifesto preliminar diverge do contexto do gate".into());
+        return Err("preliminary manifest identity differs from gate context".into());
     }
     let name = format!("sider-v{version}-{target}.tar.gz");
     let artifacts = manifest["artifacts"]
         .as_array()
-        .ok_or("inventário de artefatos ausente")?;
+        .ok_or("missing artifact inventory")?;
     let mut selected = artifacts.iter().filter(|item| item["name"] == name);
     let proof = selected
         .next()
-        .ok_or("tar.gz esperado ausente no manifesto")?;
+        .ok_or("expected tar.gz missing from manifest")?;
     if selected.next().is_some() {
-        return Err("tar.gz repetido no manifesto".into());
+        return Err("duplicate tar.gz in manifest".into());
     }
     let size = proof["size"]
         .as_u64()
         .filter(|size| *size > 0 && *size <= MAX_ARCHIVE)
-        .ok_or("tamanho do tar.gz inválido")?;
+        .ok_or("invalid tar.gz size")?;
     let digest = proof["sha256"]
         .as_str()
         .filter(|digest| hex(digest, 64))
-        .ok_or("hash do tar.gz inválido")?;
+        .ok_or("invalid tar.gz hash")?;
     Ok(PackageProof {
         name,
         size,
@@ -199,8 +199,7 @@ fn manifest_package(
 }
 
 fn unique_member(listing: &[u8], member: &str) -> Result<(), String> {
-    let listing =
-        std::str::from_utf8(listing).map_err(|_| "lista de membros do tar não é UTF-8")?;
+    let listing = std::str::from_utf8(listing).map_err(|_| "tar member list is not UTF-8")?;
     let mut count = 0;
     let mut entries = 0;
     for entry in listing.lines() {
@@ -211,12 +210,12 @@ fn unique_member(listing: &[u8], member: &str) -> Result<(), String> {
             || entry.contains('\\')
             || entry.split('/').any(|part| part == "..")
         {
-            return Err("nome ou quantidade de membros do tar inválido".into());
+            return Err("invalid tar member name or count".into());
         }
         count += usize::from(entry == member);
     }
     if count != 1 {
-        return Err("membro do executável ausente ou repetido no tar".into());
+        return Err("executable member missing or duplicated in tar".into());
     }
     Ok(())
 }
@@ -224,7 +223,7 @@ fn unique_member(listing: &[u8], member: &str) -> Result<(), String> {
 fn regular_size(path: &Path, limit: u64) -> Result<u64, String> {
     let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
     if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > limit {
-        return Err("arquivo regular obrigatório ausente, simbólico ou acima do limite".into());
+        return Err("required regular file is missing, a symlink, or above the limit".into());
     }
     Ok(metadata.len())
 }
@@ -238,7 +237,7 @@ fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
         .read_to_end(&mut bytes)
         .map_err(|e| e.to_string())?;
     if bytes.len() as u64 > limit {
-        return Err("arquivo cresceu durante leitura".into());
+        return Err("file grew during reading".into());
     }
     Ok(bytes)
 }
@@ -246,7 +245,7 @@ fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
 fn checked(command: &mut Command) -> Result<Vec<u8>, String> {
     let output = process::run(command.env("LC_ALL", "C"), TIMEOUT)?;
     if !output.status.success() {
-        return Err("comando de integridade do pacote falhou".into());
+        return Err("package integrity command failed".into());
     }
     Ok(output.stdout)
 }
@@ -256,14 +255,14 @@ pub fn sha256(path: &Path) -> Result<String, String> {
 }
 
 fn parse_digest(bytes: &[u8]) -> Result<String, String> {
-    let text = std::str::from_utf8(bytes).map_err(|_| "saída sha256sum não é UTF-8")?;
+    let text = std::str::from_utf8(bytes).map_err(|_| "sha256sum output is not UTF-8")?;
     let digest = text
         .split_whitespace()
         .next()
         .filter(|value| hex(value, 64))
-        .ok_or("saída sha256sum inválida")?;
+        .ok_or("invalid sha256sum output")?;
     if text.lines().count() != 1 {
-        return Err("sha256sum retornou múltiplas linhas".into());
+        return Err("sha256sum returned multiple lines".into());
     }
     Ok(digest.to_owned())
 }

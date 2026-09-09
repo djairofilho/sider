@@ -1,4 +1,4 @@
-//! Operação offline explícita; argumentos e caminhos não modificam o ambiente global.
+//! Explicit offline operation; arguments and paths do not change the global environment.
 #![forbid(unsafe_code)]
 
 use std::process::ExitCode;
@@ -11,7 +11,7 @@ fn main() -> ExitCode {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
     if arguments.len() == 1 && arguments[0] == "--help" {
         println!(
-            "Uso: sider-aof-migrate --source DIR --source-shards N --source-routing 1 --destination DIR_NOVO --shards N --routing 1 [--source-max-dataset-bytes N] [--max-dataset-bytes N] [--source-max-record-bytes N] [--max-record-bytes N]"
+            "Usage: sider-aof-migrate --source DIR --source-shards N --source-routing 1 --destination NEW_DIR --shards N --routing 1 [--source-max-dataset-bytes N] [--max-dataset-bytes N] [--source-max-record-bytes N] [--max-record-bytes N]"
         );
         return ExitCode::SUCCESS;
     }
@@ -34,7 +34,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("migração AOF recusada: {error}");
+            eprintln!("AOF migration rejected: {error}");
             ExitCode::FAILURE
         }
     }

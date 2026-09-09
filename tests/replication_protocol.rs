@@ -1,4 +1,4 @@
-//! Evidência parcial R09: transporte real, replay tipado e limites do protocolo.
+//! Partial R09 evidence: real transport, typed replay, and protocol limits.
 
 use std::time::Duration;
 
@@ -154,7 +154,7 @@ fn nested_lengths_and_encoder_budget_do_not_escape_the_outer_frame_limit() {
     frame[20..24].copy_from_slice(&digest.to_le_bytes());
     assert!(matches!(
         protocol::decode(Bytes::from(frame), Limits::default()),
-        Err(Error::Invalid("comprimento do registro"))
+        Err(Error::Invalid("record length"))
     ));
     let message = Message::SnapshotEntry(Mutation::Put {
         key: Bytes::new(),
@@ -254,7 +254,7 @@ async fn tcp_transports_all_types_snapshot_and_resolved_batch_to_real_replay() {
             .await
             .unwrap()
         else {
-            panic!("handshake ausente")
+            panic!("missing handshake")
         };
         receiver.accepts(&hello()).unwrap();
         protocol::write(
@@ -273,7 +273,7 @@ async fn tcp_transports_all_types_snapshot_and_resolved_batch_to_real_replay() {
             let message = Message::SnapshotEntry(mutation);
             let frame = protocol::encode(&message, Limits::default()).unwrap();
             digest = format::snapshot_digest(digest, &frame);
-            // Fragmentação real do stream: nenhuma escrita equivale a um frame completo.
+            // Actual stream fragmentation: no write corresponds to a complete frame.
             for fragment in frame.chunks(7) {
                 socket.write_all(fragment).await.unwrap();
             }
@@ -338,7 +338,7 @@ async fn tcp_transports_all_types_snapshot_and_resolved_batch_to_real_replay() {
             .unwrap();
         digest = format::snapshot_digest(digest, &frame);
         let Message::SnapshotEntry(mutation) = message else {
-            panic!("entrada ausente")
+            panic!("missing entry")
         };
         mutations.push(mutation);
     }
@@ -360,7 +360,7 @@ async fn tcp_transports_all_types_snapshot_and_resolved_batch_to_real_replay() {
         .await
         .unwrap()
     else {
-        panic!("lote ausente")
+        panic!("missing batch")
     };
     staged.replay(&batch.mutations).unwrap();
     assert_eq!(staged.snapshot(), expected);

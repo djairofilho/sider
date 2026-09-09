@@ -1,4 +1,4 @@
-//! Subconjunto básico de sorted sets, com scores e opções validados antes da execução.
+//! Basic sorted-set subset, with scores and options validated before execution.
 
 use super::{Command, RequestError, Score, parse_decimal};
 use bytes::Bytes;
@@ -77,7 +77,7 @@ pub(super) fn parse(
                 with_scores,
             }
         }
-        _ => unreachable!("nome validado"),
+        _ => unreachable!("validated name"),
     };
     Ok(Command::SortedSet { key, operation })
 }

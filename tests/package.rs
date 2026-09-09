@@ -1,7 +1,7 @@
-//! Smoke do executável realmente selecionado no diretório de pacote extraído.
+//! Smoke test of the executable actually selected in the extracted package directory.
 //!
-//! A extração e os checksums do arquivo compactado pertencem ao empacotamento;
-//! este teste não infere essa origem a partir do nome de um diretório.
+//! Archive extraction and checksums belong to packaging;
+//! this test does not infer that origin from a directory name.
 
 #![forbid(unsafe_code)]
 
@@ -72,39 +72,39 @@ fn select_package(
     readme: &[u8],
     license: &[u8],
 ) -> Result<ExtractedPackage, String> {
-    let directory = PathBuf::from(value.ok_or("SIDER_PACKAGE_DIR ausente")?);
+    let directory = PathBuf::from(value.ok_or("missing SIDER_PACKAGE_DIR")?);
     if !directory.is_absolute() {
-        return Err("SIDER_PACKAGE_DIR precisa ser um caminho absoluto não vazio".into());
+        return Err("SIDER_PACKAGE_DIR must be a nonempty absolute path".into());
     }
-    let metadata = fs::symlink_metadata(&directory)
-        .map_err(|e| format!("inspecionar SIDER_PACKAGE_DIR: {e}"))?;
+    let metadata =
+        fs::symlink_metadata(&directory).map_err(|e| format!("inspect SIDER_PACKAGE_DIR: {e}"))?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err("SIDER_PACKAGE_DIR precisa ser diretório real, não symlink".into());
+        return Err("SIDER_PACKAGE_DIR must be a real directory, not a symlink".into());
     }
     let directory = directory.canonicalize().map_err(|e| e.to_string())?;
     let binary = directory.join(BINARY_NAME);
     let binary_bytes = regular_file(&binary)?.len();
     if binary_bytes == 0 {
-        return Err("executável do pacote está vazio".into());
+        return Err("package executable is empty".into());
     }
     let migrator = directory.join(MIGRATOR_NAME);
     let migrator_bytes = regular_file(&migrator)?.len();
     if migrator_bytes == 0 {
-        return Err("migrador do pacote está vazio".into());
+        return Err("package migrator is empty".into());
     }
     let backup = directory.join(BACKUP_NAME);
     let backup_bytes = regular_file(&backup)?.len();
     if backup_bytes == 0 {
-        return Err("CLI de backup do pacote está vazia".into());
+        return Err("package backup CLI is empty".into());
     }
     let replica = directory.join(REPLICA_NAME);
     let replica_bytes = regular_file(&replica)?.len();
     if replica_bytes == 0 {
-        return Err("CLI de replicação do pacote está vazia".into());
+        return Err("package replication CLI is empty".into());
     }
     for (name, expected) in [("README.md", readme), ("LICENSE", license)] {
         if expected.is_empty() {
-            return Err(format!("{name} do checkout está vazio"));
+            return Err(format!("checkout {name} is empty"));
         }
         verify_contents(&directory.join(name), expected)?;
     }
@@ -122,11 +122,11 @@ fn select_package(
 }
 
 fn regular_file(path: &Path) -> Result<fs::Metadata, String> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|e| format!("arquivo obrigatório {}: {e}", path.display()))?;
+    let metadata =
+        fs::symlink_metadata(path).map_err(|e| format!("required file {}: {e}", path.display()))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(format!(
-            "{} precisa ser arquivo regular, não symlink",
+            "{} must be a regular file, not a symlink",
             path.display()
         ));
     }
@@ -134,22 +134,22 @@ fn regular_file(path: &Path) -> Result<fs::Metadata, String> {
 }
 
 fn verify_contents(path: &Path, expected: &[u8]) -> Result<(), String> {
-    let size = u64::try_from(expected.len()).map_err(|_| "documento esperado grande demais")?;
+    let size = u64::try_from(expected.len()).map_err(|_| "expected document too large")?;
     if regular_file(path)?.len() != size {
         return Err(format!(
-            "conteúdo integral de {} diverge do checkout",
+            "full contents of {} differ from the checkout",
             path.display()
         ));
     }
     let mut actual = Vec::new();
     File::open(path)
         .map_err(|e| e.to_string())?
-        .take(size.checked_add(1).ok_or("limite de documento inválido")?)
+        .take(size.checked_add(1).ok_or("invalid document limit")?)
         .read_to_end(&mut actual)
         .map_err(|e| e.to_string())?;
     if actual != expected {
         return Err(format!(
-            "conteúdo integral de {} diverge do checkout",
+            "full contents of {} differ from the checkout",
             path.display()
         ));
     }
@@ -170,7 +170,7 @@ fn native_target() -> Result<&'static str, String> {
     )) {
         Ok("x86_64-unknown-linux-gnu")
     } else {
-        Err("smoke de pacote exige execução nativa Windows MSVC ou Linux GNU x86_64".into())
+        Err("package smoke requires native Windows MSVC or Linux GNU x86_64 execution".into())
     }
 }
 
@@ -178,23 +178,23 @@ fn remaining(deadline: Instant) -> Result<Duration, String> {
     deadline
         .checked_duration_since(Instant::now())
         .filter(|duration| !duration.is_zero())
-        .ok_or_else(|| "pipeline do pacote excedeu prazo total de I/O".into())
+        .ok_or_else(|| "package pipeline exceeded the overall I/O deadline".into())
 }
 
 fn pipeline(address: SocketAddr) -> Result<(), String> {
     let deadline = Instant::now() + IO_TIMEOUT;
     let mut stream = TcpStream::connect_timeout(&address, remaining(deadline)?)
-        .map_err(|e| format!("conectar ao executável extraído: {e}"))?;
+        .map_err(|e| format!("connect to extracted executable: {e}"))?;
     let mut request = PIPELINE_REQUEST;
     while !request.is_empty() {
         stream
             .set_write_timeout(Some(remaining(deadline)?))
             .map_err(|e| e.to_string())?;
         match stream.write(request) {
-            Ok(0) => return Err("escrita do pipeline foi interrompida".into()),
+            Ok(0) => return Err("pipeline write was interrupted".into()),
             Ok(count) => request = &request[count..],
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(format!("escrever pipeline: {error}")),
+            Err(error) => return Err(format!("write pipeline: {error}")),
         }
     }
     stream
@@ -207,14 +207,14 @@ fn pipeline(address: SocketAddr) -> Result<(), String> {
             .set_read_timeout(Some(remaining(deadline)?))
             .map_err(|e| e.to_string())?;
         match stream.read(&mut actual[offset..]) {
-            Ok(0) => return Err("resposta do pipeline truncada".into()),
+            Ok(0) => return Err("truncated pipeline response".into()),
             Ok(count) => offset += count,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(format!("ler pipeline: {error}")),
+            Err(error) => return Err(format!("read pipeline: {error}")),
         }
     }
     if actual != PIPELINE_RESPONSE {
-        return Err(format!("bytes do pipeline divergentes: {actual:?}"));
+        return Err(format!("pipeline byte mismatch: {actual:?}"));
     }
     loop {
         stream
@@ -223,9 +223,9 @@ fn pipeline(address: SocketAddr) -> Result<(), String> {
         let mut trailing = [0; 1];
         match stream.read(&mut trailing) {
             Ok(0) => return Ok(()),
-            Ok(_) => return Err("resposta excedente depois do pipeline".into()),
+            Ok(_) => return Err("extra response after pipeline".into()),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(format!("EOF limpo após half-close: {error}")),
+            Err(error) => return Err(format!("clean EOF after half-close: {error}")),
         }
     }
 }
@@ -244,16 +244,16 @@ fn smoke(
     if !migrator.status.success()
         || !migrator
             .stdout
-            .starts_with(b"Uso: sider-aof-migrate --source DIR")
+            .starts_with(b"Usage: sider-aof-migrate --source DIR")
     {
-        return Err("migrador extraído não executou sua CLI".into());
+        return Err("extracted migrator did not run its CLI".into());
     }
     let backup = process::run(
         std::process::Command::new(&package.backup).arg("--version"),
         IO_TIMEOUT,
     )?;
     if !backup.status.success() || backup.stdout != format!("sider-backup {version}\n").as_bytes() {
-        return Err("versão da CLI de backup extraída diverge".into());
+        return Err("extracted backup CLI version mismatch".into());
     }
     let replica = process::run(
         std::process::Command::new(&package.replica).arg("--help"),
@@ -262,16 +262,16 @@ fn smoke(
     if !replica.status.success()
         || !replica
             .stdout
-            .starts_with(b"Uso: sider-replica --addr IP:PORTA")
+            .starts_with(b"Usage: sider-replica --addr IP:PORT")
     {
-        return Err("CLI de replicação extraída não executou sua ajuda".into());
+        return Err("extracted replication CLI did not display its help".into());
     }
-    // Esta é a única origem do executável: não há fallback para um target local.
+    // This is the only executable source: there is no fallback to a local target.
     let mut sider = SiderProcess::try_start(&package.binary, version)?;
     pipeline(sider.address())?;
     sider.assert_alive();
     sider.finish();
-    // Mudanças nos documentos durante o teste também invalidam o resultado.
+    // Document changes during the test also invalidate the result.
     let verified = select_package(
         Some(package.directory.clone().into_os_string()),
         readme,
@@ -282,7 +282,7 @@ fn smoke(
         || verified.backup_bytes != package.backup_bytes
         || verified.replica_bytes != package.replica_bytes
     {
-        return Err("tamanho do executável mudou durante o smoke".into());
+        return Err("executable size changed during smoke".into());
     }
     Ok(json!({
         "schema_version": 1,
@@ -318,23 +318,23 @@ fn smoke(
 }
 
 #[test]
-#[ignore = "exige SIDER_PACKAGE_DIR absoluto apontando para um pacote realmente extraído"]
+#[ignore = "requires an absolute SIDER_PACKAGE_DIR pointing to an actually extracted package"]
 fn extracted_package_runs_version_and_tcp() {
     let package = select_package(
         std::env::var_os("SIDER_PACKAGE_DIR"),
         DISTRIBUTION_README,
         DISTRIBUTION_LICENSE,
     )
-    .expect("pacote extraído completo e explicitamente selecionado");
+    .expect("complete and explicitly selected extracted package");
     let result = smoke(
         &package,
         DISTRIBUTION_README,
         DISTRIBUTION_LICENSE,
         env!("CARGO_PKG_VERSION"),
     )
-    .expect("executável extraído precisa passar pelo smoke real");
-    // Somente este caminho opt-in emite resultado para o manifesto manual.
-    // Não cria recibo de gate, não publica release e não infere o SHA do build.
+    .expect("extracted executable must pass the actual smoke test");
+    // Only this opt-in path emits a result for the manual manifest.
+    // Does not create a gate receipt, publish a release, or infer the build SHA.
     println!("{result}");
 }
 
@@ -361,7 +361,7 @@ mod tests {
                         fs::create_dir(fixture.checkout()).unwrap();
                         fs::create_dir(fixture.package()).unwrap();
                         for name in ["README.md", "LICENSE"] {
-                            let contents = format!("Documento completo de programação: {name}.\n");
+                            let contents = format!("Complete café documentation: {name}.\n");
                             fs::write(fixture.checkout().join(name), &contents).unwrap();
                             fs::write(fixture.package().join(name), contents).unwrap();
                         }
@@ -391,7 +391,7 @@ mod tests {
         }
 
         fn install_real_binary(&self) {
-            // Simulação explícita do teste nativo, não evidência de extração.
+            // Explicit native test simulation, not evidence of extraction.
             fs::copy(
                 env!("CARGO_BIN_EXE_sider"),
                 self.package().join(BINARY_NAME),
@@ -424,7 +424,7 @@ mod tests {
 
     impl Drop for Fixture {
         fn drop(&mut self) {
-            // Apenas caminhos conhecidos sob o diretório criado pelo fixture.
+            // Only known paths under the directory created by the fixture.
             for directory in [self.package(), self.checkout()] {
                 for name in PACKAGE_FILES {
                     let path = directory.join(name);
@@ -567,6 +567,6 @@ mod tests {
             "0.0.0-not-this-version",
         )
         .unwrap_err();
-        assert!(error.contains("versão"), "{error}");
+        assert!(error.contains("version"), "{error}");
     }
 }

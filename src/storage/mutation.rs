@@ -1,4 +1,4 @@
-//! Prepara somente as chaves tocadas; o estado real muda após a confirmação durável.
+//! Prepares only touched keys; real state changes after durable confirmation.
 
 use std::collections::BTreeSet;
 
@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use super::*;
 
-/// Estado final resolvido, independente do comando e do relógio de replay.
+/// Resolved final state, independent of the command and replay clock.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Mutation {
     Put {
@@ -152,21 +152,21 @@ impl Mutation {
     }
 }
 
-/// Manutenção de TTL não é uma escrita recebida de um cliente.
+/// TTL maintenance is not a write received from a client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MutationOrigin {
     Client,
     Expiration,
 }
 
-/// Unidade indivisível de persistência; a sequência é atribuída pelo escritor global.
+/// Indivisible persistence unit; the global writer assigns its sequence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedBatch {
     pub origin: MutationOrigin,
     pub mutations: Vec<Mutation>,
 }
 
-/// Resultado pré-validado. Deve ser aplicado no mesmo store, antes de outra mutação.
+/// Prevalidated result. Must be applied in the same store before another mutation.
 pub struct Prepared {
     pub reply: Reply,
     pub batch: ResolvedBatch,
@@ -176,11 +176,11 @@ pub struct Prepared {
 
 #[derive(Debug, Error)]
 pub enum ReplayError {
-    #[error("lote contém chaves duplicadas")]
+    #[error("batch contains duplicate keys")]
     DuplicateKey,
-    #[error("dataset recuperado excede a quota configurada")]
+    #[error("recovered dataset exceeds configured quota")]
     Quota,
-    #[error("prazo absoluto não é representável pelo relógio")]
+    #[error("absolute expiry is not representable by the clock")]
     Deadline,
 }
 
@@ -198,8 +198,8 @@ impl Clock for FrozenClock {
 }
 
 impl Store {
-    /// Resolve condições, inteiros, TTL e quota sem copiar nem modificar o dataset.
-    /// A cópia temporária contém somente metadados das chaves do comando; Bytes é compartilhado.
+    /// Resolves conditions, integers, TTL, and quota without copying or changing the dataset.
+    /// The temporary copy contains only command-key metadata; Bytes is shared.
     pub fn prepare(&self, command: Command) -> Prepared {
         let origin = if matches!(
             &command,
@@ -247,7 +247,7 @@ impl Store {
                 unix_ms: self.clock.unix_millis(),
             }),
         )
-        .expect("configuração já validada");
+        .expect("configuration already validated");
         shadow.used_bytes = self.used_bytes;
         shadow.generation = self.generation;
         for key in &keys {
@@ -272,7 +272,7 @@ impl Store {
         self.prepared(reply, entries, origin)
     }
 
-    /// Prepara tombstones limitados, sem remover uma chave antes do append.
+    /// Prepares bounded tombstones without removing a key before append.
     pub fn prepare_expiration(&self, budget: usize) -> Prepared {
         let now = self.clock.now();
         let entries = self
@@ -319,9 +319,9 @@ impl Store {
         }
     }
 
-    /// Aplica sem reavaliar condições, quota ou relógio. O proprietário não intercala preparações.
+    /// Applies without reevaluating conditions, quota, or clock. The owner does not interleave preparations.
     pub fn apply(&mut self, prepared: Prepared) -> Reply {
-        assert_eq!(self.generation, prepared.generation, "preparação obsoleta");
+        assert_eq!(self.generation, prepared.generation, "stale preparation");
         for (key, _) in &prepared.entries {
             self.watches.invalidate(key);
             self.remove(key);
@@ -334,8 +334,8 @@ impl Store {
         prepared.reply
     }
 
-    /// Snapshot consistente e ordenado; valores imutáveis compartilham armazenamento.
-    /// Entradas expiradas ainda presentes são mantidas com deadline, nunca como persistentes.
+    /// Consistent, ordered snapshot; immutable values share storage.
+    /// Expired entries still present retain their deadline, never as persistent entries.
     pub fn snapshot(&self) -> Vec<Mutation> {
         let mut entries: Vec<_> = self
             .values
@@ -350,14 +350,14 @@ impl Store {
         entries
     }
 
-    /// Valida o lote completo antes de aplicar; TTL vencido vira remoção e não ressuscita valor anterior.
+    /// Validates the whole batch before applying; expired TTL becomes removal and does not resurrect a previous value.
     pub fn replay(&mut self, mutations: &[Mutation]) -> Result<(), ReplayError> {
         let prepared = self.prepare_replay(mutations, MutationOrigin::Client)?;
         self.apply(prepared);
         Ok(())
     }
 
-    /// Pré-valida as pós-imagens para persistir antes de aplicar no worker.
+    /// Prevalidates post-images for persistence before applying in the worker.
     pub fn prepare_replay(
         &self,
         mutations: &[Mutation],

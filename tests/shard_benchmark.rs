@@ -1,4 +1,4 @@
-//! Gate de desempenho do pacote Linux: execução explícita em máquina sem outras cargas.
+//! Linux package performance gate: explicit execution on a machine with no other workloads.
 #![forbid(unsafe_code)]
 
 #[path = "common/gate_receipt.rs"]
@@ -75,7 +75,7 @@ fn output(command: &mut Command) -> Result<String, String> {
     let result = process::run(command, TIMEOUT)?;
     if !result.status.success() {
         return Err(format!(
-            "observação falhou: {}",
+            "observation failed: {}",
             String::from_utf8_lossy(&result.stderr)
         ));
     }
@@ -90,7 +90,7 @@ fn hardware() -> Result<Value, String> {
         "cpu":cpu.lines().filter(|line| line.starts_with("model name") || line.starts_with("cpu cores") || line.starts_with("siblings")).take(3).collect::<Vec<_>>(),
         "logical_processors":cpu.lines().filter(|line| line.starts_with("processor")).count(),
         "available_parallelism":thread::available_parallelism().map_err(|e| e.to_string())?.get(),
-        "memory":memory.lines().find(|line| line.starts_with("MemTotal:")).ok_or("MemTotal ausente")?,
+        "memory":memory.lines().find(|line| line.starts_with("MemTotal:")).ok_or("missing MemTotal")?,
         "os_release":fs::read_to_string("/etc/os-release").map_err(|e| e.to_string())?,
         "kernel":output(Command::new("uname").arg("-a"))?,
         "loadavg_before":fs::read_to_string("/proc/loadavg").map_err(|e| e.to_string())?,
@@ -104,15 +104,15 @@ fn parse_rss(status: &str) -> Result<u64, String> {
     let mut fields = status
         .lines()
         .find_map(|line| line.strip_prefix("VmRSS:"))
-        .ok_or("VmRSS ausente")?
+        .ok_or("missing VmRSS")?
         .split_whitespace();
     let kib = fields
         .next()
-        .ok_or("VmRSS sem valor")?
+        .ok_or("VmRSS has no value")?
         .parse::<u64>()
         .map_err(|e| e.to_string())?;
     if fields.next() != Some("kB") || fields.next().is_some() {
-        return Err("unidade de VmRSS inesperada".into());
+        return Err("unexpected VmRSS unit".into());
     }
     kib.checked_mul(1024)
         .ok_or_else(|| "VmRSS excede u64".into())
@@ -145,7 +145,7 @@ impl RssSampler {
                     let _ = ready.send(());
                 }
                 if samples.len() >= MAX_RSS_SAMPLES {
-                    return Err("amostras RSS excederam limite".into());
+                    return Err("RSS samples exceeded the limit".into());
                 }
                 match wait.recv_timeout(RSS_INTERVAL) {
                     Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(samples),
@@ -159,7 +159,7 @@ impl RssSampler {
         };
         started
             .recv_timeout(TIMEOUT)
-            .map_err(|e| format!("iniciar amostragem RSS: {e}"))?;
+            .map_err(|e| format!("start RSS sampling: {e}"))?;
         Ok(sampler)
     }
     fn finish(mut self) -> Result<Vec<RssSample>, String> {
@@ -168,7 +168,7 @@ impl RssSampler {
             .take()
             .unwrap()
             .join()
-            .map_err(|_| "amostrador RSS encerrou com panic")?
+            .map_err(|_| "RSS sampler panicked")?
     }
 }
 impl Drop for RssSampler {
@@ -193,7 +193,7 @@ impl Directory {
 }
 impl Drop for Directory {
     fn drop(&mut self) {
-        // Caminho exclusivo criado por este guard; nunca uma fonte de dados reutilizada.
+        // Dedicated path created by this guard; never a reused data source.
         let _ = fs::remove_dir_all(&self.0);
     }
 }
@@ -251,7 +251,7 @@ fn batch(
 ) -> Result<(), String> {
     let remaining = deadline
         .checked_duration_since(Instant::now())
-        .ok_or("prazo da fase excedido")?;
+        .ok_or("phase deadline exceeded")?;
     stream
         .get_ref()
         .set_write_timeout(Some(remaining.min(TIMEOUT)))
@@ -263,14 +263,14 @@ fn batch(
     for _ in 0..pipeline {
         let remaining = deadline
             .checked_duration_since(Instant::now())
-            .ok_or("prazo da fase excedido")?;
+            .ok_or("phase deadline exceeded")?;
         stream
             .get_ref()
             .set_read_timeout(Some(remaining.min(TIMEOUT)))
             .map_err(|e| e.to_string())?;
         if !matches!(wire::read_response(stream).map_err(|e| e.to_string())?.value, Response::Integer(value) if value > 0)
         {
-            return Err("INCR não retornou inteiro positivo".into());
+            return Err("INCR did not return a positive integer".into());
         }
     }
     Ok(())
@@ -307,7 +307,7 @@ fn client_run(
     let mut stream = preparation?;
     start
         .recv_timeout(PHASE_TIMEOUT)
-        .map_err(|e| format!("aguardar fase medida: {e}"))?;
+        .map_err(|e| format!("wait for measured phase: {e}"))?;
     let mut samples = Vec::with_capacity(workload.measured.len());
     let began = Instant::now();
     let deadline = began + PHASE_TIMEOUT;
@@ -400,7 +400,7 @@ fn repetition(
         for _ in 0..CLIENTS {
             prepared
                 .recv_timeout(PHASE_TIMEOUT)
-                .map_err(|e| format!("aquecimento: {e}"))??;
+                .map_err(|e| format!("warmup: {e}"))??;
         }
         Ok::<_, String>(())
     })();
@@ -429,7 +429,7 @@ fn repetition(
         .into_iter()
         .map(|task| {
             task.join()
-                .map_err(|_| "cliente encerrou com panic".to_owned())
+                .map_err(|_| "client panicked".to_owned())
                 .and_then(|result| result)
         })
         .collect();
@@ -463,7 +463,7 @@ fn repetition(
         .iter()
         .map(|sample| sample.bytes)
         .max()
-        .ok_or("nenhuma amostra RSS dentro da fase medida")?;
+        .ok_or("no RSS sample within the measured phase")?;
     let mut stream = connection(address)?;
     for (key, count) in &expected {
         stream
@@ -475,7 +475,7 @@ fn repetition(
             .value
             != Response::Bulk(Some(count.to_string().into_bytes()))
         {
-            return Err("estado final difere dos INCR medidos e do aquecimento".into());
+            return Err("final state differs from measured and warmup INCR operations".into());
         }
     }
     let summary = json!({"repetition":iteration+1, "operations":CLIENTS*OPERATIONS,
@@ -493,8 +493,8 @@ fn repetition(
     Ok((summary, raw, rates))
 }
 
-// O JSON compacto acrescenta só uma vírgula ao ampliar um array não vazio.
-// O envelope já entra na conta, sem indentação adicional pelo aninhamento.
+// Compact JSON adds only one comma when extending a nonempty array.
+// The envelope is already counted, without additional indentation from nesting.
 struct RawSamples {
     document: Value,
     bytes: usize,
@@ -506,7 +506,7 @@ impl RawSamples {
             .map_err(|e| e.to_string())?
             .len();
         if bytes > limit {
-            return Err(format!("amostras excederam o limite de {limit} bytes"));
+            return Err(format!("samples exceeded the {limit}-byte limit"));
         }
         Ok(Self {
             document,
@@ -527,7 +527,7 @@ impl RawSamples {
             .checked_add(detail_bytes)
             .and_then(|bytes| bytes.checked_add(usize::from(!repetitions.is_empty())))
             .filter(|bytes| *bytes <= self.limit)
-            .ok_or_else(|| format!("amostras excederam o limite de {} bytes", self.limit))?;
+            .ok_or_else(|| format!("samples exceeded the {}-byte limit", self.limit))?;
         repetitions.push(detail);
         self.bytes = bytes;
         Ok(())
@@ -546,28 +546,28 @@ impl RawSamples {
             .checked_sub(previous_bytes)
             .and_then(|bytes| bytes.checked_add(observation_bytes))
             .filter(|bytes| *bytes <= self.limit)
-            .ok_or_else(|| format!("amostras excederam o limite de {} bytes", self.limit))?;
+            .ok_or_else(|| format!("samples exceeded the {}-byte limit", self.limit))?;
         self.document["loadavg_after"] = observation;
         let bytes = serde_json::to_vec(&self.document).map_err(|e| e.to_string())?;
         if bytes.len() != self.bytes || bytes.len() > self.limit {
-            return Err("tamanho final das amostras difere do orçamento compacto".into());
+            return Err("final sample size differs from the compact budget".into());
         }
         Ok(bytes)
     }
 }
 
 #[test]
-#[ignore = "gate Linux do pacote: requer SIDER_BENCH_IDLE_MACHINE=1 e máquina sem builds ou outra carga"]
+#[ignore = "Linux package gate: requires SIDER_BENCH_IDLE_MACHINE=1 and a machine without builds or other workloads"]
 fn release_benchmarks_gate() {
     assert_eq!(
         std::env::var("SIDER_BENCH_IDLE_MACHINE").as_deref(),
         Ok("1"),
-        "a carga exige confirmação explícita de máquina livre"
+        "the load requires explicit confirmation of an idle machine"
     );
     let context = gate_receipt::GateContext::from_env("benchmarks").unwrap();
     let package = release_input::ReleaseInput::from_env(&context).unwrap();
     let raw_path = context.release_dir().join("benchmarks-samples.json");
-    assert!(!raw_path.exists(), "não substituir amostras anteriores");
+    assert!(!raw_path.exists(), "do not replace previous samples");
     let began = Instant::now();
     let hardware = hardware().unwrap();
     let methodology = json!({"scenarios":16,"repetitions":REPETITIONS,"clients":CLIENTS,
@@ -577,11 +577,11 @@ fn release_benchmarks_gate() {
         "throughput_window":"earliest_client_start_to_latest_client_end",
         "rss_interval_requested_ms":RSS_INTERVAL.as_millis(),
         "operator_confirmed_idle_machine":true,
-        "limitations":["loopback; clientes e amostrador RSS compartilham a máquina",
-            "RTT de lote pipeline não é dividido em latência fictícia por comando",
-            "RSS observado durante a medição, não pico garantido",
-            "ordem fixa de cenários; três repetições descritivas, sem intervalo de confiança",
-            "sem limiar de superioridade sobre Redis ou garantia de desempenho"]});
+        "limitations":["loopback; clients and RSS sampler share the machine",
+            "pipeline batch RTT is not divided into fictitious per-command latency",
+            "RSS observed during measurement, not a guaranteed peak",
+            "fixed scenario order; three descriptive repetitions, without a confidence interval",
+            "no threshold for outperforming Redis or performance guarantee"]});
     let raw = json!({"schema_version":1,"task":"R11-05","sha":context.sha(),"version":context.version(),
         "target":context.target(),"input":package.details(),"hardware":hardware,"methodology":methodology,
         "loadavg_after":null,"scenarios":matrix().into_iter().map(|scenario|json!({
@@ -674,7 +674,7 @@ fn benchmark_contract_rss_requires_observation_and_known_units() {
 #[test]
 fn benchmark_contract_raw_samples_preserve_nested_values_without_pretty_growth() {
     let detail = json!({
-        "effective_configuration":"diagnóstico\npath=\"C:\\dados\"",
+        "effective_configuration":"diagnostic café\npath=\"C:\\data\"",
         "clients":[{"client":0,"seed":SEED,"samples":(0..128).map(|index|json!({
             "start_seconds":index as f64 / 1000.0,"rtt_nanoseconds":123456
         })).collect::<Vec<_>>()}],
@@ -683,7 +683,7 @@ fn benchmark_contract_raw_samples_preserve_nested_values_without_pretty_growth()
         })).collect::<Vec<_>>()
     });
     let envelope = json!({"schema_version":1,"task":"R11-05",
-    "hardware":{"cpu":["CPU de teste"],"toolchain_file":"[toolchain]\nchannel=\"1.97.1\""},
+    "hardware":{"cpu":["Test CPU"],"toolchain_file":"[toolchain]\nchannel=\"1.97.1\""},
     "loadavg_after":null,"scenarios":[
         {"scenario":{"shards":1},"repetitions":[]},
         {"scenario":{"shards":4},"repetitions":[]}
@@ -721,7 +721,7 @@ fn benchmark_contract_raw_samples_limit_includes_envelope_and_final_observation(
     let detail = json!({"rss_samples":[{"seconds":0.001,"bytes":12345678}]});
     let mut expected = envelope.clone();
     expected["scenarios"][0]["repetitions"] = json!([detail.clone()]);
-    // "é" ocupa os mesmos quatro bytes de null, contando aspas e UTF-8.
+    // "é" occupies the same four bytes as null, counting quotes and UTF-8.
     expected["loadavg_after"] = json!("é");
     let exact_bytes = serde_json::to_vec(&expected).unwrap();
     let mut samples = RawSamples::new(envelope.clone(), exact_bytes.len()).unwrap();

@@ -1,4 +1,4 @@
-//! AOF binário com lotes resolvidos e um único proprietário da escrita.
+//! Binary AOF with resolved batches and a single write owner.
 
 pub mod backup;
 mod diagnostics;

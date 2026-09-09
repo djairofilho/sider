@@ -1,4 +1,4 @@
-//! Comandos tipados e parsing sem acesso ao armazenamento.
+//! Typed commands and parsing without storage access.
 
 mod collections;
 mod fpconv;
@@ -18,7 +18,7 @@ use std::time::Duration;
 pub use parser::{RequestError, parse};
 pub use reply::{ExecutionError, Reply};
 
-/// Condição de existência verificada pelo worker antes de substituir o valor.
+/// Existence condition checked by the worker before replacing the value.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SetCondition {
     #[default]
@@ -27,7 +27,7 @@ pub enum SetCondition {
     Present,
 }
 
-/// Política temporal de SET, resolvida no instante de execução.
+/// SET time policy, resolved at execution time.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SetExpiry {
     #[default]
@@ -36,7 +36,7 @@ pub enum SetExpiry {
     After(Duration),
 }
 
-/// Opções independentes de transporte para uma substituição condicional.
+/// Transport-independent options for a conditional replacement.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SetOptions {
     pub condition: SetCondition,
@@ -44,14 +44,14 @@ pub struct SetOptions {
     pub return_previous: bool,
 }
 
-/// Unidade de uma operação temporal, preservada para validar e reportar erros.
+/// Unit of a time operation, retained for validation and error reporting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExpiryUnit {
     Seconds,
     Milliseconds,
 }
 
-/// Decimal canônico compatível com o parser de inteiros Redis.
+/// Canonical decimal compatible with the Redis integer parser.
 pub(crate) fn parse_decimal(value: &[u8]) -> Option<i64> {
     if value == b"0" {
         return Some(0);
@@ -63,10 +63,10 @@ pub(crate) fn parse_decimal(value: &[u8]) -> Option<i64> {
     std::str::from_utf8(value).ok()?.parse().ok()
 }
 
-/// Comando validado, sem canais ou conhecimento do protocolo de transporte.
+/// Validated command, without channels or transport-protocol knowledge.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
-    /// Diagnóstico operacional próprio, com seleção limitada de seções.
+    /// Sider operational diagnostics, with a limited section selection.
     Info(InfoSections),
     SortedSet {
         key: Bytes,
@@ -76,103 +76,103 @@ pub enum Command {
         key: Bytes,
         operation: SetCommand,
     },
-    /// Operação sobre campos e valores binários de um hash.
+    /// Operation on binary fields and values in a hash.
     Hash {
         key: Bytes,
         operation: HashCommand,
     },
-    /// Operação de lista, incluindo pops individuais e ranges por índice.
+    /// List operation, including individual pops and index ranges.
     List {
         key: Bytes,
         operation: ListCommand,
     },
-    /// Responde PONG ou devolve a mensagem binária.
+    /// Returns PONG or the binary message.
     Ping(Option<Bytes>),
-    /// Devolve exatamente o payload.
+    /// Returns the payload exactly.
     Echo(Bytes),
-    /// Lê o valor de uma chave.
+    /// Reads a key's value.
     Get {
         key: Bytes,
     },
-    /// Cria ou substitui um valor persistente.
+    /// Creates or replaces a persistent value.
     Set {
         key: Bytes,
         value: Bytes,
     },
-    /// Aplica condições, prazo e retorno do valor anterior.
+    /// Applies conditions, expiry, and previous-value return.
     SetWithOptions {
         key: Bytes,
         value: Bytes,
         options: SetOptions,
     },
-    /// Remove chaves; duplicatas são preservadas para contar apenas efeitos reais.
+    /// Removes keys; duplicates are retained to count only actual effects.
     Del {
         keys: Vec<Bytes>,
     },
-    /// Conta cada ocorrência de uma chave existente.
+    /// Counts each occurrence of an existing key.
     Exists {
         keys: Vec<Bytes>,
     },
-    /// Incrementa um inteiro decimal i64, criando zero antes da operação se ausente.
+    /// Increments an i64 decimal integer, creating zero before the operation if absent.
     Incr {
         key: Bytes,
     },
-    /// Decrementa um inteiro decimal i64.
+    /// Decrements an i64 decimal integer.
     Decr {
         key: Bytes,
     },
-    /// Lê valores na ordem das chaves, preservando duplicatas.
+    /// Reads values in key order, retaining duplicates.
     MGet {
         keys: Vec<Bytes>,
     },
-    /// Aplica um lote indivisível; o último par de uma chave prevalece.
+    /// Applies an indivisible batch; the last pair for a key prevails.
     MSet {
         entries: Vec<(Bytes, Bytes)>,
     },
-    /// Define expiração relativa em milissegundos; prazo não positivo remove a chave.
+    /// Sets relative expiry in milliseconds; a non-positive expiry removes the key.
     Expire {
         key: Bytes,
         value: i64,
         unit: ExpiryUnit,
     },
-    /// Retorna o prazo restante ou os sentinelas -1 (persistente) e -2 (ausente).
+    /// Returns the remaining expiry or sentinels -1 (persistent) and -2 (missing).
     Ttl {
         key: Bytes,
         milliseconds: bool,
     },
-    /// Remove a expiração de uma chave existente.
+    /// Removes expiry from an existing key.
     Persist {
         key: Bytes,
     },
-    /// Inscreve esta conexão em canais efêmeros, fora do armazenamento.
+    /// Subscribes this connection to ephemeral channels, outside storage.
     Subscribe {
         channels: Vec<Bytes>,
     },
-    /// Remove inscrições; lista vazia remove todas as inscrições da conexão.
+    /// Removes subscriptions; an empty list removes all subscriptions for the connection.
     Unsubscribe {
         channels: Vec<Bytes>,
     },
-    /// Publica uma mensagem binária sem alterar o dataset.
+    /// Publishes a binary message without changing the dataset.
     Publish {
         channel: Bytes,
         message: Bytes,
     },
-    /// Inicia uma fila transacional pertencente à conexão.
+    /// Starts a transaction queue owned by the connection.
     Multi,
-    /// Executa a fila inteira no seu único shard.
+    /// Executes the entire queue in its single shard.
     Exec,
-    /// Descarta a fila e suas observações.
+    /// Discards the queue and its observations.
     Discard,
-    /// Observa chaves até EXEC, DISCARD, UNWATCH ou encerramento.
+    /// Watches keys until EXEC, DISCARD, UNWATCH, or shutdown.
     Watch {
         keys: Vec<Bytes>,
     },
-    /// Libera as observações desta conexão.
+    /// Releases this connection's observations.
     Unwatch,
 }
 
 impl Command {
-    /// Classificação sem consultar o dataset; condições que falhariam continuam escritas.
+    /// Classification without consulting the dataset; conditions that would fail remain writes.
     pub fn writes_dataset(&self) -> bool {
         match self {
             Self::Set { .. }
@@ -217,7 +217,7 @@ impl Command {
         }
     }
 
-    /// Visita chaves na ordem original sem alocar nem confundir valores com chaves.
+    /// Visits keys in original order without allocating or confusing values with keys.
     pub fn visit_keys(&self, mut visit: impl FnMut(&Bytes)) {
         match self {
             Self::Ping(_)

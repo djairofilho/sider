@@ -166,9 +166,9 @@ async fn pubsub_eviction_interrupts_blocked_write_and_cleans_every_channel() {
         payload: Bytes::from(vec![0xff; 128]),
     };
     assert_eq!(hub.publish(message()), 1);
-    assert_pending(connection.as_mut()).await; // A escrita de 128 bytes bloqueia no duplex de 64.
+    assert_pending(connection.as_mut()).await; // The 128-byte write blocks in the 64-byte duplex.
     assert_eq!(hub.publish(message()), 1);
-    assert_eq!(hub.publish(message()), 0); // Fila cheia remove o assinante sem esperar I/O.
+    assert_eq!(hub.publish(message()), 0); // A full queue removes the subscriber without waiting for I/O.
     assert!(matches!(
         ready(connection.as_mut()).await,
         Err(ConnectionError::PubSub(PubSubError::Closed))
@@ -397,8 +397,8 @@ async fn guard(test: impl Future<Output = ()>) {
         .expect("connection test exceeded its outer deadline");
 }
 
-// Uma única sondagem sempre termina imediatamente: não dá ao runtime a chance
-// de avançar o relógio até um timer futuro para disfarçar falta de progresso.
+// A single probe always ends immediately: it does not give the runtime a chance
+// to advance the clock to a future timer and conceal a lack of progress.
 async fn poll_once<F: Future>(mut future: Pin<&mut F>) -> Poll<F::Output> {
     poll_fn(|context| Poll::Ready(future.as_mut().poll(context))).await
 }
@@ -419,7 +419,7 @@ where
     F: Future<Output = Result<(), ConnectionError>>,
 {
     let mut writing = Box::pin(client.write_all(bytes));
-    // Há no máximo um avanço por byte, mesmo com um duplex de capacidade 1.
+    // There is at most one advance per byte, even with a duplex of capacity 1.
     for _ in 0..=bytes.len() {
         match poll_once(writing.as_mut()).await {
             Poll::Ready(result) => {
@@ -643,8 +643,8 @@ async fn write_timeout_closes_connection_without_dispatching_the_next_set() {
         .concat();
 
         feed(&mut client, connection.as_mut(), &request).await;
-        // Já existe outro pedido no socket, mas a primeira resposta é maior que
-        // o duplex e o cliente não a lê antes do prazo.
+        // Another request is already in the socket, but the first reply is larger
+        // than the duplex and the client does not read it before the timeout.
         let mut later = Box::pin(client.write_all(LATER_SET));
         ready(later.as_mut()).await.unwrap();
         drop(later);
@@ -773,8 +773,8 @@ async fn shutdown_during_a_blocked_write_delivers_the_complete_accepted_response
         feed(&mut client, connection.as_mut(), &request).await;
         assert_pending(owner.as_mut()).await;
         assert_pending(connection.as_mut()).await;
-        // A resposta já começou e não cabe no duplex. A parada não deve abortar
-        // essa escrita nem despachar outro comando depois de terminá-la.
+        // The reply has already started and does not fit in the duplex. Shutdown
+        // must not abort this write or dispatch another command after it finishes.
         stop.send(true).unwrap();
         assert_pending(connection.as_mut()).await;
         ready(owner.as_mut()).await;
@@ -929,8 +929,8 @@ async fn shutdown_cancels_a_send_waiting_behind_a_full_worker_queue() {
         let mut connection = Box::pin(run(server, config, database, stop.subscribe()));
         feed(&mut client, connection.as_mut(), LATER_SET).await;
 
-        // O worker ainda não foi polled, portanto a única vaga continua ocupada
-        // pelo PING. A conexão deve terminar sem esperar capacidade ou resposta.
+        // The worker has not been polled, so PING still occupies the only slot.
+        // The connection must end without waiting for capacity or a reply.
         stop.send(true).unwrap();
         ready(connection.as_mut()).await.unwrap();
         assert_eof(&mut client).await;

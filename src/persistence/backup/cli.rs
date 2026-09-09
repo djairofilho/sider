@@ -1,4 +1,4 @@
-//! Parser puro: caminhos são OsString e erros não repetem valores fornecidos.
+//! Pure parser: paths are OsString and errors do not repeat supplied values.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -23,15 +23,15 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
     let action = args
         .next()
         .and_then(|value| value.into_string().ok())
-        .ok_or(Error::Invalid("subcomando ausente"))?;
+        .ok_or(Error::Invalid("missing subcommand"))?;
     if !matches!(action.as_str(), "export" | "verify" | "restore") {
-        return Err(Error::Invalid("subcomando desconhecido"));
+        return Err(Error::Invalid("unknown subcommand"));
     }
     let mut values = BTreeMap::new();
     while let Some(name) = args.next() {
         let name = name
             .into_string()
-            .map_err(|_| Error::Invalid("nome de opção inválido"))?;
+            .map_err(|_| Error::Invalid("invalid option name"))?;
         if !matches!(
             name.as_str(),
             "--source"
@@ -45,28 +45,28 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
                 | "--max-dataset-bytes"
                 | "--timeout-ms"
         ) {
-            return Err(Error::Invalid("opção desconhecida"));
+            return Err(Error::Invalid("unknown option"));
         }
         let value = args
             .next()
             .filter(|value| !value.is_empty())
-            .ok_or(Error::Invalid("opção sem valor"))?;
+            .ok_or(Error::Invalid("option without value"))?;
         if values.insert(name, value).is_some() {
-            return Err(Error::Invalid("opção repetida"));
+            return Err(Error::Invalid("repeated option"));
         }
     }
     fn required(values: &mut BTreeMap<String, OsString>, name: &str) -> Result<OsString, Error> {
         values
             .remove(name)
-            .ok_or(Error::Invalid("opção obrigatória ausente"))
+            .ok_or(Error::Invalid("required option missing"))
     }
     fn number(value: OsString) -> Result<u64, Error> {
         value
             .to_str()
             .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
-            .ok_or(Error::Invalid("inteiro decimal inválido"))?
+            .ok_or(Error::Invalid("invalid decimal integer"))?
             .parse()
-            .map_err(|_| Error::Invalid("inteiro fora do limite"))
+            .map_err(|_| Error::Invalid("integer out of range"))
     }
     let mut limits = Limits::default();
     for (name, field) in [
@@ -76,7 +76,7 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
     ] {
         if let Some(value) = values.remove(name) {
             *field = usize::try_from(number(value)?)
-                .map_err(|_| Error::Invalid("inteiro fora do limite"))?;
+                .map_err(|_| Error::Invalid("integer out of range"))?;
         }
     }
     if let Some(value) = values.remove("--max-snapshot-bytes") {
@@ -90,13 +90,13 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
     let result = if action == "export" {
         let source = source
             .to_str()
-            .ok_or(Error::Invalid("endereço inválido"))?
+            .ok_or(Error::Invalid("invalid address"))?
             .parse()
-            .map_err(|_| Error::Invalid("origem exige IP literal e porta"))?;
+            .map_err(|_| Error::Invalid("source requires a literal IP address and port"))?;
         let destination = required(&mut values, "--destination")?.into();
         let source_sha = required(&mut values, "--source-sha")?
             .into_string()
-            .map_err(|_| Error::Invalid("SHA inválido"))?;
+            .map_err(|_| Error::Invalid("invalid SHA"))?;
         super::manifest::require_hex(&source_sha, 40)?;
         Action::Export(ExportOptions {
             source,
@@ -107,9 +107,9 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
     } else {
         let layout = DurableLayout {
             shard_count: u32::try_from(number(required(&mut values, "--shards")?)?)
-                .map_err(|_| Error::Invalid("quantidade de shards"))?,
+                .map_err(|_| Error::Invalid("shard count"))?,
             routing_version: u32::try_from(number(required(&mut values, "--routing")?)?)
-                .map_err(|_| Error::Invalid("versão de roteamento"))?,
+                .map_err(|_| Error::Invalid("routing version"))?,
         };
         layout.validate()?;
         layout.quota(limits.max_dataset_bytes, 0)?;
@@ -129,7 +129,7 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
         }
     };
     if !values.is_empty() {
-        return Err(Error::Invalid("opção incompatível com subcomando"));
+        return Err(Error::Invalid("option incompatible with subcommand"));
     }
     Ok(result)
 }

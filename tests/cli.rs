@@ -15,7 +15,7 @@ static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 fn sider() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_sider"));
-    // Só altera o ambiente do filho, nunca o ambiente global dos testes.
+    // Changes only the child environment, never the global test environment.
     for (name, _) in std::env::vars_os() {
         if name
             .to_string_lossy()
@@ -33,8 +33,8 @@ struct TestDirectory(PathBuf);
 
 impl TestDirectory {
     fn new() -> Self {
-        // create_dir comprova propriedade exclusiva, inclusive se existir um
-        // diretório de uma execução anterior com PID reutilizado.
+        // create_dir establishes exclusive ownership, including when there is a
+        // directory from a previous run with a reused PID.
         for _ in 0..100 {
             let path = std::env::temp_dir().join(format!(
                 "sider-cli-{}-{}",
@@ -57,7 +57,7 @@ impl TestDirectory {
 
 impl Drop for TestDirectory {
     fn drop(&mut self) {
-        // Nomes exatos sob um diretório criado pelo teste; sem remoção recursiva.
+        // Exact names under a test-created directory; no recursive deletion.
         for name in ["ready.json", "stdout.log", "stderr.log"] {
             let _ = fs::remove_file(self.file(name));
         }
@@ -72,7 +72,7 @@ struct ChildProcess {
 
 impl ChildProcess {
     fn start(command: &mut Command, directory: TestDirectory) -> Self {
-        // Arquivos evitam deadlock por pipe cheio enquanto aguardamos o filho.
+        // Files prevent full-pipe deadlock while waiting for the child.
         let stdout = File::create(directory.file("stdout.log")).unwrap();
         let stderr = File::create(directory.file("stderr.log")).unwrap();
         let child = command
@@ -80,7 +80,7 @@ impl ChildProcess {
             .stderr(Stdio::from(stderr))
             .spawn()
             .expect("spawn owned test process");
-        // Libera as cópias dos handles no pai antes de qualquer cleanup Windows.
+        // Releases the parent handle copies before any Windows cleanup.
         command.stdout(Stdio::null()).stderr(Stdio::null());
         Self { child, directory }
     }
@@ -96,7 +96,7 @@ impl ChildProcess {
                 };
             }
             assert!(Instant::now() < deadline, "child process exit deadline");
-            // Espera apenas a mudança observável de estado do processo filho.
+            // Waits only for an observable change in child process state.
             std::thread::sleep(POLL_INTERVAL);
         }
     }
@@ -107,7 +107,7 @@ impl ChildProcess {
         loop {
             match fs::read(&path) {
                 Ok(bytes) => {
-                    // JSON parcial é falha: a publicação promete ser atômica.
+                    // Partial JSON is a failure: publication promises atomicity.
                     let ready: serde_json::Value =
                         serde_json::from_slice(&bytes).expect("complete readiness JSON");
                     let object = ready.as_object().expect("readiness object");
@@ -135,8 +135,8 @@ impl ChildProcess {
                 );
             }
             assert!(Instant::now() < deadline, "readiness publication deadline");
-            // O arquivo é o sinal de prontidão. Não sondamos portas nem usamos
-            // esta espera para determinar ordem de comandos do banco.
+            // The file is the readiness signal. We do not probe ports or use
+            // this wait to determine database command order.
             std::thread::sleep(POLL_INTERVAL);
         }
     }
@@ -148,8 +148,8 @@ impl Drop for ChildProcess {
             let _ = self.child.kill();
             let _ = self.child.wait();
         }
-        // O binário cria um único arquivo temporário de prontidão com serial 0.
-        // Só pode restar aqui se o teste tiver interrompido o filho nesse ponto.
+        // The binary creates a single temporary readiness file with serial 0.
+        // It can remain here only if the test interrupted the child at that point.
         let own_temporary = self
             .directory
             .file(&format!(".sider-ready-{}-0.tmp", self.child.id()));
@@ -215,8 +215,8 @@ fn executable_publishes_readiness_and_serves_literal_tcp_commands() {
     );
     exchange(&mut connection, b"*1\r\n$4\r\nPING\r\n", b"+PONG\r\n");
     assert!(process.child.try_wait().unwrap().is_none());
-    // Drop termina e recolhe somente este filho. No Windows não envia sinais
-    // ao console compartilhado; shutdown cooperativo é testado pela API serve.
+    // Drop terminates and reaps only this child. On Windows it sends no signals
+    // to the shared console; cooperative shutdown is tested through the serve API.
 }
 
 #[test]
@@ -306,7 +306,7 @@ fn help_does_not_require_valid_server_configuration() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("Uso: sider"));
+    assert!(stdout.contains("Usage: sider"));
     assert!(stdout.contains("SIDER_READY_FILE"));
 }
 
@@ -379,7 +379,7 @@ fn unknown_arguments_are_rejected() {
     let output = output(sider().arg("--unknown"));
 
     assert!(!output.status.success());
-    assert!(String::from_utf8(output.stderr).unwrap().contains("uso:"));
+    assert!(String::from_utf8(output.stderr).unwrap().contains("usage:"));
 }
 
 #[cfg(unix)]

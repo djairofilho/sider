@@ -1,4 +1,4 @@
-//! R10-03: exportação TCP, arquivo verificável e restauração sem sobrescrita.
+//! R10-03: TCP export, verifiable archive, and restore without overwriting.
 #![forbid(unsafe_code)]
 
 #[path = "common/process.rs"]
@@ -155,7 +155,7 @@ async fn serve(stream: &mut (impl AsyncRead + AsyncWrite + Unpin), payload: &[u8
             .unwrap(),
         Message::Export { .. }
     ));
-    // Fragmentação de TCP não é fronteira de registro nem de snapshot.
+    // TCP fragmentation does not define record or snapshot boundaries.
     for bytes in payload.chunks(17) {
         if stream.write_all(bytes).await.is_err() {
             return;
@@ -291,9 +291,9 @@ async fn malformed_streams_never_publish_a_backup() {
         let destination = parent.child(&format!("bad-{index}"));
         assert!(
             fixture(destination.clone(), payload, None).await.is_err(),
-            "caso {index}"
+            "case {index}"
         );
-        assert!(!destination.exists(), "destino parcial no caso {index}");
+        assert!(!destination.exists(), "partial destination in case {index}");
     }
 }
 
@@ -461,7 +461,7 @@ async fn corruption_layout_and_quota_are_rejected_before_destination_creation() 
     let mut changed: serde_json::Value = serde_json::from_slice(&original_manifest).unwrap();
     changed["layout"]["shard_count"] = 2.into();
     fs::write(&manifest_path, serde_json::to_vec(&changed).unwrap()).unwrap();
-    // Mesmo a atualização do checksum do manifesto não altera a identidade do AOF.
+    // Even updating the manifest checksum does not change the AOF identity.
     rewrite_checksums(&backup_path);
     let mut request = restore_options(&parent, "restored");
     request.layout.shard_count = 2;
@@ -540,7 +540,7 @@ async fn real_cli_exports_tcp_verifies_restores_and_redacts_invalid_values() {
             String::from_utf8_lossy(&result.stderr)
         );
         let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
-        assert_eq!(report["live_entries"], 5); // TTL absoluto de 1970 não é reiniciado.
+        assert_eq!(report["live_entries"], 5); // The absolute TTL from 1970 is not restarted.
     }
     let result = run_cli(vec![
         "export".into(),

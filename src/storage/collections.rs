@@ -1,4 +1,4 @@
-//! Execução tipada no proprietário do mapa, com substituição após pré-validar quota.
+//! Typed execution in the map owner, with replacement after quota prevalidation.
 
 use super::*;
 use crate::command::{HashCommand, ListCommand, SetCommand};
@@ -181,7 +181,7 @@ impl Store {
     }
 }
 
-/// Converte índices inclusivos assinados sem overflow nos extremos de i64.
+/// Converts inclusive signed indexes without overflow at i64 bounds.
 pub(super) fn range(length: usize, start: i64, stop: i64) -> Option<(usize, usize)> {
     let length = length as i128;
     let mut start = i128::from(start);

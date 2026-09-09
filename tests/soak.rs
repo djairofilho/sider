@@ -1,4 +1,4 @@
-//! Carga prolongada com modelo independente, processos reais e falhas planejadas.
+//! Sustained load with an independent model, real processes, and planned failures.
 #![forbid(unsafe_code)]
 
 #[path = "common/gate_receipt.rs"]
@@ -52,7 +52,7 @@ fn exchange(stream: &mut TcpStream, args: &[&[u8]]) -> Response {
 
 fn info(address: SocketAddr) -> BTreeMap<String, String> {
     let Response::Bulk(Some(bytes)) = exchange(&mut connect(address), &[b"INFO", b"all"]) else {
-        panic!("INFO deve retornar bulk string");
+        panic!("INFO must return a bulk string");
     };
     let mut fields = BTreeMap::new();
     for line in std::str::from_utf8(&bytes).unwrap().split("\r\n") {
@@ -62,7 +62,7 @@ fn info(address: SocketAddr) -> BTreeMap<String, String> {
         let (key, value) = line.split_once(':').unwrap();
         assert!(
             fields.insert(key.to_owned(), value.to_owned()).is_none(),
-            "métrica duplicada"
+            "duplicate metric"
         );
     }
     fields
@@ -71,7 +71,7 @@ fn info(address: SocketAddr) -> BTreeMap<String, String> {
 fn metric(fields: &BTreeMap<String, String>, key: &str) -> u64 {
     fields
         .get(key)
-        .unwrap_or_else(|| panic!("métrica ausente: {key}"))
+        .unwrap_or_else(|| panic!("missing metric: {key}"))
         .parse()
         .unwrap()
 }
@@ -139,7 +139,7 @@ fn mutate(stream: &mut TcpStream, slot: usize, value: u64) {
         );
     }
     let Response::Array(Some(replies)) = exchange(stream, &[b"EXEC"]) else {
-        panic!("EXEC não confirmou o lote");
+        panic!("EXEC did not acknowledge the batch");
     };
     assert_eq!(replies.len(), 8);
     assert!(
@@ -158,7 +158,7 @@ fn verify_slot(stream: &mut TcpStream, slot: usize, value: u64) {
             &[b"MGET", &key(slot, "counter"), &key(slot, "peer")]
         ),
         Response::Array(Some(vec![bulk(number.as_bytes()), bulk(number.as_bytes())])),
-        "meio lote ou confirmação perdida"
+        "partial batch or lost acknowledgment"
     );
     assert_eq!(
         exchange(stream, &[b"HGET", &key(slot, "hash"), b"field"]),
@@ -215,7 +215,7 @@ fn await_replica(address: SocketAddr, model: &[u64; SLOTS]) {
         }
         assert!(
             Instant::now() < deadline,
-            "réplica não convergiu dentro do prazo"
+            "replica did not converge before the deadline"
         );
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -272,7 +272,7 @@ fn expiration(address: SocketAddr, replica: SocketAddr) {
         }
         assert!(
             Instant::now() < deadline,
-            "TTL não venceu nos dois processos"
+            "TTL did not expire in both processes"
         );
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -298,12 +298,12 @@ fn slow_subscriber(address: SocketAddr) {
             for sequence in 0..MESSAGES {
                 let Response::Array(Some(parts)) = wire::read_response(&mut fast).unwrap().value
                 else {
-                    panic!("notificação inválida");
+                    panic!("invalid notification");
                 };
                 assert_eq!(parts[0], bulk(b"message"));
                 assert_eq!(parts[1], bulk(channel));
                 let Response::Bulk(Some(bytes)) = &parts[2] else {
-                    panic!("payload ausente")
+                    panic!("missing payload")
                 };
                 assert_eq!(bytes.len(), 65536);
                 assert_eq!(&bytes[..8], &(sequence as u64).to_le_bytes());
@@ -323,7 +323,7 @@ fn slow_subscriber(address: SocketAddr) {
     });
     assert!(
         metric(&info(address), "pubsub_evictions_total") > before,
-        "assinante lento não foi expulso pela fila limitada"
+        "slow subscriber was not evicted by the bounded queue"
     );
     drop(slow);
 }
@@ -372,7 +372,7 @@ fn start(
         }
         assert!(
             Instant::now() < deadline,
-            "listener interno não publicou prontidão"
+            "internal listener did not publish readiness"
         );
         std::thread::sleep(Duration::from_millis(10));
     };
@@ -413,18 +413,18 @@ fn observe(instance: &Instance) -> Value {
     let memory = rss(instance.process.id());
     assert!(
         memory <= RSS_ENVELOPE,
-        "RSS excedeu envelope explícito do ensaio"
+        "RSS exceeded the explicit test envelope"
     );
     json!({ "pid": instance.process.id(), "rss_bytes": memory, "info": fields })
 }
 
 fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -> Value {
     if !cfg!(target_os = "linux") {
-        panic!("soak exige processo Linux com /proc");
+        panic!("soak requires a Linux process with /proc");
     }
     assert!(binary.is_absolute() && output.is_absolute());
     assert!(duration >= Duration::from_secs(20));
-    fs::create_dir(output).expect("evidências exigem diretório novo");
+    fs::create_dir(output).expect("evidence requires a new directory");
     let mut samples = OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -505,7 +505,7 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
             ttl_checks += 1;
             slow_subscriber(primary.process.address());
             pubsub_checks += 1;
-            // Reconexão RESP não pode preservar MULTI/WATCH ou inscrições anteriores.
+            // RESP reconnection must not preserve MULTI/WATCH or previous subscriptions.
             writer = connect(primary.process.address());
             next_event = Instant::now() + event_period;
         }
@@ -534,7 +534,7 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
                 verify_all(primary.process.address(), &model);
                 writer = connect(primary.process.address());
             } else {
-                // Avança durante indisponibilidade da réplica para exigir retomada real.
+                // Advance while the replica is unavailable to require an actual resumption.
                 model[slot] += 1;
                 mutate(&mut writer, slot, model[slot]);
                 rounds += 1;
@@ -554,14 +554,14 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
         replica.process.assert_alive();
         if last_progress.elapsed() >= Duration::from_secs(60) {
             eprintln!(
-                "soak: {} s; {} lotes; {} verificações; crashes primário/réplica {primary_crashes}/{replica_crashes}",
+                "soak: {} s; {} batches; {} checks; primary/replica crashes {primary_crashes}/{replica_crashes}",
                 began.elapsed().as_secs(),
                 rounds,
                 checks
             );
             last_progress = Instant::now();
         }
-        // Limite declarado de 20 iterações/s: carga contínua e dataset limitado.
+        // Declared limit of 20 iterations/s: continuous load and a bounded dataset.
         if let Some(remaining) = Duration::from_millis(50).checked_sub(tick.elapsed()) {
             std::thread::sleep(remaining);
         }
@@ -577,17 +577,17 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
     compactions += metric(&info(primary.process.address()), "aof_compactions_total");
     assert!(
         compactions > 0,
-        "compactação precisa ser observada no ensaio"
+        "compaction must be observed during the test"
     );
     assert!(primary_crashes > 0 && replica_crashes > 1);
     assert!(
         full_syncs > 1 && partial_syncs > 0,
-        "FULL e CONTINUE precisam acontecer"
+        "FULL and CONTINUE must occur"
     );
     assert!(ttl_checks > 0 && watch_checks > 0 && pubsub_checks > 0);
     assert!(
         rounds > duration.as_secs(),
-        "progresso insuficiente no ensaio"
+        "insufficient progress during the test"
     );
     let elapsed = began.elapsed();
     replica.process.finish();
@@ -604,8 +604,8 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
         "primary_crashes": primary_crashes, "replica_crashes": replica_crashes,
         "full_syncs": full_syncs, "partial_syncs": partial_syncs,
         "final_primary": final_primary, "final_replica": final_replica,
-        "scope": "modelo binário dos cinco tipos; EXEC; WATCH; TTL; clientes lentos; AOF/compactação; FULL/CONTINUE e crash/recovery",
-        "crash_boundary": "processos interrompidos entre lotes confirmados; cortes durante append são cobertos pelo gate crash",
+        "scope": "binary model of all five types; EXEC; WATCH; TTL; slow clients; AOF/compaction; FULL/CONTINUE and crash/recovery",
+        "crash_boundary": "processes interrupted between acknowledged batches; interruptions during append are covered by the crash gate",
         "cleanup_confirmed": true
     });
     let mut file = File::create(output.join("soak-report.json")).unwrap();
@@ -615,25 +615,26 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
 }
 
 #[test]
-#[ignore = "ensaio curto explícito; exige binário com replicação e métricas, não aprova soak da release"]
+#[ignore = "explicit short test; requires a binary with replication and metrics; does not approve the release soak"]
 fn internal_soak_rehearsal() {
-    let binary = PathBuf::from(std::env::var_os("SIDER_SOAK_BINARY").expect("binário explícito"));
-    let output = PathBuf::from(std::env::var_os("SIDER_SOAK_OUTPUT_DIR").expect("diretório novo"));
+    let binary = PathBuf::from(std::env::var_os("SIDER_SOAK_BINARY").expect("explicit binary"));
+    let output = PathBuf::from(std::env::var_os("SIDER_SOAK_OUTPUT_DIR").expect("new directory"));
     let report = exercise(&binary, &output, Duration::from_secs(25), true);
     eprintln!("{report}");
 }
 
 #[test]
-#[ignore = "gate exige build candidato, pacote extraído e carga real de pelo menos 3600 segundos"]
+#[ignore = "gate requires a candidate build, an extracted package, and actual load for at least 3600 seconds"]
 fn release_soak_gate() {
-    let context = gate_receipt::GateContext::from_env("soak").expect("contexto exato da candidata");
-    let input = release_input::ReleaseInput::from_env(&context).expect("pacote extraído conferido");
+    let context = gate_receipt::GateContext::from_env("soak").expect("exact candidate context");
+    let input =
+        release_input::ReleaseInput::from_env(&context).expect("verified extracted package");
     let output = context.release_dir().join("soak");
     let began = Instant::now();
     let mut report = exercise(input.binary(), &output, Duration::from_secs(3600), false);
     input
         .verify_again(&context)
-        .expect("pacote e executável permaneceram iguais");
+        .expect("package and executable remained unchanged");
     report["input"] = input.details();
     report["samples_sha256"] =
         json!(release_input::sha256(&output.join("soak-samples.jsonl")).unwrap());
@@ -646,5 +647,5 @@ fn release_soak_gate() {
             began.elapsed(),
             report,
         )
-        .expect("recibo apenas após soak completo e cleanup");
+        .expect("receipt only after the complete soak and cleanup");
 }

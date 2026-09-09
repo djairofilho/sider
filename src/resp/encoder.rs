@@ -1,13 +1,13 @@
-//! Encoder RESP2 em duas passagens: validar o frame inteiro, depois escrever.
+//! Two-pass RESP2 encoder: validate the entire frame, then write it.
 
 use bytes::BytesMut;
 
 use super::{EncodeError, Frame, RespLimits};
 
-/// Acrescenta um frame a `dst`, preservando a saída inteira em qualquer erro.
+/// Appends a frame to `dst`, retaining all existing output on any error.
 ///
-/// O orçamento é por frame, não pelo conteúdo anterior de `dst`. O consumidor
-/// precisa limitar também seu buffer de saída e a quantidade de respostas em fila.
+/// The budget is per frame, not for prior `dst` content. The consumer must also
+/// limit its output buffer and the number of queued replies.
 pub fn encode(frame: &Frame, dst: &mut BytesMut, limits: RespLimits) -> Result<(), EncodeError> {
     limits.validate()?;
     let size = encoded_size(frame, limits)?;
@@ -67,7 +67,7 @@ fn encoded_size(frame: &Frame, limits: RespLimits) -> Result<usize, EncodeError>
             Frame::Simple(value) | Frame::Error(value) => {
                 let size = line_size(value.len(), limits)?;
                 if value.iter().any(|byte| matches!(byte, b'\r' | b'\n')) {
-                    return Err(EncodeError::InvalidFrame("simple/error contém CR ou LF"));
+                    return Err(EncodeError::InvalidFrame("simple/error contains CR or LF"));
                 }
                 size
             }
@@ -90,7 +90,7 @@ fn encoded_size(frame: &Frame, limits: RespLimits) -> Result<usize, EncodeError>
                 match values {
                     None => line_size(2, limits)?,
                     Some(values) => {
-                        // Orçamento dos filhos antes de aumentar a pilha de metadados.
+                        // Budget children before growing the metadata stack.
                         nodes
                             .checked_add(pending.len())
                             .and_then(|count| count.checked_add(values.len()))

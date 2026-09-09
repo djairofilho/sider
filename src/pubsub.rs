@@ -1,7 +1,7 @@
-//! Registro efêmero de canais binários, independente do armazenamento e do AOF.
+//! Ephemeral registry of binary channels, independent of storage and AOF.
 //!
-//! O mutex protege somente metadados e envios `try_send`; nenhum socket ou await
-//! ocorre sob o lock. Sua ordem define a ordem das publicações para os assinantes.
+//! The mutex protects only metadata and `try_send` operations; no socket or await
+//! occurs under the lock. Its order defines publication order for subscribers.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
@@ -34,7 +34,7 @@ impl Message {
 pub(crate) enum PubSubError {
     #[error("ERR pubsub channel limit exceeded")]
     ChannelLimit,
-    #[error("assinante encerrado ou fila de notificações cheia")]
+    #[error("subscriber closed or notification queue full")]
     Closed,
 }
 
@@ -125,7 +125,7 @@ impl Hub {
             metrics,
         }
     }
-    /// O chamador valida os limites antes de criar o canal Tokio.
+    /// The caller validates limits before creating the Tokio channel.
     pub(crate) fn connect(
         &self,
         max_channels: usize,
@@ -153,8 +153,8 @@ impl Hub {
         })
     }
 
-    /// Conta filas que aceitaram a mensagem; isso não confirma leitura pelo cliente.
-    /// Fila cheia remove todas as inscrições daquele cliente e sinaliza sua conexão.
+    /// Counts queues that accepted the message; this does not confirm client reads.
+    /// A full queue removes all subscriptions for that client and signals its connection.
     pub(crate) fn publish(&self, message: Message) -> i64 {
         self.state
             .lock()
@@ -163,7 +163,7 @@ impl Hub {
     }
 }
 
-/// Guard de conexão: drop, cancelamento, erro e EOF removem todas as inscrições.
+/// Connection guard: drop, cancellation, error, and EOF remove all subscriptions.
 pub(crate) struct Subscription {
     hub: Hub,
     id: u64,
@@ -237,8 +237,8 @@ impl Subscription {
         if unique.len() > self.max_channels {
             return Err(PubSubError::ChannelLimit);
         }
-        // Captura mensagens anteriores sob o mesmo lock da inscrição. Confirmações
-        // nunca ultrapassam mensagens já aceitas na fila desta conexão.
+        // Captures earlier messages under the subscription's same lock. Confirmations
+        // never overtake messages already accepted in this connection's queue.
         let mut responses = if drain_messages {
             drain(&mut self.receiver)
         } else {
@@ -313,7 +313,7 @@ impl Subscription {
         Ok(responses)
     }
 
-    /// O worker chama somente após append aprovado. Nenhum await ou socket ocorre sob o lock.
+    /// The worker calls only after accepted append. No await or socket operation occurs under the lock.
     pub(crate) fn complete_exec(
         &mut self,
         commands: Vec<Command>,
@@ -323,7 +323,7 @@ impl Subscription {
         let hub = self.hub.clone();
         let mut state = hub.state.lock().expect("mutex Pub/Sub envenenado");
         let Reply::Array(replies) = apply() else {
-            unreachable!("prepare_batch sempre produz array")
+            unreachable!("prepare_batch always produces an array")
         };
         let command_count = commands.len();
         let mut frames = Vec::new();
@@ -372,7 +372,7 @@ impl Subscription {
                 _ => frames.push(reply.into()),
             }
         }
-        // Redis adia notificações à própria conexão até todas as respostas de EXEC.
+        // Redis delays notifications to the same connection until all EXEC replies.
         frames.extend(drain(&mut self.receiver));
         drop(state);
         for frame in &frames {
@@ -382,9 +382,9 @@ impl Subscription {
     }
 }
 
-/// SUBSCRIBE pode produzir vários frames para um comando no EXEC RESP2 do Redis.
-/// Primeiro valida/aloca o agregado físico completo; depois troca só o cabeçalho
-/// pela quantidade lógica de comandos. O cabeçalho novo nunca é maior.
+/// SUBSCRIBE can produce multiple frames for one command in Redis RESP2 EXEC.
+/// First validates/allocates the whole physical aggregate; then replaces only the
+/// header with the logical command count. The new header is never larger.
 fn encode_exec(
     command_count: usize,
     frames: Vec<Frame>,

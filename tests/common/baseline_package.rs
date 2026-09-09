@@ -1,4 +1,4 @@
-//! Extração limitada do pacote, sem delegar caminhos de escrita ao tar.
+//! Bounded package extraction, without delegating write paths to tar.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
@@ -47,7 +47,7 @@ pub fn run(command: &mut Command) -> Result<std::process::Output> {
     let output = process::run(command, TIMEOUT)?;
     if !output.status.success() {
         return Err(format!(
-            "comando falhou: {}",
+            "command failed: {}",
             String::from_utf8_lossy(&output.stderr)
         ));
     }
@@ -71,7 +71,7 @@ pub fn identities(root: &Path) -> Result<(String, String)> {
         "--untracked-files=normal",
     ]))?;
     if !status.stdout.is_empty() {
-        return Err("congelamento exige checkout limpo".into());
+        return Err("freezing requires a clean checkout".into());
     }
     let toolchain = String::from_utf8(
         run(Command::new("rustc")
@@ -109,8 +109,8 @@ fn expected_files(checkout: &Path) -> Result<BTreeMap<String, Option<(u64, Strin
     Ok(expected)
 }
 
-/// Cada membro é lido por stdout e gravado em arquivo novo após validar o caminho.
-/// Links do arquivo compactado nunca são materializados no filesystem.
+/// Each member is read through stdout and written to a new file after path validation.
+/// Archive links are never materialized on the filesystem.
 pub fn extract(
     archive: &Path,
     destination: &Path,
@@ -118,7 +118,7 @@ pub fn extract(
     checkout: &Path,
 ) -> Result<PathBuf> {
     if !archive.is_absolute() || !destination.is_absolute() {
-        return Err("pacote e destino exigem caminhos absolutos".into());
+        return Err("package and destination require absolute paths".into());
     }
     let archive_before = manifest::digest(archive)?;
     let expected = expected_files(checkout)?;
@@ -135,20 +135,20 @@ pub fn extract(
         }
         let relative = path
             .strip_prefix(&format!("{prefix}/"))
-            .ok_or("raiz do arquivo compactado diverge")?;
+            .ok_or("archive root mismatch")?;
         if line.ends_with('/') {
             if !expected
                 .keys()
                 .any(|key| key.starts_with(&format!("{relative}/")))
             {
-                return Err("diretório extra no pacote".into());
+                return Err("extra directory in package".into());
             }
         } else if !members.insert(relative.to_owned()) {
-            return Err("membro duplicado no pacote".into());
+            return Err("duplicate package member".into());
         }
     }
     if members != expected.keys().cloned().collect() {
-        return Err("pacote contém arquivos extras ou ausentes".into());
+        return Err("package contains extra or missing files".into());
     }
     fs::create_dir(destination).map_err(|error| error.to_string())?;
     let mut remaining = 512 * 1024 * 1024u64;
@@ -169,13 +169,13 @@ pub fn extract(
         let actual = manifest::digest(&output)?;
         remaining = remaining
             .checked_sub(actual.0)
-            .ok_or("expansão do pacote excedeu limite")?;
+            .ok_or("package expansion exceeded the limit")?;
         if actual.0 == 0
             || expected[&relative]
                 .as_ref()
                 .is_some_and(|wanted| *wanted != actual)
         {
-            return Err(format!("conteúdo extraído diverge: {relative}"));
+            return Err(format!("extracted content mismatch: {relative}"));
         }
         #[cfg(unix)]
         if BINARIES.contains(&relative.as_str()) {
@@ -185,7 +185,7 @@ pub fn extract(
         }
     }
     if archive_before != manifest::digest(archive)? {
-        return Err("pacote mudou durante extração".into());
+        return Err("package changed during extraction".into());
     }
     Ok(destination.to_owned())
 }
@@ -229,7 +229,7 @@ fn stream_member(archive: &Path, member: &str, mut output: File, limit: u64) -> 
                 }
                 size += count as u64;
                 if size > limit {
-                    return Err(std::io::Error::other("membro excedeu limite de expansão"));
+                    return Err(std::io::Error::other("member exceeded the expansion limit"));
                 }
                 output.write_all(&buffer[..count])?;
             }
@@ -243,7 +243,7 @@ fn stream_member(archive: &Path, member: &str, mut output: File, limit: u64) -> 
             break status;
         }
         if Instant::now() >= deadline {
-            return Err("extração excedeu prazo".into());
+            return Err("extraction exceeded the deadline".into());
         }
         std::thread::sleep(Duration::from_millis(5));
     };
@@ -252,7 +252,7 @@ fn stream_member(archive: &Path, member: &str, mut output: File, limit: u64) -> 
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())?;
     if !status.success() {
-        return Err("tar recusou membro do pacote".into());
+        return Err("tar rejected package member".into());
     }
     Ok(())
 }
@@ -270,7 +270,7 @@ pub fn validate_binaries(directory: &Path, version: &str) -> Result<()> {
     ] {
         let binary = directory.join(filename(name));
         if manifest::digest(&binary)?.0 == 0 {
-            return Err("executável vazio".into());
+            return Err("empty executable".into());
         }
         let output = run(Command::new(binary).arg(argument))?;
         if expected
@@ -278,7 +278,7 @@ pub fn validate_binaries(directory: &Path, version: &str) -> Result<()> {
             .is_some_and(|expected| output.stdout != expected.as_bytes())
             || output.stdout.is_empty()
         {
-            return Err(format!("identidade/ajuda divergente: {name}"));
+            return Err(format!("identity/help mismatch: {name}"));
         }
     }
     Ok(())
@@ -288,14 +288,14 @@ pub fn compare_builds(package: &Path, builds: &Path) -> Result<()> {
     for binary in BINARIES {
         let name = filename(binary);
         if manifest::digest(&package.join(&name))? != manifest::digest(&builds.join(name))? {
-            return Err("executável extraído diverge do build declarado".into());
+            return Err("extracted executable differs from the declared build".into());
         }
     }
     Ok(())
 }
 
-/// Confere o registro observacional produzido logo após o build e o empacotamento.
-/// Não autentica o operador: o hash externo da baseline e os logs são guardados à parte.
+/// Verifies the observational record produced immediately after building and packaging.
+/// Does not authenticate the operator: the external baseline hash and logs are stored separately.
 pub fn provenance(
     path: &Path,
     archive: &Path,
@@ -304,19 +304,19 @@ pub fn provenance(
     version: &str,
 ) -> Result<Value> {
     if manifest::digest(path)?.0 > 65536 {
-        return Err("proveniência excedeu limite".into());
+        return Err("provenance exceeded the limit".into());
     }
     let value: Value = serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     validate_provenance(&value, identity, version)?;
     if file_identity(archive)? != value["archive"] {
-        return Err("pacote diverge da proveniência de build".into());
+        return Err("package differs from build provenance".into());
     }
     for binary in value["binaries"].as_array().unwrap() {
         let file = binaries.join(binary["path"].as_str().unwrap());
         let actual = file_identity(&file)?;
         if actual["bytes"] != binary["bytes"] || actual["sha256"] != binary["sha256"] {
-            return Err("executável diverge da proveniência de build".into());
+            return Err("executable differs from build provenance".into());
         }
     }
     Ok(value)
@@ -365,22 +365,22 @@ fn validate_provenance(value: &Value, identity: &(String, String), version: &str
         || value["source_clean_before"] != true
         || value["source_clean_after"] != true
     {
-        return Err("identidade ou execução do build diverge".into());
+        return Err("build identity or execution mismatch".into());
     }
     manifest::hex(&value["source_sha"], 40)?;
     manifest::fields(&value["archive"], &["bytes", "sha256"])?;
     let entries = value["binaries"]
         .as_array()
-        .ok_or("binários da proveniência ausentes")?;
+        .ok_or("missing provenance binaries")?;
     let mut names = BINARIES.map(filename);
     names.sort_unstable();
     if entries.len() != names.len() {
-        return Err("proveniência exige quatro executáveis".into());
+        return Err("provenance requires four executables".into());
     }
     for (entry, name) in entries.iter().zip(names) {
         manifest::fields(entry, &["path", "bytes", "sha256"])?;
         if entry["path"] != name {
-            return Err("nomes ou ordem dos binários divergem".into());
+            return Err("binary names or order differ".into());
         }
     }
     for entry in entries.iter().chain(std::iter::once(&value["archive"])) {
@@ -388,7 +388,7 @@ fn validate_provenance(value: &Value, identity: &(String, String), version: &str
             .as_u64()
             .is_none_or(|n| n == 0 || n > manifest::MAX_FILE_BYTES)
         {
-            return Err("tamanho inválido na proveniência".into());
+            return Err("invalid size in provenance".into());
         }
         manifest::hex(&entry["sha256"], 64)?;
     }

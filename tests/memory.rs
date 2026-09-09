@@ -1,4 +1,4 @@
-//! Quota lógica e rejeição atômica, sem confundir contabilidade com RSS.
+//! Logical quota and atomic rejection, keeping accounting distinct from RSS.
 
 #![forbid(unsafe_code)]
 

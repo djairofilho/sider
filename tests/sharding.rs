@@ -135,7 +135,7 @@ async fn local_compaction_is_disabled_for_multi_shard_public_api() {
     tokio::time::pause();
     tokio::time::advance(Duration::from_millis(200)).await;
     tokio::time::resume();
-    // Cada GET passa pelo worker depois do tick prioritário, sem espera arbitrária.
+    // Each GET passes through the worker after the priority tick, without arbitrary waits.
     for tag in 0..4 {
         assert_eq!(
             rig.database
@@ -354,7 +354,7 @@ impl FaultInjector for BeforeReply {
             if !*released {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
-                    "barreira de teste não liberada",
+                    "test barrier not released",
                 ));
             }
         }
@@ -394,7 +394,7 @@ async fn snapshot_waits_for_durable_ack_and_apply_even_after_caller_cancellation
 }
 
 #[test]
-#[ignore = "gate de release exige contexto exato; cenários internos executam diretamente"]
+#[ignore = "release gate requires exact context; internal scenarios run directly"]
 fn release_sharding_gate() {
     let context = gate_receipt::GateContext::from_env("sharding").unwrap();
     let began = std::time::Instant::now();
@@ -404,6 +404,6 @@ fn release_sharding_gate() {
     server_restarts_all_shards_and_rejects_incompatible_layout_before_bind();
     context.publish(4, began.elapsed(), serde_json::json!({
         "scenarios": ["concurrent_shard_compaction_sequence", "cross_shard_no_append", "snapshot_waits_ack_apply_after_cancel"],
-        "shards":4,"durable_batches":160,"metrics":"benchmark exploratório separado; não concorrer com builds"
+        "shards":4,"durable_batches":160,"metrics":"separate exploratory benchmark; must not run alongside builds"
     })).unwrap();
 }

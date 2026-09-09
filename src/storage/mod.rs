@@ -1,4 +1,4 @@
-//! Armazenamento síncrono de chaves e valores binários, sem acesso ao protocolo.
+//! Synchronous storage for binary keys and values, without protocol access.
 
 mod clock;
 mod collections;
@@ -29,10 +29,10 @@ use crate::command::{
     Command, ExecutionError, ExpiryUnit, Reply, SetCondition, SetExpiry, SetOptions, parse_decimal,
 };
 
-/// Taxa lógica fixa por entrada; inclui metadados e índice de expiração.
+/// Fixed logical charge per entry; includes metadata and expiry index.
 pub const ENTRY_OVERHEAD_BYTES: usize = 128;
 
-/// Orçamento lógico, independente das alocações reais e do RSS.
+/// Logical budget independent of actual allocations and RSS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StoreConfig {
     pub max_dataset_bytes: usize,
@@ -50,14 +50,14 @@ impl StoreConfig {
     pub fn validate(self) -> Result<(), ConfigError> {
         if self.max_dataset_bytes == 0 || self.max_dataset_bytes > isize::MAX as usize {
             return Err(ConfigError::InvalidServerLimits {
-                reason: "SIDER_MAX_DATASET_BYTES precisa estar entre 1 e isize::MAX",
+                reason: "SIDER_MAX_DATASET_BYTES must be between 1 and isize::MAX",
             });
         }
         Ok(())
     }
 }
 
-/// Valor e metadados comuns. O prazo absoluto registra o instante resolvido da escrita.
+/// Value and shared metadata. Absolute expiry records the resolved write instant.
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub value: Value,
@@ -66,9 +66,9 @@ pub struct Entry {
     pub generation: u64,
 }
 
-/// Mapa em memória com proprietário único e execução sequencial dos comandos.
+/// In-memory map with a single owner and sequential command execution.
 ///
-/// O relógio é injetável; eventos antigos são retirados em toda substituição.
+/// The clock is injectable; old events are removed on every replacement.
 pub struct Store {
     values: HashMap<Bytes, Entry>,
     expirations: BTreeSet<(Instant, u64, Bytes)>,
@@ -94,13 +94,13 @@ impl Store {
             quota: self.config.max_dataset_bytes,
         }
     }
-    /// Cria um armazenamento vazio, usando o hasher padrão de `HashMap`.
+    /// Creates empty storage using the default `HashMap` hasher.
     pub fn new() -> Self {
         Self::default()
     }
 
     pub fn with_clock(clock: Arc<dyn Clock>) -> Self {
-        Self::with_config(StoreConfig::default(), clock).expect("configuração padrão válida")
+        Self::with_config(StoreConfig::default(), clock).expect("valid default configuration")
     }
 
     pub fn with_config(config: StoreConfig, clock: Arc<dyn Clock>) -> Result<Self, ConfigError> {
@@ -120,7 +120,7 @@ impl Store {
         self.used_bytes
     }
 
-    /// Quantidade física de entradas, incluindo expiradas ainda não visitadas.
+    /// Physical number of entries, including expired entries not yet visited.
     pub fn len(&self) -> usize {
         self.values.len()
     }
@@ -129,7 +129,7 @@ impl Store {
         self.values.is_empty()
     }
 
-    /// Processa no máximo `budget` eventos sem percorrer o mapa inteiro.
+    /// Processes at most `budget` events without traversing the entire map.
     pub fn expire_due(&mut self, budget: usize) -> usize {
         let now = self.clock.now();
         let mut removed = 0;
@@ -154,10 +154,10 @@ impl Store {
         removed
     }
 
-    /// Aplica um comando validado sem suspender a execução.
+    /// Applies a validated command without suspending execution.
     ///
-    /// `GET` compartilha o conteúdo imutável de `Bytes` com a resposta. Alterar ou
-    /// remover a chave depois não altera uma resposta já devolvida.
+    /// `GET` shares immutable `Bytes` content with the reply. Changing or removing
+    /// the key later does not alter a reply already returned.
     pub fn execute(&mut self, command: Command) -> Reply {
         let prepared = self.prepare(command);
         self.apply(prepared)
@@ -190,8 +190,8 @@ impl Store {
                 options,
             } => self.set(key, value, options, now),
             Command::Del { keys } => {
-                // Nos alvos de 32/64 bits, uma Vec<Bytes> válida possui menos de
-                // i64::MAX elementos. Cada elemento causa no máximo um incremento.
+                // On 32/64-bit targets, a valid Vec<Bytes> has fewer than i64::MAX
+                // elements. Each element causes at most one increment.
                 let mut removed = 0_i64;
                 for key in keys {
                     self.expire_key(&key, now);
@@ -399,7 +399,7 @@ impl Store {
         let entry = self.values.remove(key)?;
         self.watches.invalidate(key);
         self.generation = self.generation.wrapping_add(1);
-        self.used_bytes -= Self::entry_bytes(key, &entry.value).expect("entrada contabilizada");
+        self.used_bytes -= Self::entry_bytes(key, &entry.value).expect("accounted entry");
         if let Some(deadline) = entry.expires_at {
             self.expirations
                 .remove(&(deadline, entry.generation, key.clone()));
@@ -411,8 +411,8 @@ impl Store {
         let value = value.into();
         self.watches.invalidate(&key);
         self.remove(&key);
-        self.used_bytes += Self::entry_bytes(&key, &value).expect("mutação pré-validada");
-        // Há no máximo um evento por chave; o anterior foi removido antes da geração avançar.
+        self.used_bytes += Self::entry_bytes(&key, &value).expect("prevalidated mutation");
+        // There is at most one event per key; the previous one was removed before generation advanced.
         self.generation = self.generation.wrapping_add(1);
         let entry = Entry {
             value,
@@ -446,7 +446,7 @@ impl Store {
     }
 
     fn mset(&mut self, entries: Vec<(Bytes, Bytes)>, now: Instant) -> Reply {
-        // Reduz duplicatas antes de contabilizar: só o último valor pertence ao estado final.
+        // Reduces duplicates before accounting: only the last value belongs to final state.
         let entries: HashMap<_, _> = entries.into_iter().collect();
         for key in entries.keys() {
             self.expire_key(key, now);
@@ -454,7 +454,7 @@ impl Store {
         let mut base = self.used_bytes;
         for key in entries.keys() {
             if let Some(old) = self.values.get(key) {
-                base -= Self::entry_bytes(key, &old.value).expect("entrada contabilizada");
+                base -= Self::entry_bytes(key, &old.value).expect("accounted entry");
             }
         }
         let proposed = entries.iter().try_fold(base, |usage, (key, value)| {
@@ -465,7 +465,7 @@ impl Store {
         {
             return Reply::Error(ExecutionError::OutOfMemory);
         }
-        // Retira os valores anteriores após validar o lote completo, evitando pico contábil.
+        // Removes prior values after validating the whole batch, avoiding an accounting spike.
         for key in entries.keys() {
             self.remove(key);
         }
@@ -705,10 +705,10 @@ mod tests {
         );
 
         let Reply::Bulk(Some(first)) = get(&mut store, b"key") else {
-            panic!("GET deve devolver o valor armazenado");
+            panic!("GET must return the stored value");
         };
         let Reply::Bulk(Some(second)) = get(&mut store, b"key") else {
-            panic!("GET repetido deve devolver o mesmo conteúdo");
+            panic!("repeated GET must return the same content");
         };
         assert_eq!(first.as_ptr(), original_pointer);
         assert_eq!(second.as_ptr(), original_pointer);

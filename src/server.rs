@@ -1,4 +1,4 @@
-//! Listener e supervisão do worker e das conexões, com drenagem limitada.
+//! Listener and supervision for the worker and connections, with bounded draining.
 
 use std::future::Future;
 use std::io;
@@ -15,26 +15,26 @@ use crate::storage::worker::{self, DbHandle};
 use crate::storage::{Store, StoreConfig, SystemClock};
 use crate::{ConfigError, ServerConfig};
 
-/// Falha que impede o servidor de continuar atendendo.
+/// Failure that prevents the server from continuing to serve.
 #[derive(Debug, Error)]
 pub enum ServerError {
-    #[error("configuração inválida: {0}")]
+    #[error("invalid configuration: {0}")]
     Config(#[from] ConfigError),
-    #[error("falha do listener: {0}")]
+    #[error("listener failure: {0}")]
     Io(#[from] io::Error),
-    #[error("worker terminou inesperadamente")]
+    #[error("worker ended unexpectedly")]
     WorkerStopped,
-    #[error("worker falhou: {0}")]
+    #[error("worker failed: {0}")]
     WorkerFailed(#[source] tokio::task::JoinError),
-    #[error("prazo de encerramento excedido; tarefas restantes foram abortadas")]
+    #[error("shutdown timeout exceeded; remaining tasks were aborted")]
     ShutdownTimeout,
-    #[error("persistência indisponível: {0}")]
+    #[error("persistence unavailable: {0}")]
     Persistence(#[from] crate::persistence::AofError),
-    #[error("replicação indisponível: {0}")]
+    #[error("replication unavailable: {0}")]
     Replication(#[from] crate::replication::Error),
 }
 
-/// Estado recuperado antes de abrir o listener do binário.
+/// State recovered before opening the binary listener.
 pub struct PreparedServer {
     stores: Vec<Store>,
     recovered: Option<crate::persistence::Recovered>,
@@ -89,7 +89,7 @@ pub async fn prepare(config: &ServerConfig) -> Result<PreparedServer, ServerErro
             .and_then(|replication| replication.upstream)
             .is_none()
     {
-        return Err(ConfigError::InvalidServerLimits { reason: "réplica persistida exige upstream configurado; use promoção local para trocar o papel" }.into());
+        return Err(ConfigError::InvalidServerLimits { reason: "persisted replica requires configured upstream; use local promotion to change the role" }.into());
     }
     let replication_listener = match &config.replication {
         Some(replication) => Some(TcpListener::bind(replication.listen).await?),
@@ -103,11 +103,11 @@ pub async fn prepare(config: &ServerConfig) -> Result<PreparedServer, ServerErro
     })
 }
 
-/// Atende o listener já aberto até o sinal de parada ou uma falha do worker.
+/// Serves the already open listener until the shutdown signal or a worker failure.
 ///
-/// O cancelamento desta future aborta as tarefas que ela possui. A parada normal
-/// drena pedidos aceitos. A durabilidade segue a política AOF configurada;
-/// cancelar ou exceder o timeout não desfaz pedidos já aceitos.
+/// Cancelling this future aborts the tasks it owns. Normal shutdown
+/// drains accepted requests. Durability follows the configured AOF policy;
+/// cancellation or timeout does not undo requests already accepted.
 pub async fn serve(
     listener: TcpListener,
     config: ServerConfig,
@@ -117,7 +117,7 @@ pub async fn serve(
     serve_prepared(listener, config, shutdown, prepared).await
 }
 
-/// Atende somente depois da recuperação. `prepare` pode executar antes do bind.
+/// Serves only after recovery. `prepare` may run before bind.
 pub async fn serve_prepared(
     listener: TcpListener,
     config: ServerConfig,
@@ -127,7 +127,7 @@ pub async fn serve_prepared(
     config.validate()?;
     if prepared.config != config {
         return Err(ConfigError::InvalidServerLimits {
-            reason: "configuração difere do estado recuperado",
+            reason: "configuration differs from recovered state",
         }
         .into());
     }
@@ -196,7 +196,7 @@ pub async fn serve_prepared(
         runtime.as_ref(),
         persistence.as_ref(),
     ) {
-        let aof_config = config.aof.as_ref().expect("AOF validada para replicação");
+        let aof_config = config.aof.as_ref().expect("AOF validated for replication");
         let context = crate::storage::replication::Context {
             aof: aof.clone(),
             runtime: runtime.clone(),
@@ -246,7 +246,7 @@ pub async fn serve_prepared(
             )
             .await
             {
-                tracing::error!(%error, "listener interno encerrou com falha");
+                tracing::error!(%error, "internal listener terminated with failure");
             }
         });
         if runtime.readonly() {
@@ -262,7 +262,7 @@ pub async fn serve_prepared(
                 )
                 .await
                 {
-                    tracing::error!(%error, "réplica encerrou com falha");
+                    tracing::error!(%error, "replica terminated with failure");
                 }
             });
         }
@@ -340,7 +340,7 @@ async fn supervise_workers(
     metrics.configure(&config, listener.local_addr()?.port());
     let pubsub = crate::pubsub::Hub::with_metrics(metrics.clone());
     tokio::pin!(shutdown);
-    tracing::info!(address = %listener.local_addr()?, "servidor TCP iniciado");
+    tracing::info!(address = %listener.local_addr()?, "TCP server started");
 
     let failure = loop {
         tokio::select! {
@@ -360,12 +360,12 @@ async fn supervise_workers(
                 };
                 let Ok(slot) = slots.clone().try_acquire_owned() else {
                     metrics.add(crate::metrics::Counter::RejectedConnections, 1);
-                    tracing::warn!("conexão excedente recusada");
+                    tracing::warn!("excess connection rejected");
                     continue;
                 };
                 if let Err(error) = stream.set_nodelay(true) {
                     metrics.add(crate::metrics::Counter::ConnectionFailures, 1);
-                    tracing::warn!(%error, "falha ao configurar conexão");
+                    tracing::warn!(%error, "failed to configure connection");
                     continue;
                 }
                 let config = config.clone();
@@ -383,7 +383,7 @@ async fn supervise_workers(
     drop(listener);
     stop.send_replace(true);
     drop(database);
-    tracing::info!("iniciando drenagem dos pedidos aceitos");
+    tracing::info!("starting accepted-request drain");
     let deadline = Instant::now()
         .checked_add(config.shutdown_timeout)
         .ok_or(ServerError::ShutdownTimeout)?;
@@ -393,7 +393,7 @@ async fn supervise_workers(
         tokio::select! {
             biased;
             _ = sleep_until(deadline) => {
-                tracing::error!(connections = connections.len(), workers = workers.len(), "encerramento forçado");
+                tracing::error!(connections = connections.len(), workers = workers.len(), "forced shutdown");
                 workers.abort_all();
                 connections.abort_all();
                 while workers.join_next().await.is_some() {}
@@ -408,7 +408,7 @@ async fn supervise_workers(
             result = connections.join_next(), if !connections.is_empty() => log_connection(result),
         }
     }
-    tracing::info!("servidor encerrado");
+    tracing::info!("server stopped");
     match failure {
         Some(error) => Err(error),
         None => Ok(()),
@@ -417,8 +417,8 @@ async fn supervise_workers(
 
 fn log_connection(result: Option<Result<Result<(), ConnectionError>, tokio::task::JoinError>>) {
     match result {
-        Some(Ok(Err(error))) => tracing::warn!(%error, "conexão encerrada com erro"),
-        Some(Err(error)) => tracing::error!(%error, "tarefa de conexão falhou"),
+        Some(Ok(Err(error))) => tracing::warn!(%error, "connection terminated with error"),
+        Some(Err(error)) => tracing::error!(%error, "connection task failed"),
         _ => {}
     }
 }
@@ -499,7 +499,7 @@ mod tests {
                 db,
                 async move {
                     let _worker = worker;
-                    panic!("falha injetada do worker");
+                    panic!("injected worker failure");
                 },
                 stop,
             ),

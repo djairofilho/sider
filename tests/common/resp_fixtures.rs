@@ -1,7 +1,7 @@
-//! Oráculo literal da 0.1, independente do codec e do encoder do Sider.
+//! Literal 0.1 oracle, independent of the Sider codec and encoder.
 //!
-//! Cada caso começa e termina sem suas chaves; pode ser repetido em pipeline.
-//! Os comprimentos são escritos à mão para não compartilhar bugs com o produto.
+//! Each case starts and ends with its keys absent; it can be repeated in a pipeline.
+//! Lengths are written by hand to avoid sharing bugs with the product.
 
 pub type Exchange = (&'static [u8], &'static [u8]);
 

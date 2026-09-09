@@ -1,4 +1,4 @@
-//! Validação completa da requisição antes de construir um comando executável.
+//! Complete request validation before building an executable command.
 
 use bytes::Bytes;
 use thiserror::Error;
@@ -6,37 +6,37 @@ use thiserror::Error;
 use super::{Command, ExpiryUnit, SetCondition, SetExpiry, SetOptions};
 use crate::resp::Frame;
 
-/// Erro de formato encerra a conexão; erros de comando permitem continuar.
+/// A format error closes the connection; command errors allow it to continue.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum RequestError {
-    /// Apenas arrays não vazios de bulk strings não nulas são executáveis.
-    #[error("formato de requisição inválido")]
+    /// Only non-empty arrays of non-null bulk strings are executable.
+    #[error("invalid request format")]
     InvalidFormat,
-    /// Mensagem simplificada, sem reproduzir dados enviados pelo cliente.
-    #[error("comando desconhecido")]
+    /// Simplified message, without reproducing client-supplied data.
+    #[error("unknown command")]
     UnknownCommand,
-    /// Nome canônico usado para a resposta compatível de aridade.
-    #[error("aridade inválida para {0}")]
+    /// Canonical name used for the compatible arity response.
+    #[error("wrong number of arguments for {0}")]
     WrongArity(&'static str),
-    #[error("sintaxe inválida")]
+    #[error("syntax error")]
     Syntax,
-    #[error("inteiro inválido ou fora do intervalo")]
+    #[error("integer is invalid or out of range")]
     InvalidInteger,
-    #[error("score inválido")]
+    #[error("invalid score")]
     InvalidFloat,
-    #[error("prazo de SET inválido")]
+    #[error("invalid SET expiry")]
     InvalidSetExpiry,
-    #[error("prazo de expiração inválido")]
+    #[error("invalid expiry")]
     InvalidExpiry(&'static str),
 }
 
 impl RequestError {
-    /// Indica se o chamador precisa encerrar o fluxo após responder, se possível.
+    /// Indicates whether the caller must close the stream after replying, if possible.
     pub fn is_fatal(&self) -> bool {
         matches!(self, Self::InvalidFormat)
     }
 
-    /// Converte o erro em resposta controlada, sem revelar argumentos do cliente.
+    /// Converts the error into a controlled reply without revealing client arguments.
     pub fn into_frame(self) -> Frame {
         let message = match self {
             Self::InvalidFormat => Bytes::from_static(b"ERR invalid request format"),
@@ -60,10 +60,10 @@ impl RequestError {
     }
 }
 
-/// Constrói um comando validado, movendo os payloads sem copiá-los novamente.
+/// Builds a validated command, moving payloads without copying them again.
 ///
-/// O formato de todos os argumentos é verificado antes da aridade ou do nome.
-/// Nomes não distinguem caixa ASCII; chaves e valores preservam todos os bytes.
+/// The format of all arguments is checked before arity or name.
+/// Names are ASCII case-insensitive; keys and values retain all bytes.
 pub fn parse(frame: Frame) -> Result<Command, RequestError> {
     let Frame::Array(Some(frames)) = frame else {
         return Err(RequestError::InvalidFormat);
@@ -419,7 +419,7 @@ mod tests {
             Frame::Bulk(Some(payload)),
         ]));
         let Command::Echo(value) = parse(frame).unwrap() else {
-            panic!("echo esperado")
+            panic!("expected echo")
         };
         assert_eq!(value.as_ptr(), address);
     }

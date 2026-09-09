@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Contratos públicos do codec, sem sockets ou referência externa em execução.
+//! Public codec contracts, without sockets or a running external reference.
 
 #[path = "common/resp_fixtures.rs"]
 mod resp_fixtures;
@@ -63,12 +63,12 @@ fn literals() -> Vec<(&'static [u8], Frame)> {
 }
 
 fn decode_exact(wire: &[u8], limits: RespLimits) -> Frame {
-    let mut decoder = Decoder::new(limits).expect("limites válidos");
+    let mut decoder = Decoder::new(limits).expect("valid limits");
     let mut input = BytesMut::from(wire);
     let frame = decoder
         .decode(&mut input)
-        .expect("frame válido")
-        .expect("frame completo");
+        .expect("valid frame")
+        .expect("complete frame");
     assert!(input.is_empty(), "bytes restantes: {input:?}");
     assert_eq!(decoder.decode(&mut input).unwrap(), None);
     frame
@@ -76,7 +76,7 @@ fn decode_exact(wire: &[u8], limits: RespLimits) -> Frame {
 
 fn encoded(frame: &Frame, limits: RespLimits) -> BytesMut {
     let mut output = BytesMut::new();
-    encode(frame, &mut output, limits).expect("frame válido dentro dos limites");
+    encode(frame, &mut output, limits).expect("valid frame within limits");
     output
 }
 
@@ -87,12 +87,12 @@ fn check_every_split(wire: &[u8], expected: &Frame) {
         let before = input.clone();
         let first = decoder.decode(&mut input).unwrap();
         if split == wire.len() {
-            assert_eq!(first.as_ref(), Some(expected), "corte {split}");
+            assert_eq!(first.as_ref(), Some(expected), "split {split}");
         } else {
-            assert_eq!(first, None, "corte {split}");
-            assert_eq!(input, before, "incompleto consumido no corte {split}");
+            assert_eq!(first, None, "split {split}");
+            assert_eq!(input, before, "incomplete input consumed at split {split}");
             assert_eq!(decoder.decode(&mut input).unwrap(), None);
-            assert_eq!(input, before, "segunda leitura consumiu incompleto");
+            assert_eq!(input, before, "second read consumed incomplete input");
             input.extend_from_slice(&wire[split..]);
             assert_eq!(decoder.decode(&mut input).unwrap().as_ref(), Some(expected));
         }
@@ -111,7 +111,7 @@ fn check_bytewise(wire: &[u8], expected: &Frame) {
             assert_eq!(actual.as_ref(), Some(expected));
             assert!(input.is_empty());
         } else {
-            assert_eq!(actual, None, "byte {index} de {wire:?}");
+            assert_eq!(actual, None, "byte {index} of {wire:?}");
             assert_eq!(input, before);
         }
     }
@@ -272,7 +272,7 @@ fn malformed_wire_is_terminal_in_whole_and_fragmented_input() {
                 input.extend_from_slice(chunk);
                 match decoder.decode(&mut input) {
                     Ok(None) => {}
-                    Ok(Some(frame)) => panic!("entrada inválida aceita: {wire:?}, {frame:?}"),
+                    Ok(Some(frame)) => panic!("invalid input accepted: {wire:?}, {frame:?}"),
                     Err(_) => {
                         failed = true;
                         assert_eq!(decoder.decode(&mut input), Err(ProtocolError::Poisoned));
@@ -280,7 +280,7 @@ fn malformed_wire_is_terminal_in_whole_and_fragmented_input() {
                     }
                 }
             }
-            assert!(failed, "entrada inválida aguardou mais bytes: {wire:?}");
+            assert!(failed, "invalid input waited for more bytes: {wire:?}");
         }
     }
 }
@@ -299,7 +299,7 @@ fn huge_advertised_lengths_fail_before_payload_or_children_arrive() {
         let mut input = BytesMut::from(wire);
         assert!(
             decoder.decode(&mut input).is_err(),
-            "declaração aceita: {wire:?}"
+            "declaration accepted: {wire:?}"
         );
     }
 }
@@ -561,7 +561,7 @@ fn reducing_an_incomplete_buffer_is_reported_and_poisoned() {
 fn a_large_binary_payload_survives_reallocation_and_representative_splits() {
     let payload: Vec<u8> = (0..32_768).map(|index| (index % 256) as u8).collect();
     let frame = Frame::Bulk(Some(Bytes::copy_from_slice(&payload)));
-    // Cabeçalho literal: este teste não usa o encoder para construir a entrada.
+    // Literal header: this test does not use the encoder to construct the input.
     let mut wire = b"$32768\r\n".to_vec();
     wire.extend_from_slice(&payload);
     wire.extend_from_slice(b"\r\n");
@@ -618,7 +618,7 @@ fn frame_strategy() -> impl Strategy<Value = Frame> {
         Just(Frame::Array(None)),
         Just(Frame::Array(Some(vec![]))),
     ];
-    // Três níveis recursivos e um possível array folha: profundidade máxima 4.
+    // Three recursive levels and a possible leaf array: maximum depth 4.
     leaf.prop_recursive(3, 64, 4, |inner| {
         prop::collection::vec(inner, 0..4).prop_map(|items| Frame::Array(Some(items)))
     })

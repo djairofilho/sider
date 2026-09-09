@@ -1,4 +1,4 @@
-//! Frames binários limitados; o payload de dados conserva o codec AOF tipado.
+//! Bounded binary frames; the data payload retains the typed AOF codec.
 
 use std::time::Duration;
 
@@ -16,7 +16,7 @@ pub const MAX_FRAME_BYTES: usize = format::MAX_RECORD_BYTES + 128;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
-    /// Inclui cabeçalho de transporte, framing AOF e payload.
+    /// Includes transport header, AOF framing, and payload.
     pub max_frame_bytes: usize,
     pub record: format::Limits,
 }
@@ -56,7 +56,7 @@ pub struct Hello {
 }
 
 impl Hello {
-    /// Capacidades do receptor devem comportar o contrato anunciado pelo emissor.
+    /// Receiver capacities must accommodate the contract announced by the sender.
     pub fn accepts(&self, source: &Self) -> Result<(), Reject> {
         if self.sider_version != source.sider_version
             || self.record_version != source.record_version
@@ -91,7 +91,7 @@ pub enum Reject {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
     Hello(Hello),
-    /// Snapshot único para backup; não cria assinatura incremental nem exige ACK.
+    /// Single snapshot for backup; creates no incremental subscription and requires no ACK.
     Export {
         sider_version: Bytes,
         max_record_bytes: u32,
@@ -131,17 +131,17 @@ pub enum Message {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("I/O de replicação: {0}")]
+    #[error("replication I/O: {0}")]
     Io(#[from] std::io::Error),
-    #[error("prazo de replicação excedido")]
+    #[error("replication timeout exceeded")]
     Timeout,
-    #[error("limite de replicação excedido")]
+    #[error("replication limit exceeded")]
     Limit,
-    #[error("mensagem de replicação inválida: {0}")]
+    #[error("invalid replication message: {0}")]
     Invalid(&'static str),
-    #[error("versão de replicação não suportada: {0}")]
+    #[error("unsupported replication version: {0}")]
     Version(u16),
-    #[error("registro de replicação: {0}")]
+    #[error("replication record: {0}")]
     Record(#[from] format::FormatError),
 }
 
@@ -152,8 +152,8 @@ fn write_cursor(out: &mut Vec<u8>, cursor: Cursor) {
 
 pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
     limits.validate()?;
-    // O encoder AOF verifica o tamanho antes de alocar. Seu orçamento precisa
-    // caber também no frame negociado, incluindo os dois cabeçalhos.
+    // The AOF encoder checks size before allocating. Its budget must also fit in
+    // the negotiated frame, including both headers.
     let record_limits = format::Limits {
         max_record_bytes: limits
             .record
@@ -208,7 +208,7 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
             4
         }
         Message::SnapshotEntry(Mutation::Delete { .. }) => {
-            return Err(Error::Invalid("remoção dentro de snapshot"));
+            return Err(Error::Invalid("removal within snapshot"));
         }
         Message::FullEnd {
             cursor,
@@ -253,7 +253,7 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
                 || *max_record_bytes == 0
                 || *max_snapshot_bytes == 0
             {
-                return Err(Error::Invalid("pedido de exportação"));
+                return Err(Error::Invalid("export request"));
             }
             body.push(sider_version.len() as u8);
             body.extend_from_slice(sider_version);
@@ -314,18 +314,18 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
 fn header(header: &[u8], limits: Limits) -> Result<(u8, usize), Error> {
     limits.validate()?;
     if header.len() != HEADER_BYTES || &header[..8] != MAGIC || header[11] != 0 {
-        return Err(Error::Invalid("cabeçalho"));
+        return Err(Error::Invalid("header"));
     }
     let version = u16::from_le_bytes(header[8..10].try_into().unwrap());
     if version != VERSION {
         return Err(Error::Version(version));
     }
     if !(1..=14).contains(&header[10]) {
-        return Err(Error::Invalid("tipo de mensagem"));
+        return Err(Error::Invalid("message type"));
     }
     let len = u32::from_le_bytes(header[12..16].try_into().unwrap());
     if !len != u32::from_le_bytes(header[16..20].try_into().unwrap()) {
-        return Err(Error::Invalid("comprimento"));
+        return Err(Error::Invalid("length"));
     }
     let len = len as usize;
     if len == 0 || len > limits.max_frame_bytes - HEADER_BYTES {
@@ -344,7 +344,7 @@ fn header(header: &[u8], limits: Limits) -> Result<(u8, usize), Error> {
         _ => true,
     };
     if !valid_size {
-        return Err(Error::Invalid("tamanho do tipo de mensagem"));
+        return Err(Error::Invalid("message type length"));
     }
     Ok((header[10], len))
 }
@@ -360,7 +360,7 @@ impl Fields {
             .position
             .checked_add(count)
             .filter(|end| *end <= self.bytes.len())
-            .ok_or(Error::Invalid("payload incompleto"))?;
+            .ok_or(Error::Invalid("incomplete payload"))?;
         let value = self.bytes.slice(self.position..end);
         self.position = end;
         Ok(value)
@@ -372,7 +372,7 @@ impl Fields {
         match self.byte()? {
             0 => Ok(false),
             1 => Ok(true),
-            _ => Err(Error::Invalid("flag booleana")),
+            _ => Err(Error::Invalid("boolean flag")),
         }
     }
     fn u32(&mut self) -> Result<u32, Error> {
@@ -393,14 +393,14 @@ impl Fields {
     }
 }
 
-/// Aceita exatamente um frame, sem ignorar bytes posteriores.
+/// Accepts exactly one frame without ignoring trailing bytes.
 pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
     if frame.len() < HEADER_BYTES {
-        return Err(Error::Invalid("cabeçalho incompleto"));
+        return Err(Error::Invalid("incomplete header"));
     }
     let (kind, len) = header(&frame[..HEADER_BYTES], limits)?;
     if frame.len() != HEADER_BYTES + len {
-        return Err(Error::Invalid("comprimento do payload"));
+        return Err(Error::Invalid("payload length"));
     }
     let body = frame.slice(HEADER_BYTES..);
     let expected = u32::from_le_bytes(frame[20..24].try_into().unwrap());
@@ -408,17 +408,17 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
         return Err(Error::Invalid("checksum"));
     }
     if kind == 4 || kind == 6 {
-        // Um prefixo AOF forjado não pode pedir uma alocação maior que o frame
-        // já recebido, mesmo quando os limites globais permitem registros grandes.
+        // A forged AOF prefix cannot request an allocation larger than the frame
+        // already received, even when global limits allow large records.
         if body.len() < 12
             || u32::from_le_bytes(body[..4].try_into().unwrap()) as usize != body.len() - 12
         {
-            return Err(Error::Invalid("comprimento do registro"));
+            return Err(Error::Invalid("record length"));
         }
         let mut input = body.as_ref();
         let record = format::read_record(&mut input, limits.record)?;
         if !input.is_empty() {
-            return Err(Error::Invalid("bytes depois do registro"));
+            return Err(Error::Invalid("bytes after record"));
         }
         return match (kind, record) {
             (4, Next::Record(Record::Snapshot(mutation @ Mutation::Put { .. }))) => {
@@ -427,7 +427,7 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
             (6, Next::Record(Record::Batch { sequence, batch })) => {
                 Ok(Message::Batch { sequence, batch })
             }
-            _ => Err(Error::Invalid("registro incompatível ou incompleto")),
+            _ => Err(Error::Invalid("incompatible or incomplete record")),
         };
     }
     let mut fields = Fields {
@@ -448,10 +448,10 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
                 cursor: match fields.byte()? {
                     0 => None,
                     1 => Some(fields.cursor()?),
-                    _ => return Err(Error::Invalid("flag do cursor")),
+                    _ => return Err(Error::Invalid("cursor flag")),
                 },
             };
-            // Reutiliza a validação dos campos fixos sem alocar dados proporcionais ao peer.
+            // Reuses fixed-field validation without allocating data proportional to the peer.
             let message = Message::Hello(hello);
             encode(&message, limits)?;
             message
@@ -475,7 +475,7 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
             4 => Reject::FullRequired,
             5 => Reject::InvalidSequence,
             6 => Reject::Unavailable,
-            _ => return Err(Error::Invalid("motivo de rejeição")),
+            _ => return Err(Error::Invalid("rejection reason")),
         }),
         10 => {
             let length = fields.byte()? as usize;
@@ -489,7 +489,7 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
         }
         11 | 12 => {
             if fields.byte()? != 0 {
-                return Err(Error::Invalid("pedido administrativo"));
+                return Err(Error::Invalid("administrative request"));
             }
             if kind == 11 {
                 Message::StatusRequest
@@ -504,7 +504,7 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
             let has_upstream = fields.boolean()?;
             let sequence = fields.u64()?;
             if !has_upstream && sequence != 0 {
-                return Err(Error::Invalid("posição upstream ausente"));
+                return Err(Error::Invalid("missing upstream position"));
             }
             Message::Status {
                 readonly,
@@ -516,15 +516,15 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
                 partial_syncs: fields.u64()?,
             }
         }
-        _ => return Err(Error::Invalid("tipo de mensagem")),
+        _ => return Err(Error::Invalid("message type")),
     };
     if fields.position != fields.bytes.len() {
-        return Err(Error::Invalid("bytes depois da mensagem"));
+        return Err(Error::Invalid("bytes after message"));
     }
     Ok(message)
 }
 
-/// O prazo cobre o frame inteiro, incluindo um peer que nunca completa o cabeçalho.
+/// The timeout covers the whole frame, including a peer that never completes the header.
 pub async fn read(
     input: &mut (impl AsyncRead + Unpin),
     limits: Limits,
@@ -533,7 +533,7 @@ pub async fn read(
     Ok(read_with_frame(input, limits, deadline).await?.1)
 }
 
-/// Conserva os bytes validados para a assinatura do snapshot, sem recodificação.
+/// Retains validated bytes for the snapshot signature without recoding.
 pub async fn read_with_frame(
     input: &mut (impl AsyncRead + Unpin),
     limits: Limits,

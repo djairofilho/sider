@@ -1,4 +1,4 @@
-//! Corpus R11 entre famílias; reutiliza sockets, oráculo e referência do gate existente.
+//! R11 cross-family corpus; reuses sockets, oracle, and reference from the existing gate.
 
 use super::{Pair, RedisReference, Response, Sequence};
 use serde_json::{Value, json};
@@ -55,7 +55,7 @@ fn typed_ttl(pair: &mut Pair, seed: u64, key: &[u8]) {
             Response::Integer(1)
         );
         run(pair, &[b"PEXPIRE", key, b"60000"], &context);
-        // Rejeição por tipo ou inteiro precisa preservar o prazo anterior.
+        // Type or integer rejection must preserve the previous deadline.
         if kind == 0 {
             run(pair, &[b"HSET", key, b"f", b"wrong"], &context);
         } else {
@@ -87,7 +87,7 @@ fn typed_ttl(pair: &mut Pair, seed: u64, key: &[u8]) {
 }
 
 fn transactions(pair: &mut Pair, other: &mut Pair, seed: u64, key: &[u8], auxiliary: &[u8]) {
-    let context = format!("R11 transações seed={seed}");
+    let context = format!("R11 transactions seed={seed}");
     let mut rng = Sequence(seed);
     for round in 0..10 {
         let payload = rng.bytes();
@@ -100,7 +100,7 @@ fn transactions(pair: &mut Pair, other: &mut Pair, seed: u64, key: &[u8], auxili
         run(pair, &[b"SET", auxiliary, b"must-not-exist"], &context);
         assert_eq!(run(pair, &[b"EXEC"], &context), Response::Array(None));
         run(pair, &[b"GET", auxiliary], &context);
-        // ABA no tipo: a chave observada retorna a ausente, mas WATCH deve abortar.
+        // Type ABA: the watched key becomes absent again, but WATCH must abort.
         run(pair, &[b"WATCH", key], &context);
         create(other, (round + 1) % 5, key, &payload, &context);
         run(other, &[b"DEL", key], &context);
@@ -125,7 +125,7 @@ fn transactions(pair: &mut Pair, other: &mut Pair, seed: u64, key: &[u8], auxili
             Response::Integer(1)
         );
         run(pair, &[b"HGET", key, b"f"], &context);
-        // DISCARD e UNWATCH não podem alterar o valor ou conservar uma observação.
+        // DISCARD and UNWATCH must not change the value or retain a watch.
         run(pair, &[b"WATCH", key], &context);
         run(pair, &[b"UNWATCH"], &context);
         run(other, &[b"HSET", key, b"f", b"changed"], &context);
@@ -230,8 +230,8 @@ pub fn audit(sider: SocketAddr, reference: &RedisReference, require_cli: bool) -
             "task":"R11-02","seeds":SEEDS,"typed_rounds_per_seed":ROUNDS,
             "transaction_rounds_per_seed":10,"pubsub_rounds_per_seed":4,
             "binary_comparisons":binary,"cli_cases":cli_cases,"checks":binary+cli_cases,
-            "time_model":"PEXPIRE 0 e TTL persistente/ausente, sem tolerância temporal nova",
-            "normalization":"nenhuma; leituras sem ordem pública são evitadas neste corpus",
+            "time_model":"PEXPIRE 0 and persistent/absent TTL, with no new timing tolerance",
+            "normalization":"none; reads without a public ordering guarantee are avoided in this corpus",
             "cleanup_confirmed":true,
         }),
     )

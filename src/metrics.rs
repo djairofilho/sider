@@ -1,4 +1,4 @@
-//! Indicadores por instância: nomes fixos, observações curtas e nenhum dado do cliente.
+//! Per-instance metrics: fixed names, short observations, and no client data.
 
 use std::{
     fmt::Write,
@@ -120,13 +120,13 @@ impl Metrics {
             .0
             .config
             .lock()
-            .expect("configuração de métricas envenenada") = Some(config.clone());
+            .expect("metrics configuration lock poisoned") = Some(config.clone());
         self.0.bound_port.store(u64::from(port), Ordering::Relaxed);
     }
     pub(crate) fn dataset(&self, shard: usize, value: DatasetStats) {
         *self.0.datasets[shard]
             .lock()
-            .expect("métricas de dataset envenenadas") = value;
+            .expect("dataset metrics lock poisoned") = value;
     }
     pub(crate) fn queue(&self, shard: usize, used: usize, capacity: usize) {
         debug_assert_eq!(self.0.queues[shard].capacity, capacity);
@@ -140,7 +140,7 @@ impl Metrics {
             .0
             .replication
             .lock()
-            .expect("observador de replicação envenenado") = Some(source);
+            .expect("replication observer lock poisoned") = Some(source);
     }
     pub(crate) fn pubsub(&self, channels: usize, subscribers: usize, subscriptions: usize) {
         self.0
@@ -254,7 +254,7 @@ impl Metrics {
                 .0
                 .datasets
                 .iter()
-                .map(|state| *state.lock().expect("métricas de dataset envenenadas"))
+                .map(|state| *state.lock().expect("dataset metrics lock poisoned"))
                 .collect();
             number!(
                 "dataset_keys",
@@ -326,7 +326,7 @@ impl Metrics {
                 .0
                 .replication
                 .lock()
-                .expect("observador de replicação envenenado")
+                .expect("replication observer lock poisoned")
                 .clone();
             text.push_str("# Replication\r\n");
             number!("replication_enabled", u8::from(source.is_some()));
@@ -349,7 +349,7 @@ impl Metrics {
                     if replica {
                         number!("replication_applied_sequence", state.applied.sequence);
                     } else {
-                        // O journal avança no append, antes de aplicar no Store.
+                        // The journal advances on append, before applying to the Store.
                         number!("replication_head_sequence", state.applied.sequence);
                     }
                 }
@@ -388,7 +388,7 @@ impl Metrics {
                 .0
                 .config
                 .lock()
-                .expect("configuração de métricas envenenada")
+                .expect("metrics configuration lock poisoned")
                 .as_ref()
         {
             text.push_str(&configuration(config));

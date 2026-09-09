@@ -7,7 +7,7 @@ use crate::replication::Cursor;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Manifest {
     pub sider_version: String,
-    /// Declaração do operador, sem inferir o SHA a partir da conexão ou do binário.
+    /// Operator declaration, without inferring the SHA from the connection or binary.
     pub source_sha: String,
     pub cursor: Cursor,
     pub layout: DurableLayout,
@@ -28,7 +28,7 @@ pub(super) fn require_hex(text: &str, size: usize) -> Result<(), Error> {
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     {
-        return Err(Error::Invalid("hash ou identidade hexadecimal"));
+        return Err(Error::Invalid("hash or hexadecimal identity"));
     }
     Ok(())
 }
@@ -71,17 +71,17 @@ impl Manifest {
             || value["record_version"] != format::VERSION
             || value["snapshot"]["file"] != super::SNAPSHOT
         {
-            return Err(Error::Invalid("schema do manifesto"));
+            return Err(Error::Invalid("manifest schema"));
         }
         let text = |value: &Value| {
             value
                 .as_str()
                 .map(str::to_owned)
-                .ok_or(Error::Invalid("texto do manifesto"))
+                .ok_or(Error::Invalid("manifest text"))
         };
-        let number = |value: &Value| value.as_u64().ok_or(Error::Invalid("inteiro do manifesto"));
+        let number = |value: &Value| value.as_u64().ok_or(Error::Invalid("manifest integer"));
         let small = |value: &Value| {
-            u32::try_from(number(value)?).map_err(|_| Error::Invalid("inteiro do manifesto"))
+            u32::try_from(number(value)?).map_err(|_| Error::Invalid("manifest integer"))
         };
         let epoch = text(&value["cursor"]["epoch"])?;
         require_hex(&epoch, 32)?;
@@ -109,7 +109,7 @@ impl Manifest {
             transport_digest: small(&value["transport_digest_crc32"])?,
             received_at_unix_ms: value["received_at_unix_ms"]
                 .as_i64()
-                .ok_or(Error::Invalid("relógio do manifesto"))?,
+                .ok_or(Error::Invalid("manifest clock"))?,
         };
         manifest.validate(limits)?;
         Ok(manifest)
@@ -133,7 +133,7 @@ impl Manifest {
             || self.validation_max_dataset_bytes == 0
             || self.validation_max_dataset_bytes > isize::MAX as u64
         {
-            return Err(Error::Invalid("versão ou limites do manifesto"));
+            return Err(Error::Invalid("manifest version or limits"));
         }
         Ok(())
     }

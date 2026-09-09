@@ -1,4 +1,4 @@
-//! Scores, ordenação, quota, TTL e pós-imagens de sorted sets.
+//! Sorted set scores, ordering, quota, TTL, and post-images.
 #![forbid(unsafe_code)]
 
 use bytes::Bytes;

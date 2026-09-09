@@ -1,4 +1,4 @@
-//! Diferencial de coleções: pares e sets normalizados, listas comparadas byte a byte.
+//! Collection differential tests: normalized pairs and sets, lists compared byte for byte.
 
 #![forbid(unsafe_code)]
 
@@ -68,7 +68,7 @@ impl Pair {
             if let (Response::Array(Some(actual)), Response::Array(Some(expected))) =
                 (&actual.value, &expected.value)
             {
-                assert_eq!(actual.len(), expected.len(), "tamanho: {args:?}");
+                assert_eq!(actual.len(), expected.len(), "length: {args:?}");
                 for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
                     assert_eq!(actual, expected, "elemento {index}: {args:?}");
                 }
@@ -82,26 +82,26 @@ impl Pair {
 
 fn normalize(value: &Response, pairs: bool) -> BTreeMap<Vec<u8>, Vec<u8>> {
     let Response::Array(Some(values)) = value else {
-        panic!("array esperado: {value:?}")
+        panic!("expected array: {value:?}")
     };
     let bulk = |value: &Response| match value {
         Response::Bulk(Some(value)) => value.clone(),
-        _ => panic!("bulk não nulo esperado: {value:?}"),
+        _ => panic!("expected non-null bulk: {value:?}"),
     };
     let mut result = BTreeMap::new();
     if pairs {
-        assert_eq!(values.len() % 2, 0, "pares completos");
+        assert_eq!(values.len() % 2, 0, "complete pairs");
         for pair in values.chunks_exact(2) {
             assert!(
                 result.insert(bulk(&pair[0]), bulk(&pair[1])).is_none(),
-                "campo repetido"
+                "repeated field"
             );
         }
     } else {
         for value in values {
             assert!(
                 result.insert(bulk(value), vec![]).is_none(),
-                "membro repetido"
+                "repeated member"
             );
         }
     }
@@ -208,7 +208,7 @@ fn fixtures(pair: &mut Pair) {
         }
         pair.run(&[b"PEXPIRE", b"{r05}type", b"60000"]);
         pair.run(creator);
-        // SET limpa TTL; as três coleções o preservam.
+        // SET clears TTL; all three collections preserve it.
         pair.run(&[b"PERSIST", b"{r05}type"]);
         pair.run(&[b"PEXPIRE", b"{r05}type", b"0"]);
         pair.run(&[b"EXISTS", b"{r05}type"]);
@@ -247,7 +247,7 @@ fn generated(pair: &mut Pair) {
 }
 
 #[test]
-#[ignore = "exige Docker e Redis fixado; execute explicitamente"]
+#[ignore = "requires Docker and pinned Redis; run explicitly"]
 fn collections_match_redis() {
     assert!(collections_cases().0 > 0);
 }
@@ -269,7 +269,7 @@ fn collections_cases() -> (usize, usize) {
     fixtures(&mut pair);
     generated(&mut pair);
     eprintln!(
-        "R05: {} respostas exatas, {} arrays normalizados; total {}",
+        "R05: {} exact responses, {} normalized arrays; total {}",
         pair.exact,
         pair.normalized,
         pair.exact + pair.normalized
@@ -449,7 +449,7 @@ fn sorted_generated(pair: &mut Pair) {
 }
 
 #[test]
-#[ignore = "exige Docker e Redis fixado; execute explicitamente"]
+#[ignore = "requires Docker and pinned Redis; run explicitly"]
 fn sorted_sets_match_redis() {
     assert!(sorted_cases() > 0);
 }
@@ -479,9 +479,9 @@ fn sorted_cases() -> usize {
         pair.run(&args.iter().map(Vec::as_slice).collect::<Vec<_>>());
         pair.run(&[b"ZRANGE", b"{r06}scores", b"0", b"-1", b"WITHSCORES"]);
     }
-    assert_eq!(pair.normalized, 0, "sorted sets não permitem normalização");
+    assert_eq!(pair.normalized, 0, "sorted sets do not allow normalization");
     eprintln!(
-        "R06: {} respostas exatas, incluindo scores e ordem",
+        "R06: {} exact responses, including scores and ordering",
         pair.exact
     );
     let count = pair.exact;
@@ -493,7 +493,7 @@ fn sorted_cases() -> usize {
 }
 
 #[test]
-#[ignore = "gate de release exige contexto exato e Redis fixado"]
+#[ignore = "release gate requires exact context and pinned Redis"]
 fn release_types_gate() {
     let context = gate_receipt::GateContext::from_env("types").unwrap();
     let began = std::time::Instant::now();
@@ -504,15 +504,15 @@ fn release_types_gate() {
             began.elapsed(),
             serde_json::json!({
                 "exact_responses":exact,"normalized_responses":normalized,
-                "normalization":"pares HGETALL e ordem SMEMBERS; demais respostas literais",
-                "durability":"suíte persistence typed_ integra os gates native/crash/recovery"
+                "normalization":"HGETALL pairs and SMEMBERS ordering; all other responses are literal",
+                "durability":"the persistence typed_ suite is part of the native/crash/recovery gates"
             }),
         )
         .unwrap();
 }
 
 #[test]
-#[ignore = "gate de release exige contexto exato e Redis fixado"]
+#[ignore = "release gate requires exact context and pinned Redis"]
 fn release_sorted_sets_gate() {
     let context = gate_receipt::GateContext::from_env("sorted_sets").unwrap();
     let began = std::time::Instant::now();
@@ -524,7 +524,7 @@ fn release_sorted_sets_gate() {
             serde_json::json!({
                 "exact_responses":exact,"normalized_responses":0,
                 "generated_float_batches":32,"samples_per_batch":400,
-                "durability":"suíte persistence typed_ integra os gates native/crash/recovery"
+                "durability":"the persistence typed_ suite is part of the native/crash/recovery gates"
             }),
         )
         .unwrap();

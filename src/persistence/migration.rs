@@ -1,4 +1,4 @@
-//! Migração offline explícita, preservando o AOF de origem e sua sequência.
+//! Explicit offline migration, preserving the source AOF and its sequence.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -29,7 +29,7 @@ pub struct MigrationReport {
     pub destination_shard_usage: Vec<usize>,
 }
 
-/// Parser puro compartilhado pelo CLI e pelos testes; caminhos preservam OsString.
+/// Pure parser shared by the CLI and tests; paths retain OsString.
 pub fn options_from_args(
     arguments: impl IntoIterator<Item = OsString>,
 ) -> Result<MigrationOptions, String> {
@@ -38,7 +38,7 @@ pub fn options_from_args(
     while let Some(name) = arguments.next() {
         let name = name
             .into_string()
-            .map_err(|_| "nome de opção precisa ser UTF-8")?;
+            .map_err(|_| "option name must be UTF-8")?;
         if !matches!(
             name.as_str(),
             "--source"
@@ -52,28 +52,28 @@ pub fn options_from_args(
                 | "--source-max-record-bytes"
                 | "--max-record-bytes"
         ) {
-            return Err(format!("opção desconhecida: {name}"));
+            return Err(format!("unknown option: {name}"));
         }
         let value = arguments
             .next()
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| format!("{name} precisa de um valor"))?;
+            .ok_or_else(|| format!("{name} requires a value"))?;
         if values.insert(name.clone(), value).is_some() {
-            return Err(format!("opção repetida: {name}"));
+            return Err(format!("repeated option: {name}"));
         }
     }
     fn required(values: &mut BTreeMap<String, OsString>, name: &str) -> Result<OsString, String> {
         values
             .remove(name)
-            .ok_or_else(|| format!("{name} é obrigatório"))
+            .ok_or_else(|| format!("{name} is required"))
     }
     fn number(value: OsString, name: &str) -> Result<usize, String> {
         let text = value
             .to_str()
             .filter(|text| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit()))
-            .ok_or_else(|| format!("{name} precisa ser inteiro decimal sem sinal"))?;
+            .ok_or_else(|| format!("{name} must be an unsigned decimal integer"))?;
         text.parse()
-            .map_err(|_| format!("{name} excede o tamanho representável"))
+            .map_err(|_| format!("{name} exceeds representable size"))
     }
     fn layout(
         values: &mut BTreeMap<String, OsString>,
@@ -81,9 +81,9 @@ pub fn options_from_args(
         routing: &str,
     ) -> Result<DurableLayout, String> {
         let shard_count = u32::try_from(number(required(values, count)?, count)?)
-            .map_err(|_| format!("{count} excede u32"))?;
+            .map_err(|_| format!("{count} exceeds u32"))?;
         let routing_version = u32::try_from(number(required(values, routing)?, routing)?)
-            .map_err(|_| format!("{routing} excede u32"))?;
+            .map_err(|_| format!("{routing} exceeds u32"))?;
         Ok(DurableLayout {
             shard_count,
             routing_version,
@@ -161,7 +161,7 @@ struct Destination {
 impl Drop for Destination {
     fn drop(&mut self) {
         if !self.committed {
-            // Remove somente nomes criados por esta operação; jamais apaga recursivamente.
+            // Removes only names created by this operation; never deletes recursively.
             let _ = fs::remove_file(&self.temporary);
             let _ = fs::remove_file(&self.published);
             let _ = fs::remove_file(self.directory.join("writer.lock"));
@@ -170,8 +170,8 @@ impl Drop for Destination {
     }
 }
 
-/// Exige o escritor de origem parado e destino inexistente, fora da árvore de origem.
-/// Não trunca a origem: uma cauda incompleta é informada no relatório e fica preservada.
+/// Requires the source writer to be stopped and a nonexistent destination outside the source tree.
+/// Does not truncate the source: an incomplete tail is reported and preserved.
 pub fn migrate_offline(
     options: MigrationOptions,
     clock: Arc<dyn Clock>,
@@ -192,13 +192,13 @@ pub fn migrate_offline(
     let destination_path = destination_path(&options.destination.directory)?;
     if destination_path.starts_with(&source_path) {
         return Err(AofError::Migration(
-            "destino precisa ficar fora da árvore de origem",
+            "destination must be outside the source tree",
         ));
     }
     if destination_path.exists() {
-        return Err(AofError::Migration("destino já existe"));
+        return Err(AofError::Migration("destination already exists"));
     }
-    // Um par de relógios mantém a semântica de TTL estável durante leitura, quotas e conferência.
+    // A pair of clocks keeps TTL semantics stable during reading, quotas, and verification.
     let clock: Arc<dyn Clock> = Arc::new(FrozenClock {
         now: clock.now(),
         unix_ms: clock.unix_millis(),
@@ -267,9 +267,9 @@ pub fn migrate_offline(
 }
 
 fn destination_path(path: &Path) -> Result<PathBuf, AofError> {
-    let name = path.file_name().ok_or(AofError::Migration(
-        "destino precisa nomear um diretório novo",
-    ))?;
+    let name = path
+        .file_name()
+        .ok_or(AofError::Migration("destination must name a new directory"))?;
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -284,8 +284,8 @@ fn validate_snapshot(
     clock: Arc<dyn Clock>,
 ) -> Result<Vec<usize>, AofError> {
     let mut usage = vec![0usize; layout.shard_count as usize];
-    // Reutiliza a contabilidade real de Store com no máximo uma entrada temporária.
-    // Bytes/valores imutáveis continuam compartilhados com a origem.
+    // Reuses the real Store accounting with at most one temporary entry.
+    // Immutable Bytes/values remain shared with the source.
     let mut entry_store = Store::with_config(
         StoreConfig {
             max_dataset_bytes: isize::MAX as usize,
@@ -299,7 +299,7 @@ fn validate_snapshot(
             usage[shard]
                 .checked_add(entry_store.used_bytes())
                 .ok_or(AofError::Migration(
-                    "contabilidade excedeu o tamanho representável",
+                    "accounting exceeded representable size",
                 ))?;
         let quota = layout.quota(config.max_dataset_bytes, shard)?;
         if usage[shard] > quota {
@@ -326,19 +326,19 @@ fn verify_file(
     let mut file = File::open(path)?;
     let header = format::read_header_with_layout(&mut file)?;
     if header.sequence != sequence || header.layout != config.layout {
-        return Err(AofError::Migration("cabeçalho do destino divergiu"));
+        return Err(AofError::Migration("destination header diverged"));
     }
     for mutation in snapshot {
         if format::read_record(&mut file, config.limits)?
             != Next::Record(Record::Snapshot(mutation.clone()))
         {
-            return Err(AofError::Migration("snapshot do destino divergiu"));
+            return Err(AofError::Migration("destination snapshot diverged"));
         }
     }
     if format::read_record(&mut file, config.limits)? != Next::Record(seal.clone())
         || format::read_record(&mut file, config.limits)? != Next::End
     {
-        return Err(AofError::Migration("selo ou fim do destino divergiu"));
+        return Err(AofError::Migration("destination seal or end diverged"));
     }
     Ok(())
 }

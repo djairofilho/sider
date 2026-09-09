@@ -1,15 +1,15 @@
-//! Roteamento binário estável, independente do hasher aleatório do dataset.
+//! Stable binary routing, independent of the dataset's randomized hasher.
 
 use crate::ConfigError;
 use crate::command::{Command, ExecutionError};
 
-/// Limita workers, filas e metadados de coordenação criados na inicialização.
+/// Bounds workers, queues, and coordination metadata created at initialization.
 pub const MAX_SHARDS: usize = 256;
 
-/// Extrai o primeiro par de chaves não vazio, sem interpretar UTF-8.
+/// Extracts the first non-empty key pair without interpreting UTF-8.
 ///
-/// Um primeiro par vazio ou incompleto mantém a chave inteira, inclusive quando
-/// existir outro par depois. A abertura aninhada pertence aos bytes da tag.
+/// An empty or incomplete first pair retains the whole key, including when
+/// another pair occurs later. A nested opening belongs to the tag bytes.
 pub fn hash_tag(key: &[u8]) -> &[u8] {
     let Some(open) = key.iter().position(|byte| *byte == b'{') else {
         return key;
@@ -21,7 +21,7 @@ pub fn hash_tag(key: &[u8]) -> &[u8] {
     }
 }
 
-/// FNV-1a de 64 bits, com multiplicação módulo 2^64 em cada byte.
+/// 64-bit FNV-1a, with multiplication modulo 2^64 for every byte.
 pub fn stable_hash(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
         (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
@@ -37,7 +37,7 @@ impl ShardRouter {
     pub fn new(count: usize) -> Result<Self, ConfigError> {
         if !(1..=MAX_SHARDS).contains(&count) {
             return Err(ConfigError::InvalidServerLimits {
-                reason: "SIDER_SHARDS precisa estar entre 1 e 256",
+                reason: "SIDER_SHARDS must be between 1 and 256",
             });
         }
         Ok(Self { count })
@@ -47,8 +47,8 @@ impl ShardRouter {
         (stable_hash(hash_tag(key)) % self.count as u64) as usize
     }
 
-    /// Verifica todas as chaves antes de selecionar a fila. Comandos sem chave
-    /// usam o worker zero; duplicatas continuam intactas no comando original.
+    /// Checks all keys before selecting the queue. Commands without a key use
+    /// worker zero; duplicates remain intact in the original command.
     pub fn route(&self, command: &Command) -> Result<usize, ExecutionError> {
         let mut selected = None;
         self.select_command(command, &mut selected)?;

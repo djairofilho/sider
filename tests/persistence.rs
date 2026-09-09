@@ -1,4 +1,4 @@
-//! Persistência em disco e falhas de processos reais, executáveis em Windows e Linux.
+//! Disk persistence and real process failures, runnable on Windows and Linux.
 #![forbid(unsafe_code)]
 
 #[path = "common/baseline_manifest.rs"]
@@ -133,7 +133,7 @@ struct ErrorAt(&'static str);
 impl FaultInjector for ErrorAt {
     fn hit(&self, point: &'static str) -> io::Result<()> {
         if point == self.0 {
-            Err(io::Error::other("falha de disco injetada"))
+            Err(io::Error::other("injected disk failure"))
         } else {
             Ok(())
         }
@@ -193,7 +193,7 @@ impl FaultInjector for ShortWrite {
     }
     fn write_append(&self, file: &mut fs::File, bytes: &[u8]) -> io::Result<()> {
         file.write_all(&bytes[..self.0.min(bytes.len())])?;
-        Err(io::Error::other("escrita curta seguida de falha"))
+        Err(io::Error::other("short write followed by failure"))
     }
 }
 
@@ -475,10 +475,10 @@ impl FaultInjector for Pause {
 }
 
 #[test]
-#[ignore = "helper executado somente pelo teste pai em processo isolado"]
+#[ignore = "helper executed only by the parent test in an isolated process"]
 fn aof_process_child() {
     let directory =
-        PathBuf::from(std::env::var_os("SIDER_TEST_AOF_DIR").expect("diretório do processo filho"));
+        PathBuf::from(std::env::var_os("SIDER_TEST_AOF_DIR").expect("child process directory"));
     let point = std::env::var("SIDER_TEST_AOF_POINT").unwrap();
     let compact = point.starts_with("compact_");
     let recovered = persistence::recover_with_faults(
@@ -511,10 +511,10 @@ fn wait_file(path: &Path, child: &mut process::OwnedChild) {
     while !path.is_file() {
         child
             .assert_alive()
-            .expect("processo encerrou antes do ponto de crash");
+            .expect("process exited before the crash point");
         assert!(
             Instant::now() < deadline,
-            "ponto de crash não alcançado: {}",
+            "crash point not reached: {}",
             path.display()
         );
         std::thread::sleep(Duration::from_millis(5));
@@ -548,7 +548,7 @@ fn crash_cases() -> u64 {
         let mut recovered = recover(&directory);
         let a = get(&mut recovered.store, b"a");
         let b = get(&mut recovered.store, b"b");
-        assert_eq!(a, b, "lote parcialmente recuperado em {point}");
+        assert_eq!(a, b, "partially recovered batch at {point}");
         assert!(
             matches!(&a, Reply::Bulk(Some(value)) if value.as_ref() == b"old" || value.as_ref() == b"new")
         );
@@ -559,7 +559,7 @@ fn crash_cases() -> u64 {
             assert_eq!(
                 a,
                 Reply::Bulk(Some(Bytes::from_static(b"new"))),
-                "confirmação perdida em {point}"
+                "acknowledgment lost at {point}"
             );
         }
         cases += 1;
@@ -793,7 +793,7 @@ fn binary_refuses_corrupt_aof_before_bind_and_readiness() {
         .env("SIDER_AOF_DIR", &directory.0)
         .env("SIDER_READY_FILE", &ready)
         .env("SIDER_ADDR", held.local_addr().unwrap().to_string());
-    // Uma porta já ocupada distingue a recuperação anterior ao bind: o erro deve ser do AOF.
+    // An occupied port distinguishes recovery before bind: the error must come from the AOF.
     let mut child = process::OwnedChild::spawn(&mut command).unwrap();
     let output = child.wait(TIMEOUT).unwrap();
     assert!(!output.status.success());
@@ -895,7 +895,7 @@ fn oversized_aof_record_is_rejected_without_losing_the_connection_or_state() {
 }
 
 #[test]
-#[ignore = "gate de release exige contexto exato; suíte interna roda diretamente"]
+#[ignore = "release gate requires exact context; the internal suite runs directly"]
 fn release_crash_gate() {
     let context = gate_receipt::GateContext::from_env("crash").unwrap();
     let began = Instant::now();
@@ -917,7 +917,7 @@ fn release_crash_gate() {
 }
 
 #[test]
-#[ignore = "gate de release exige contexto exato; suíte interna roda diretamente"]
+#[ignore = "release gate requires exact context; the internal suite runs directly"]
 fn release_recovery_gate() {
     let context = gate_receipt::GateContext::from_env("recovery").unwrap();
     let began = Instant::now();
@@ -991,7 +991,7 @@ fn migration_from_fixed_v1_fixture_and_unknown_version_rejection() {
 }
 
 #[test]
-#[ignore = "gate de release exige contexto exato; suíte interna roda diretamente"]
+#[ignore = "release gate requires exact context; the internal suite runs directly"]
 fn release_migration_gate() {
     let context = gate_receipt::GateContext::from_env("migration").unwrap();
     let began = Instant::now();
@@ -1010,13 +1010,13 @@ fn release_migration_gate() {
 }
 
 #[test]
-#[ignore = "congela baseline interna somente com pacote, builds e checkout limpo explícitos"]
+#[ignore = "freezes an internal baseline only with an explicit package, builds, and clean checkout"]
 fn freeze_internal_baseline() {
     println!("{}", internal_baseline::freeze_from_env().unwrap());
 }
 
 #[test]
-#[ignore = "ensaio curto com pacote real; não congela baseline oficial nem emite recibo"]
+#[ignore = "short test with a real package; does not freeze an official baseline or issue a receipt"]
 fn rehearse_internal_baseline_migration() {
     println!("{}", internal_baseline::rehearse_from_env().unwrap());
 }
@@ -1195,7 +1195,7 @@ fn typed_migration_preserves_legacy_string_fixture_and_new_values() {
 
 #[test]
 fn typed_migration_from_frozen_r04_binary_output_preserves_shards_and_elapsed_ttl() {
-    // Bytes produzidos pelo migrador 4739d596 a partir da baseline real R03.
+    // Bytes produced by migrator 4739d596 from the actual R03 baseline.
     // SHA256 b6be7a45ad5e57eb7957d10136afddec6488c60f7aa59bb1c5522388ba4a246f.
     for family in 0..4 {
         let directory = Directory::new();
@@ -1244,7 +1244,7 @@ fn typed_migration_from_frozen_r04_binary_output_preserves_shards_and_elapsed_tt
 
 #[test]
 fn sorted_set_migration_from_frozen_r05_binary_output_preserves_collections() {
-    // Saída real a615f705; SHA256 87d12a8fc88698266882a6dce88506249fdd7dac3ffe594fc12e42cded47242b.
+    // Actual output a615f705; SHA256 87d12a8fc88698266882a6dce88506249fdd7dac3ffe594fc12e42cded47242b.
     let directory = Directory::new();
     let bytes: Vec<_> = include_str!("fixtures/aof-r05-collections.hex")
         .trim()
@@ -1352,7 +1352,7 @@ fn typed_quota_type_and_record_rejections_preserve_writer_and_dataset() {
             assert_eq!(
                 aof.status().await.unwrap().0,
                 1,
-                "rejeições não geram sequência"
+                "rejections do not generate a sequence"
             );
             stop.send(true).unwrap();
             running.await.unwrap();
@@ -1399,7 +1399,7 @@ fn typed_compaction_captures_concurrent_postimages_and_passive_tombstones() {
             .unwrap();
             assert_eq!(recovered.store.snapshot(), expected);
         });
-        // Uma leitura persiste o tombstone passivo, inclusive antes de relógio voltar.
+        // A read persists the passive tombstone, including before the clock moves backward.
         runtime().block_on(async {
             let clock = TypedClock::at(1000);
             let recovered =
@@ -1439,7 +1439,7 @@ fn typed_compaction_captures_concurrent_postimages_and_passive_tombstones() {
 }
 
 #[test]
-#[ignore = "helper exclusivo de crashes tipados em processo filho"]
+#[ignore = "dedicated helper for typed crashes in a child process"]
 fn typed_aof_process_child() {
     let directory = PathBuf::from(std::env::var_os("SIDER_TEST_AOF_DIR").unwrap());
     let point = std::env::var("SIDER_TEST_AOF_POINT").unwrap();
@@ -1518,7 +1518,7 @@ fn typed_process_crashes_preserve_complete_values_and_compaction_deltas() {
             let actual = recovered.store.execute(typed_read(family));
             assert!(
                 actual == before || actual == after,
-                "valor parcial: family={family}, point={point}"
+                "partial value: family={family}, point={point}"
             );
             if point == "before_append" {
                 assert_eq!(actual, before);
@@ -1526,7 +1526,7 @@ fn typed_process_crashes_preserve_complete_values_and_compaction_deltas() {
             if acknowledged || point == "after_sync" || point == "before_reply" {
                 assert_eq!(
                     actual, after,
-                    "confirmação perdida: family={family}, point={point}"
+                    "lost acknowledgment: family={family}, point={point}"
                 );
             }
         }

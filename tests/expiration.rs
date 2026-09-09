@@ -1,4 +1,4 @@
-//! Tempo injetado para limites exatos, opções condicionais e limpeza limitada.
+//! Injected time for exact boundaries, conditional options, and bounded cleanup.
 
 #![forbid(unsafe_code)]
 

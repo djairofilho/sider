@@ -1,4 +1,4 @@
-//! Diferencial externo explícito: o codec do Sider não constrói o oráculo.
+//! Explicit external differential test: the Sider codec does not construct the oracle.
 
 #![forbid(unsafe_code)]
 
@@ -72,10 +72,10 @@ impl Pair {
             .unwrap_or_else(|error| panic!("Sider {context}: {error}"));
         let redis = wire::read_response(&mut self.redis)
             .unwrap_or_else(|error| panic!("Redis {context}: {error}"));
-        assert_eq!(sider.value, redis.value, "tipo/conteúdo: {context}");
+        assert_eq!(sider.value, redis.value, "type/content: {context}");
         assert_eq!(sider.bytes, redis.bytes, "bytes RESP: {context}");
         if let Some(expected) = expected {
-            assert_eq!(redis.bytes, expected, "referência literal: {context}");
+            assert_eq!(redis.bytes, expected, "literal reference: {context}");
         }
         self.cases += 1;
         sider
@@ -92,7 +92,7 @@ impl Pair {
             assert_eq!(
                 stream.read(&mut [0; 1]).unwrap(),
                 0,
-                "bytes extras antes de EOF"
+                "extra bytes before EOF"
             );
         }
         self.cases
@@ -116,11 +116,11 @@ fn fixtures(pair: &mut Pair) {
             pair.compare(Some(response), &format!("{} pipeline {index}", case.name));
         }
         pair.send(b"*1\r\n$4\r\nPING\r\n");
-        pair.compare(Some(b"+PONG\r\n"), "sentinela após fixture");
+        pair.compare(Some(b"+PONG\r\n"), "sentinel after fixture");
     }
 }
 
-// Gerador pequeno e explicitamente estável: operações wrapping fixadas em u64.
+// Small, explicitly stable generator: wrapping operations fixed to u64.
 struct Sequence(u64);
 impl Sequence {
     fn next(&mut self) -> u64 {
@@ -188,18 +188,18 @@ fn sequences(pair: &mut Pair) {
                     );
                 }
             }
-            // O mesmo conjunto de operações deve produzir o mesmo estado observado.
+            // The same set of operations must produce the same observed state.
             for (index, key) in keys.iter().enumerate() {
                 pair.exchange(
                     &[b"GET".to_vec(), key.clone()],
-                    &format!("estado seed={seed} key={index}"),
+                    &format!("state seed={seed} key={index}"),
                 );
             }
             let mut cleanup = vec![b"DEL".to_vec()];
             cleanup.extend(keys.clone());
-            pair.exchange(&cleanup, "limpar somente chaves deste caso");
+            pair.exchange(&cleanup, "clean up only this case's keys");
             for key in &keys {
-                let absent = pair.exchange(&[b"GET".to_vec(), key.clone()], "estado após remoção");
+                let absent = pair.exchange(&[b"GET".to_vec(), key.clone()], "state after deletion");
                 assert_eq!(absent.value, Response::Bulk(None));
             }
         }
@@ -210,28 +210,28 @@ fn boundary_payloads(pair: &mut Pair) {
     let key = b"r01-diff-boundary".to_vec();
     for length in [0, 1, 127, 8192, 1024 * 1024] {
         let value: Vec<_> = (0..length).map(|index| (index % 256) as u8).collect();
-        let echoed = pair.exchange(&[b"ECHO".to_vec(), value.clone()], "ECHO nas fronteiras");
+        let echoed = pair.exchange(&[b"ECHO".to_vec(), value.clone()], "ECHO at boundaries");
         assert_eq!(echoed.value, Response::Bulk(Some(value.clone())));
         let stored = pair.exchange(
             &[b"SET".to_vec(), key.clone(), value.clone()],
-            "SET nas fronteiras",
+            "SET at boundaries",
         );
         assert_eq!(stored.value, Response::Simple(b"OK".to_vec()));
-        let fetched = pair.exchange(&[b"GET".to_vec(), key.clone()], "GET nas fronteiras");
+        let fetched = pair.exchange(&[b"GET".to_vec(), key.clone()], "GET at boundaries");
         assert_eq!(fetched.value, Response::Bulk(Some(value)));
     }
-    pair.exchange(&[b"DEL".to_vec(), key], "remover chave das fronteiras");
+    pair.exchange(&[b"DEL".to_vec(), key], "remove boundary key");
 }
 
 fn cli_suite(reference: &RedisReference, sider: SocketAddr) -> u64 {
     let cases: &[(&[&str], &[u8])] = &[
         (&["PING"], b"PONG\n"),
-        (&["PING", "mensagem"], b"mensagem\n"),
+        (&["PING", "message"], b"message\n"),
         (&["ECHO", ""], b"\n"),
         (&["ECHO", "sider-cli"], b"sider-cli\n"),
         (&["GET", "r01-cli-key"], b"\n"),
-        (&["SET", "r01-cli-key", "valor"], b"OK\n"),
-        (&["GET", "r01-cli-key"], b"valor\n"),
+        (&["SET", "r01-cli-key", "value"], b"OK\n"),
+        (&["GET", "r01-cli-key"], b"value\n"),
         (&["DEL", "r01-cli-key", "r01-cli-key"], b"1\n"),
         (&["GET", "r01-cli-key"], b"\n"),
     ];
@@ -254,7 +254,7 @@ fn suite(require_cli: bool) -> (u64, Value) {
     let runner = std::env::var("SIDER_TEST_RUNNER_CONTAINER").ok();
     assert!(
         !require_cli || runner.is_some(),
-        "CLI/gate exigem SIDER_TEST_RUNNER_CONTAINER com o ID completo do runner Linux isolado"
+        "CLI/gate require SIDER_TEST_RUNNER_CONTAINER with the full ID of the isolated Linux runner"
     );
     let reference = match runner {
         Some(id) => RedisReference::start_shared(&id),
@@ -303,7 +303,7 @@ fn suite(require_cli: bool) -> (u64, Value) {
 }
 
 #[test]
-#[ignore = "somente corpus R11 novo; requer Docker/Redis fixados; CLI exige runner Linux isolado"]
+#[ignore = "new R11 corpus only; requires pinned Docker/Redis; CLI requires an isolated Linux runner"]
 fn cross_family_audit_only() {
     let runner = std::env::var("SIDER_TEST_RUNNER_CONTAINER").ok();
     let reference = match &runner {
@@ -456,12 +456,12 @@ fn r02_expiration(pair: &mut Pair) -> u64 {
         let redis = wire::read_response(&mut pair.redis).unwrap();
         let (Response::Integer(sider), Response::Integer(redis)) = (sider.value, redis.value)
         else {
-            panic!("TTL deve ser inteiro");
+            panic!("TTL must be an integer");
         };
         assert!((1..=max).contains(&sider) && (1..=max).contains(&redis));
         assert!(
             (sider - redis).abs() <= tolerance,
-            "R02 prazo: sider={sider} redis={redis}"
+            "R02 deadline: sider={sider} redis={redis}"
         );
         pair.cases += 1;
         temporal_observations += 1;
@@ -479,7 +479,7 @@ fn r02_expiration(pair: &mut Pair) -> u64 {
         r02_exchange(pair, &[name, key, b"9223372036854775807"]);
     }
     r02_exchange(pair, &[b"SET", key, b"v", b"PX", b"1"]);
-    // Expiração real observada por polling limitado; não assume ordenação de timers entre processos.
+    // Actual expiration observed through bounded polling; does not assume timer ordering across processes.
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         pair.send(&wire::request(&[b"PTTL".to_vec(), key.to_vec()]));
@@ -492,7 +492,7 @@ fn r02_expiration(pair: &mut Pair) -> u64 {
         }
         assert!(
             Instant::now() < deadline,
-            "R02 expiração não observada nos dois servidores"
+            "R02 expiration not observed on both servers"
         );
     }
     r02_exchange(pair, &[b"GET", key]);
@@ -500,27 +500,27 @@ fn r02_expiration(pair: &mut Pair) -> u64 {
 }
 
 #[test]
-#[ignore = "requer Docker Linux e imagem Redis fixada; não inclui CLI contra o Sider"]
+#[ignore = "requires Linux Docker and the pinned Redis image; does not include CLI tests against Sider"]
 fn sider_matches_redis() {
     suite(false);
 }
 
 #[test]
-#[ignore = "requer runner Linux isolado, Docker e imagem Redis fixada"]
+#[ignore = "requires an isolated Linux runner, Docker, and the pinned Redis image"]
 fn sider_matches_redis_and_cli() {
     suite(true);
 }
 
 #[test]
-#[ignore = "gate externo: checkout limpo, contexto de release e runner Linux isolado"]
+#[ignore = "external gate: clean checkout, release context, and isolated Linux runner"]
 fn release_compatibility_gate() {
-    let context = GateContext::from_env("compatibility").expect("contexto real do gate");
+    let context = GateContext::from_env("compatibility").expect("actual gate context");
     assert_eq!(context.version(), env!("CARGO_PKG_VERSION"));
     let started = Instant::now();
     let (cases, report) = suite(true);
     context
         .publish(cases, started.elapsed(), report)
-        .expect("recibo do gate somente após sucesso e cleanup");
+        .expect("gate receipt only after success and cleanup");
 }
 
 #[test]

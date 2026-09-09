@@ -1,4 +1,4 @@
-//! Inventário imutável da baseline interna, validado antes de abrir executáveis.
+//! Immutable internal baseline inventory, validated before opening executables.
 
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -16,10 +16,7 @@ pub const MAX_FILES: usize = 4096;
 pub fn digest(path: &Path) -> Result<(u64, String)> {
     let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > MAX_FILE_BYTES {
-        return Err(format!(
-            "arquivo regular limitado exigido: {}",
-            path.display()
-        ));
+        return Err(format!("bounded regular file required: {}", path.display()));
     }
     let mut file = File::open(path).map_err(|error| error.to_string())?;
     let mut hash = Sha256::new();
@@ -32,12 +29,12 @@ pub fn digest(path: &Path) -> Result<(u64, String)> {
         }
         bytes += count as u64;
         if bytes > MAX_FILE_BYTES {
-            return Err("arquivo cresceu além do limite".into());
+            return Err("file grew beyond the limit".into());
         }
         hash.update(&buffer[..count]);
     }
     if bytes != metadata.len() {
-        return Err("arquivo alterado durante leitura".into());
+        return Err("file changed during reading".into());
     }
     Ok((bytes, format!("{:x}", hash.finalize())))
 }
@@ -53,7 +50,7 @@ pub fn safe_relative(value: &str) -> Result<PathBuf> {
             .split('/')
             .any(|part| part.is_empty() || matches!(part, "." | ".."))
     {
-        return Err("caminho relativo portátil inválido".into());
+        return Err("invalid portable relative path".into());
     }
     for part in value.split('/') {
         let base = part.split('.').next().unwrap().to_ascii_uppercase();
@@ -63,29 +60,29 @@ pub fn safe_relative(value: &str) -> Result<PathBuf> {
                 && (base.starts_with("COM") || base.starts_with("LPT"))
                 && matches!(base.as_bytes()[3], b'1'..=b'9'))
         {
-            return Err("componente reservado de caminho".into());
+            return Err("reserved path component".into());
         }
     }
     Ok(PathBuf::from(value))
 }
 
 pub fn hex(value: &Value, size: usize) -> Result<&str> {
-    let value = value.as_str().ok_or("hash textual exigido")?;
+    let value = value.as_str().ok_or("text hash required")?;
     if value.len() != size
         || !value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     {
-        return Err("hash hexadecimal minúsculo inválido".into());
+        return Err("invalid lowercase hexadecimal hash".into());
     }
     Ok(value)
 }
 
 pub fn fields(value: &Value, expected: &[&str]) -> Result<()> {
-    let object = value.as_object().ok_or("objeto JSON exigido")?;
+    let object = value.as_object().ok_or("JSON object required")?;
     if object.len() != expected.len() || object.keys().any(|key| !expected.contains(&key.as_str()))
     {
-        return Err("campos do manifesto divergentes".into());
+        return Err("manifest field mismatch".into());
     }
     Ok(())
 }
@@ -94,14 +91,14 @@ pub fn tree(root: &Path) -> Result<Vec<Value>> {
     fn walk(root: &Path, directory: &Path, files: &mut Vec<Value>) -> Result<()> {
         let metadata = fs::symlink_metadata(directory).map_err(|error| error.to_string())?;
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
-            return Err("diretório real exigido".into());
+            return Err("real directory required".into());
         }
         for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();
             let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
             if metadata.file_type().is_symlink() {
-                return Err("symlink não pertence à baseline".into());
+                return Err("symlink does not belong in the baseline".into());
             }
             if metadata.is_dir() {
                 walk(root, &path, files)?;
@@ -110,7 +107,7 @@ pub fn tree(root: &Path) -> Result<Vec<Value>> {
                     .strip_prefix(root)
                     .map_err(|error| error.to_string())?
                     .to_str()
-                    .ok_or("caminho não Unicode")?
+                    .ok_or("non-Unicode path")?
                     .replace('\\', "/");
                 if relative == NAME {
                     continue;
@@ -119,7 +116,7 @@ pub fn tree(root: &Path) -> Result<Vec<Value>> {
                 let (bytes, sha256) = digest(&path)?;
                 files.push(json!({"path": relative, "bytes": bytes, "sha256": sha256}));
                 if files.len() > MAX_FILES {
-                    return Err("inventário excedeu limite".into());
+                    return Err("inventory exceeded the limit".into());
                 }
             }
         }
@@ -166,44 +163,42 @@ pub fn validate(value: &Value, expected_target: &str) -> Result<()> {
             .as_str()
             .is_none_or(|text| text.is_empty() || text.len() > 4096)
     {
-        return Err("identidade da baseline interna inválida".into());
+        return Err("invalid internal baseline identity".into());
     }
     hex(&value["source_sha"], 40)?;
     let package_root = value["package_root"]
         .as_str()
-        .ok_or("raiz do pacote ausente")?;
+        .ok_or("missing package root")?;
     safe_relative(package_root)?;
-    let archive = value["archive"]
-        .as_str()
-        .ok_or("arquivo de pacote ausente")?;
+    let archive = value["archive"].as_str().ok_or("missing package archive")?;
     safe_relative(archive)?;
-    let provenance = value["provenance"].as_str().ok_or("proveniência ausente")?;
+    let provenance = value["provenance"].as_str().ok_or("missing provenance")?;
     safe_relative(provenance)?;
-    let files = value["files"].as_array().ok_or("inventário ausente")?;
+    let files = value["files"].as_array().ok_or("missing inventory")?;
     if files.is_empty() || files.len() > MAX_FILES {
-        return Err("inventário vazio ou excessivo".into());
+        return Err("empty or excessive inventory".into());
     }
     let mut paths = BTreeSet::new();
     let mut previous = "";
     for file in files {
         fields(file, &["path", "bytes", "sha256"])?;
-        let path = file["path"].as_str().ok_or("caminho ausente")?;
+        let path = file["path"].as_str().ok_or("missing path")?;
         safe_relative(path)?;
         if path <= previous || path == NAME {
-            return Err("inventário duplicado ou não ordenado".into());
+            return Err("duplicate or unsorted inventory".into());
         }
         previous = path;
         if file["bytes"]
             .as_u64()
             .is_none_or(|bytes| bytes > MAX_FILE_BYTES)
         {
-            return Err("tamanho de arquivo inválido".into());
+            return Err("invalid file size".into());
         }
         hex(&file["sha256"], 64)?;
         paths.insert(path);
     }
     if !paths.contains(archive) || !paths.contains(provenance) {
-        return Err("pacote compactado ou proveniência não inventariado".into());
+        return Err("package archive or provenance not inventoried".into());
     }
     let suffix = if expected_target.contains("windows") {
         ".exe"
@@ -217,12 +212,12 @@ pub fn validate(value: &Value, expected_target: &str) -> Result<()> {
         "sider-aof-migrate",
     ] {
         if !paths.contains(format!("{package_root}/{binary}{suffix}").as_str()) {
-            return Err("executável obrigatório ausente".into());
+            return Err("missing required executable".into());
         }
     }
-    let scenarios = value["scenarios"].as_array().ok_or("cenários ausentes")?;
+    let scenarios = value["scenarios"].as_array().ok_or("missing scenarios")?;
     if scenarios.len() != 2 {
-        return Err("cenários shards1 e4 obrigatórios".into());
+        return Err("shards1 and shards4 scenarios required".into());
     }
     for (scenario, shards) in scenarios.iter().zip([1, 4]) {
         fields(
@@ -241,7 +236,7 @@ pub fn validate(value: &Value, expected_target: &str) -> Result<()> {
             ],
         )?;
         if scenario["shards"] != shards || scenario["routing_version"] != 1 {
-            return Err("layout dos cenários inválido".into());
+            return Err("invalid scenario layout".into());
         }
         fields(
             &scenario["configuration"],
@@ -255,7 +250,7 @@ pub fn validate(value: &Value, expected_target: &str) -> Result<()> {
         if scenario["configuration"]
             != json!({"max_dataset_bytes":4*1024*1024,"aof_max_record_bytes":65536,"aof_sync":"always","aof_compact_after_bytes":0})
         {
-            return Err("configuração da fixture divergente".into());
+            return Err("fixture configuration mismatch".into());
         }
         fields(
             &scenario["aof"],
@@ -274,19 +269,19 @@ pub fn validate(value: &Value, expected_target: &str) -> Result<()> {
                 .as_u64()
                 .is_none_or(|sequence| sequence == 0)
         {
-            return Err("metadados AOF da origem inválidos".into());
+            return Err("invalid source AOF metadata".into());
         }
         hex(&scenario["aof"]["epoch"], 32)?;
         for field in ["data_dir", "backup_dir"] {
             let directory = scenario[field]
                 .as_str()
-                .ok_or("diretório do cenário ausente")?;
+                .ok_or("missing scenario directory")?;
             safe_relative(directory)?;
             if !paths
                 .iter()
                 .any(|path| path.starts_with(&format!("{directory}/")))
             {
-                return Err("dados do cenário ausentes do inventário".into());
+                return Err("scenario data missing from inventory".into());
             }
         }
         if scenario["tags"].as_array().is_none_or(|tags| {
@@ -297,14 +292,14 @@ pub fn validate(value: &Value, expected_target: &str) -> Result<()> {
                     })
                 })
         }) {
-            return Err("tags do cenário inválidas".into());
+            return Err("invalid scenario tags".into());
         }
         hex(&scenario["expected_state_sha256"], 64)?;
         let deadlines = scenario["deadlines"]
             .as_array()
-            .ok_or("deadlines ausentes")?;
+            .ok_or("missing deadlines")?;
         if deadlines.len() != 2 {
-            return Err("dois deadlines obrigatórios".into());
+            return Err("two deadlines required".into());
         }
         for deadline in deadlines {
             fields(deadline, &["key", "unix_ms"])?;
@@ -313,7 +308,7 @@ pub fn validate(value: &Value, expected_target: &str) -> Result<()> {
                 .is_none_or(|key| key.is_empty() || key.len() > 128)
                 || deadline["unix_ms"].as_i64().is_none_or(|time| time <= 0)
             {
-                return Err("deadline inválido".into());
+                return Err("invalid deadline".into());
             }
         }
         fields(
@@ -343,7 +338,7 @@ pub fn validate(value: &Value, expected_target: &str) -> Result<()> {
                 Some("sigterm" | "owned_process_kill")
             )
         {
-            return Err("observações incompletas da baseline".into());
+            return Err("incomplete baseline observations".into());
         }
         let stopped = observations["stopped_unix_ms"].as_i64().unwrap();
         let expected_keys = [
@@ -355,7 +350,7 @@ pub fn validate(value: &Value, expected_target: &str) -> Result<()> {
         }) || deadlines[0]["unix_ms"].as_i64().unwrap()
             <= deadlines[1]["unix_ms"].as_i64().unwrap()
         {
-            return Err("TTL curto não estava vivo na parada ou TTL longo inválido".into());
+            return Err("short TTL was not live at shutdown or long TTL is invalid".into());
         }
     }
     Ok(())
@@ -365,14 +360,14 @@ pub fn verify(root: &Path, expected_hash: &str, target: &str) -> Result<Value> {
     hex(&Value::String(expected_hash.to_owned()), 64)?;
     let (bytes, actual_hash) = digest(&root.join(NAME))?;
     if bytes > 4 * 1024 * 1024 || actual_hash != expected_hash {
-        return Err("hash externo do manifesto diverge".into());
+        return Err("external manifest hash mismatch".into());
     }
     let value: Value =
         serde_json::from_slice(&fs::read(root.join(NAME)).map_err(|error| error.to_string())?)
             .map_err(|error| error.to_string())?;
     validate(&value, target)?;
     if Value::Array(tree(root)?) != value["files"] {
-        return Err("inventário da baseline diverge".into());
+        return Err("baseline inventory mismatch".into());
     }
     Ok(value)
 }

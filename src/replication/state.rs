@@ -1,4 +1,4 @@
-//! Papel e posição observáveis; nenhuma leitura de status espera rede ou disco.
+//! Observable role and position; no status read waits on network or disk.
 
 use std::sync::{Arc, Mutex};
 
@@ -52,7 +52,7 @@ impl Runtime {
     }
 
     pub fn status(&self) -> Status {
-        let state = self.inner.lock().expect("estado de replicação envenenado");
+        let state = self.inner.lock().expect("replication state lock poisoned");
         let mut status = state.status.clone();
         if let Some(journal) = &state.journal
             && let Ok(head) = journal.status()
@@ -65,7 +65,7 @@ impl Runtime {
     pub fn readonly(&self) -> bool {
         self.inner
             .lock()
-            .expect("estado de replicação envenenado")
+            .expect("replication state lock poisoned")
             .status
             .role
             == Role::Replica
@@ -74,18 +74,18 @@ impl Runtime {
     pub fn journal(&self) -> Option<Journal> {
         self.inner
             .lock()
-            .expect("estado de replicação envenenado")
+            .expect("replication state lock poisoned")
             .journal
             .clone()
     }
 
     pub fn begin_session(&self) -> u64 {
-        let mut state = self.inner.lock().expect("estado de replicação envenenado");
+        let mut state = self.inner.lock().expect("replication state lock poisoned");
         state.status.generation = state
             .status
             .generation
             .checked_add(1)
-            .expect("épocas de sessão esgotadas");
+            .expect("session epochs exhausted");
         state.status.connected = false;
         state.status.reconnects = state.status.reconnects.saturating_add(1);
         let generation = state.status.generation;
@@ -94,20 +94,20 @@ impl Runtime {
     }
 
     pub fn accepts(&self, generation: u64) -> bool {
-        let state = self.inner.lock().expect("estado de replicação envenenado");
+        let state = self.inner.lock().expect("replication state lock poisoned");
         state.status.role == Role::Replica && state.status.generation == generation
     }
 
     pub fn applied(&self, cursor: Cursor) {
         self.inner
             .lock()
-            .expect("estado de replicação envenenado")
+            .expect("replication state lock poisoned")
             .status
             .applied = cursor;
     }
 
     pub fn connected(&self, generation: u64, upstream_sequence: u64, full: bool) {
-        let mut state = self.inner.lock().expect("estado de replicação envenenado");
+        let mut state = self.inner.lock().expect("replication state lock poisoned");
         if state.status.generation != generation || state.status.role != Role::Replica {
             return;
         }
@@ -121,22 +121,22 @@ impl Runtime {
     }
 
     pub fn upstream_head(&self, generation: u64, sequence: u64) {
-        let mut state = self.inner.lock().expect("estado de replicação envenenado");
+        let mut state = self.inner.lock().expect("replication state lock poisoned");
         if state.status.generation == generation && state.status.role == Role::Replica {
             state.status.upstream_sequence = Some(sequence);
         }
     }
 
     pub fn disconnected(&self, generation: u64) {
-        let mut state = self.inner.lock().expect("estado de replicação envenenado");
+        let mut state = self.inner.lock().expect("replication state lock poisoned");
         if state.status.generation == generation {
             state.status.connected = false;
         }
     }
 
-    /// Chamado sob a barreira depois de persistir papel/época e vincular o journal.
+    /// Called under the barrier after persisting role/epoch and binding the journal.
     pub fn primary(&self, cursor: Cursor, journal: Journal) {
-        let mut state = self.inner.lock().expect("estado de replicação envenenado");
+        let mut state = self.inner.lock().expect("replication state lock poisoned");
         state.status.role = Role::Primary;
         state.status.applied = cursor;
         state.status.connected = false;
@@ -144,7 +144,7 @@ impl Runtime {
             .status
             .generation
             .checked_add(1)
-            .expect("épocas de sessão esgotadas");
+            .expect("session epochs exhausted");
         state.journal = Some(journal);
         self.changed.send_replace(state.status.generation);
     }
