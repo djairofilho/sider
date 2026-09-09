@@ -6,7 +6,7 @@ use bytes::Bytes;
 use thiserror::Error;
 
 use super::DurableLayout;
-use crate::storage::{Mutation, MutationOrigin, ResolvedBatch};
+use crate::storage::{Mutation, MutationOrigin, ResolvedBatch, Value};
 
 pub const MAGIC: &[u8; 8] = b"SIDERAOF";
 pub const VERSION: u32 = 1;
@@ -156,13 +156,10 @@ pub fn read_header_with_layout(mut input: impl Read) -> Result<Header, FormatErr
 
 fn mutation_size(mutation: &Mutation) -> Result<usize, FormatError> {
     let extra = match mutation {
-        Mutation::Put { value, .. } => value.len().checked_add(13),
+        Mutation::Put { value, .. } => value_size(value)?.checked_add(9),
         Mutation::Delete { .. } => Some(0),
     };
     if mutation.key().len() > u32::MAX as usize {
-        return Err(FormatError::Limit);
-    }
-    if matches!(mutation, Mutation::Put { value, .. } if value.len() > u32::MAX as usize) {
         return Err(FormatError::Limit);
     }
     mutation
@@ -171,6 +168,29 @@ fn mutation_size(mutation: &Mutation) -> Result<usize, FormatError> {
         .checked_add(5)
         .and_then(|size| size.checked_add(extra?))
         .ok_or(FormatError::Limit)
+}
+
+fn blob_size(value: &Bytes) -> Result<usize, FormatError> {
+    if value.len() > u32::MAX as usize {
+        return Err(FormatError::Limit);
+    }
+    value.len().checked_add(4).ok_or(FormatError::Limit)
+}
+
+fn value_size(value: &Value) -> Result<usize, FormatError> {
+    match value {
+        Value::String(value) => blob_size(value),
+        Value::Hash(fields) => {
+            if fields.is_empty() || fields.len() > u32::MAX as usize {
+                return Err(FormatError::Corrupt("quantidade de campos"));
+            }
+            fields.iter().try_fold(4usize, |size, (field, value)| {
+                size.checked_add(blob_size(field)?)
+                    .and_then(|size| size.checked_add(blob_size(value).ok()?))
+                    .ok_or(FormatError::Limit)
+            })
+        }
+    }
 }
 
 pub fn encode(record: &Record, limits: Limits) -> Result<Vec<u8>, FormatError> {
@@ -231,10 +251,16 @@ pub fn encode(record: &Record, limits: Limits) -> Result<Vec<u8>, FormatError> {
 }
 
 fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
-    output.push(if matches!(mutation, Mutation::Put { .. }) {
-        1
-    } else {
-        2
+    output.push(match mutation {
+        Mutation::Put {
+            value: Value::String(_),
+            ..
+        } => 1,
+        Mutation::Delete { .. } => 2,
+        Mutation::Put {
+            value: Value::Hash(_),
+            ..
+        } => 3,
     });
     output.extend_from_slice(&(mutation.key().len() as u32).to_le_bytes());
     output.extend_from_slice(mutation.key());
@@ -244,11 +270,24 @@ fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
         ..
     } = mutation
     {
-        output.extend_from_slice(&(value.len() as u32).to_le_bytes());
-        output.extend_from_slice(value);
+        match value {
+            Value::String(value) => encode_blob(output, value),
+            Value::Hash(fields) => {
+                output.extend_from_slice(&(fields.len() as u32).to_le_bytes());
+                for (field, value) in fields.iter() {
+                    encode_blob(output, field);
+                    encode_blob(output, value);
+                }
+            }
+        }
         output.push(u8::from(expires_at_unix_ms.is_some()));
         output.extend_from_slice(&expires_at_unix_ms.unwrap_or(0).to_le_bytes());
     }
+}
+
+fn encode_blob(output: &mut Vec<u8>, value: &Bytes) {
+    output.extend_from_slice(&(value.len() as u32).to_le_bytes());
+    output.extend_from_slice(value);
 }
 
 /// Comprimento e seu complemento são validados antes da alocação; checksum antes do decode.
@@ -327,8 +366,24 @@ impl Cursor {
         let tag = self.byte()?;
         let key = self.blob()?;
         match tag {
-            1 => {
-                let value = self.blob()?;
+            1 | 3 => {
+                let value = if tag == 1 {
+                    Value::String(self.blob()?)
+                } else {
+                    let count = self.u32()? as usize;
+                    if count == 0 || count > (self.bytes.len() - self.offset) / 8 {
+                        return Err(FormatError::Corrupt("quantidade de campos"));
+                    }
+                    let mut fields = std::collections::BTreeMap::new();
+                    for _ in 0..count {
+                        let field = self.blob()?;
+                        let value = self.blob()?;
+                        if fields.insert(field, value).is_some() {
+                            return Err(FormatError::Corrupt("campo duplicado"));
+                        }
+                    }
+                    Value::Hash(std::sync::Arc::new(fields))
+                };
                 let expires = self.byte()?;
                 let deadline = i64::from_le_bytes(self.take(8)?.as_ref().try_into().unwrap());
                 let expires_at_unix_ms = match expires {
@@ -432,7 +487,7 @@ mod tests {
                 mutations: vec![
                     Mutation::Put {
                         key: Bytes::from_static(b"\xff\0"),
-                        value: Bytes::from_static(b"v\r\n"),
+                        value: Bytes::from_static(b"v\r\n").into(),
                         expires_at_unix_ms: Some(-1),
                     },
                     Mutation::Delete { key: Bytes::new() },

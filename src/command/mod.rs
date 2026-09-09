@@ -1,7 +1,9 @@
 //! Comandos tipados e parsing sem acesso ao armazenamento.
 
+mod collections;
 mod parser;
 mod reply;
+pub use collections::HashCommand;
 
 use bytes::Bytes;
 use std::time::Duration;
@@ -57,6 +59,8 @@ pub(crate) fn parse_decimal(value: &[u8]) -> Option<i64> {
 /// Comando validado, sem canais ou conhecimento do protocolo de transporte.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    /// Operação sobre campos e valores binários de um hash.
+    Hash { key: Bytes, operation: HashCommand },
     /// Responde PONG ou devolve a mensagem binária.
     Ping(Option<Bytes>),
     /// Devolve exatamente o payload.
@@ -124,6 +128,28 @@ impl Command {
             Self::MSet { entries } => {
                 entries.iter().for_each(|(key, _)| visit(key));
             }
+        }
+    }
+}
+
+impl Command {
+    /// Visita chaves na ordem original sem alocar nem confundir valores com chaves.
+    pub fn visit_keys(&self, mut visit: impl FnMut(&Bytes)) {
+        match self {
+            Self::Ping(_) | Self::Echo(_) => {}
+            Self::Get { key }
+            | Self::Hash { key, .. }
+            | Self::Set { key, .. }
+            | Self::SetWithOptions { key, .. }
+            | Self::Incr { key }
+            | Self::Decr { key }
+            | Self::Expire { key, .. }
+            | Self::Ttl { key, .. }
+            | Self::Persist { key } => visit(key),
+            Self::Del { keys } | Self::Exists { keys } | Self::MGet { keys } => {
+                keys.iter().for_each(visit)
+            }
+            Self::MSet { entries } => entries.iter().for_each(|(key, _)| visit(key)),
         }
     }
 }

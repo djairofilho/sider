@@ -11,7 +11,7 @@ use super::*;
 pub enum Mutation {
     Put {
         key: Bytes,
-        value: Bytes,
+        value: Value,
         expires_at_unix_ms: Option<i64>,
     },
     Delete {
@@ -122,7 +122,7 @@ mod tests {
             },
             Mutation::Put {
                 key: Bytes::from_static(b"other"),
-                value: Bytes::from_static(b"too big for quota"),
+                value: Bytes::from_static(b"too big for quota").into(),
                 expires_at_unix_ms: None,
             },
         ];
@@ -136,7 +136,7 @@ mod tests {
         store
             .replay(&[Mutation::Put {
                 key: Bytes::from_static(b"k"),
-                value: Bytes::new(),
+                value: Bytes::new().into(),
                 expires_at_unix_ms: Some(900),
             }])
             .unwrap();

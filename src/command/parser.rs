@@ -229,7 +229,7 @@ pub fn parse(frame: Frame) -> Result<Command, RequestError> {
             .ok_or(RequestError::WrongArity("publish"))?;
         Ok(Command::Publish { channel, message })
     } else {
-        Err(RequestError::UnknownCommand)
+        super::collections::parse(name, arguments)
     }
 }
 
