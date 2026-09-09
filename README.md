@@ -7,8 +7,9 @@ com Redis pelo protocolo RESP2. O nome é Redis ao contrário.
 O binário atende strings, operações multichave, opções de `SET` e TTL por RESP2/TCP.
 Pub/Sub oferece canais binários, assinaturas por conexão e filas limitadas.
 Workers proprietários serializam cada shard, com filas, conexões e buffers
-limitados e quota lógica total de 64 MiB por padrão. Ainda não há persistência ou
-autenticação. O [guia de strings](docs/strings.md) descreve comandos e limites.
+limitados e quota lógica total de 64 MiB por padrão. AOF opcional oferece replay,
+compactação global e migração offline de shards. Ainda não há autenticação.
+O [guia de strings](docs/strings.md) descreve comandos e limites.
 A suíte diferencial compara o binário com Redis 8.10.1; os cinco comandos iniciais
 também foram verificados com `redis-cli`. A
 [candidata 0.1.0-rc.1](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1)
@@ -44,7 +45,9 @@ autorizada para o projeto.
 
 Sem argumentos, o programa valida a configuração e abre o listener TCP.
 Use Ctrl+C para encerrar. Em outro terminal, um cliente RESP2 pode enviar os
-comandos suportados. Dados em memória são perdidos ao terminar o processo.
+comandos suportados. Sem `SIDER_AOF_DIR`, dados são perdidos ao terminar o processo.
+Com AOF, a recuperação termina antes do bind e segue a política de sincronização
+descrita no [guia de persistência](docs/persistence.md).
 
 ### Configuração
 
@@ -54,6 +57,8 @@ comandos suportados. Dados em memória são perdidos ao terminar o processo.
 | `SIDER_READY_FILE` | Ausente | Arquivo novo de prontidão com PID, IP e porta efetiva |
 | `SIDER_MAX_DATASET_BYTES` | `67108864` | Quota lógica positiva, distinta do RSS; sem eviction |
 | `SIDER_SHARDS` | `1` | Entre 1 e 256 workers, com quota dividida e configuração fixa |
+| `SIDER_AOF_DIR` | Ausente | Diretório exclusivo de dados; habilita AOF |
+| `SIDER_AOF_SYNC` | `always` | `always` aguarda sync por lote; `everysec` sincroniza periodicamente |
 
 O endereço é validado de forma estrita. Use um IP, como `127.0.0.1:6380` ou
 `[::1]:6380`, em vez de um hostname. Configuração inválida encerra o programa com
@@ -109,6 +114,8 @@ com execução manual e evidências nas plataformas previstas.
 | `src/resp/` | Frames, limites, encoder atômico e decoder incremental |
 | `src/command/` e `src/storage/` | Parser, respostas tipadas e mapa proprietário síncrono |
 | `src/storage/worker.rs` | Fila limitada, aceitação e execução proprietária |
+| `src/persistence/` e `src/storage/snapshot.rs` | Formato AOF, escritor, replay e snapshots globais |
+| `src/bin/sider-aof-migrate.rs` | Migração offline explícita para novo diretório |
 | `src/server.rs` e `src/connection.rs` | TCP, ordenação, timeouts e supervisão |
 | `src/readiness.rs` | Publicação atômica do arquivo de prontidão |
 | `src/error.rs` | Erros tipados da configuração |
@@ -153,9 +160,9 @@ sem nova publicação da 0.1. A implementação segue por dependências reais at
 a 1.0; as evidências anteriores continuam vinculadas aos seus próprios SHAs.
 
 R02 acrescenta `EXISTS`, `INCR`, `DECR`, `MGET`, `MSET`, opções de `SET`, expiração
-ativa/passiva e quota com rejeição atômica de crescimento. R04-01 a R04-03
-acrescentam [shards](docs/sharding.md) em memória, com rejeição de comandos
-multichave entre shards. Sua integração durável permanece pendente de AOF.
+ativa/passiva e quota com rejeição atômica de crescimento. R03 e R04 acrescentam
+[AOF](docs/persistence.md) e [shards](docs/sharding.md), com rejeição de comandos
+multichave cruzados, compactação global e [migração offline](docs/aof-migration.md).
 O [plano da 0.1](PLANO.md) preserva o desenho
 inicial e o [ROADMAP](ROADMAP.md) organiza as dependências posteriores.
 

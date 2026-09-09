@@ -23,6 +23,8 @@ pub enum ExecutionError {
     /// Pub/Sub depende do contexto da conexão e não executa no mapa.
     #[error("ERR command requires connection context")]
     ConnectionOnly,
+    #[error("ERR AOF record limit exceeded")]
+    AofRecordLimit,
 }
 
 /// Resultado da execução síncrona no armazenamento.

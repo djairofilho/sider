@@ -87,7 +87,7 @@ o saldo do lote inteiro antes de alterar o mapa, com último valor por chave.
 
 `Entry` guarda valor, geração, deadline monotônico e deadline Unix em milissegundos.
 O relógio é injetável. A execução usa o monotônico; o absoluto fica disponível
-para futura persistência. Um índice ordenado mantém no máximo um evento por chave,
+para persistência AOF. Um índice ordenado mantém no máximo um evento por chave,
 removido em reescritas ou `PERSIST`; a geração impede aplicar expiração antiga.
 O worker processa até 64 eventos a cada 100 ms, além da expiração em acesso.
 
@@ -120,9 +120,11 @@ tarefas pertencentes ao servidor se a future de supervisão for cancelada.
 
 A base mantém dados em memória com workers independentes por shard. TTL, quota e
 strings adicionais estão implementados em R02; roteamento, filas e restrição
-multichave estão em R04-01 a R04-03. AOF e integração durável de shards permanecem
-pendentes. O [contrato de shards](sharding.md) descreve a divisão fixa de quota.
+multichave estão em R04. O escritor AOF global confirma o lote antes de aplicar
+as mutações resolvidas. Uma barreira de admissão captura snapshots de todos os
+workers sem compartilhar mapas. O [contrato de shards](sharding.md) descreve
+quota, snapshots e evidências de carga; o [AOF](persistence.md) descreve durabilidade.
 
 A divisão em várias crates e otimizações de cópia, alocação ou hashing dependerão
-de necessidades concretas e medições. Não há resultados de desempenho publicados
-neste estágio.
+de necessidades concretas e medições. R04 tem medições exploratórias locais,
+sem promessa de desempenho ou comparação de velocidade com Redis.

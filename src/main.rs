@@ -76,6 +76,7 @@ fn start(config: ServerConfig) -> ExitCode {
 async fn run(config: ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
     // Registrar sinais antes de publicar prontidão evita perder uma parada imediata.
     let shutdown = shutdown_signal()?;
+    let prepared = server::prepare(&config).await?;
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
     let address = listener.local_addr()?;
     if !address.ip().is_loopback() {
@@ -86,7 +87,7 @@ async fn run(config: ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
         .as_ref()
         .map(|path| ReadyFile::create(path, address))
         .transpose()?;
-    server::serve(listener, config, shutdown).await?;
+    server::serve_prepared(listener, config, shutdown, prepared).await?;
     Ok(())
 }
 

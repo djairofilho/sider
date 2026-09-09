@@ -1,9 +1,10 @@
 //! Worker proprietário do armazenamento, com fila limitada e respostas individuais.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use thiserror::Error;
-use tokio::sync::{Semaphore, mpsc, oneshot, watch};
+use tokio::sync::{OwnedRwLockReadGuard, RwLock, Semaphore, mpsc, oneshot, watch};
 use tokio::time::{Instant, MissedTickBehavior, interval, sleep_until};
 
 use crate::command::{Command, Reply};
@@ -29,6 +30,8 @@ pub enum DbError {
 pub(crate) struct Request {
     pub(crate) command: Command,
     pub(crate) reply: oneshot::Sender<Result<Reply, DbError>>,
+    // Mantido desde a admissão até o apply e a resposta, mesmo se o cliente sair.
+    pub(crate) _admission: OwnedRwLockReadGuard<()>,
 }
 
 /// Acesso clonável ao mesmo armazenamento, sem compartilhar o mapa diretamente.
@@ -36,15 +39,23 @@ pub(crate) struct Request {
 pub struct DbHandle {
     requests: Vec<mpsc::Sender<Request>>,
     router: ShardRouter,
-    request_timeout: Duration,
-    shutdown: watch::Receiver<bool>,
+    pub(super) request_timeout: Duration,
+    pub(super) shutdown: watch::Receiver<bool>,
+    pub(super) barrier: Arc<RwLock<()>>,
+    pub(super) snapshots: Vec<mpsc::Sender<oneshot::Sender<Vec<super::Mutation>>>>,
 }
 
 /// Proprietário único do mapa e do lado receptor da fila.
 pub struct Worker {
     store: Store,
+    shard_count: usize,
+    aof: Option<crate::persistence::AofHandle>,
+    compact_after_bytes: u64,
+    compaction: Option<oneshot::Receiver<Result<(), crate::persistence::AofError>>>,
     requests: mpsc::Receiver<Request>,
     shutdown: watch::Receiver<bool>,
+    barrier: Arc<RwLock<()>>,
+    snapshots: mpsc::Receiver<oneshot::Sender<Vec<super::Mutation>>>,
 }
 
 /// Cria um mapa vazio e seu canal limitado, sem iniciar uma tarefa.
@@ -102,13 +113,24 @@ pub fn channel_with_stores(
 
     let mut senders = Vec::with_capacity(stores.len());
     let mut workers = Vec::with_capacity(stores.len());
+    let mut snapshots = Vec::with_capacity(stores.len());
+    let barrier = Arc::new(RwLock::new(()));
+    let shard_count = stores.len();
     for store in stores {
         let (sender, receiver) = mpsc::channel(capacity);
+        let (snapshot_sender, snapshot_receiver) = mpsc::channel(1);
+        snapshots.push(snapshot_sender);
         senders.push(sender);
         workers.push(Worker {
             store,
+            shard_count,
+            aof: None,
+            compact_after_bytes: 0,
+            compaction: None,
             requests: receiver,
             shutdown: shutdown.clone(),
+            barrier: barrier.clone(),
+            snapshots: snapshot_receiver,
         });
     }
     Ok((
@@ -117,6 +139,8 @@ pub fn channel_with_stores(
             router,
             request_timeout,
             shutdown: shutdown.clone(),
+            barrier,
+            snapshots,
         },
         workers,
     ))
@@ -144,8 +168,18 @@ impl DbHandle {
             .checked_add(self.request_timeout)
             .ok_or(DbError::Timeout)?;
         let mut shutdown = self.shutdown.clone();
+        let admission = tokio::select! {
+            biased;
+            () = sleep_until(deadline) => return Err(DbError::Timeout),
+            () = stopping(&mut shutdown) => return Err(DbError::ShuttingDown),
+            guard = self.barrier.clone().read_owned() => guard,
+        };
         let (reply, response) = oneshot::channel();
-        let request = Request { command, reply };
+        let request = Request {
+            command,
+            reply,
+            _admission: admission,
+        };
 
         tokio::select! {
             biased;
@@ -167,6 +201,22 @@ impl DbHandle {
 }
 
 impl Worker {
+    /// Compactação local só existe com um shard. Com vários, o limiar local é
+    /// desabilitado e [`DbHandle::run_compaction`] coordena o snapshot completo.
+    pub fn with_aof(
+        mut self,
+        aof: crate::persistence::AofHandle,
+        compact_after_bytes: u64,
+    ) -> Self {
+        self.aof = Some(aof);
+        // Compactação local só é válida quando este worker é o único shard.
+        self.compact_after_bytes = if self.shard_count == 1 {
+            compact_after_bytes
+        } else {
+            0
+        };
+        self
+    }
     /// Processa comandos em ordem de recepção, sem suspender uma mutação.
     ///
     /// Na parada, fecha a admissão e drena tudo que foi aceito. Também termina
@@ -182,24 +232,107 @@ impl Worker {
                     self.requests.close();
                     break;
                 }
-                _ = expiration.tick() => { self.store.expire_due(64); }
+                () = async { match &self.aof { Some(aof) => aof.failed().await, None => std::future::pending().await } } => return,
+                _ = expiration.tick() => {
+                    let Ok(_admission) = self.barrier.clone().try_read_owned() else { continue; };
+                    if self.expire().await.is_err() { return; }
+                    self.compact_if_due().await;
+                }
+                Some(reply) = self.snapshots.recv() => {
+                    let _ = reply.send(self.store.snapshot());
+                }
                 request = self.requests.recv() => {
                     match request {
-                        Some(request) => self.apply(request),
-                        None => return,
+                        Some(request) => if !self.apply(request).await { return; },
+                        None => break,
                     }
                 }
             }
         }
 
         while let Some(request) = self.requests.recv().await {
-            self.apply(request);
+            if !self.apply(request).await {
+                return;
+            }
+        }
+        if let Some(compaction) = self.compaction.take() {
+            let _ = compaction.await;
+        }
+        if let Some(aof) = &self.aof
+            && let Err(error) = aof.flush().await
+        {
+            tracing::error!(%error, "falha ao sincronizar AOF na parada");
         }
     }
 
-    fn apply(&mut self, request: Request) {
-        let result = self.store.execute(request.command);
-        let _ = request.reply.send(Ok(result));
+    async fn apply(&mut self, request: Request) -> bool {
+        let prepared = self.store.prepare(request.command);
+        let result = self.commit(prepared).await;
+        let healthy = result.is_ok();
+        let _ = request.reply.send(result);
+        healthy
+    }
+
+    async fn commit(&mut self, prepared: super::Prepared) -> Result<Reply, DbError> {
+        if let Some(aof) = &self.aof
+            && !prepared.batch.mutations.is_empty()
+            && let Err(error) = aof.append(prepared.batch.clone()).await
+        {
+            if matches!(
+                error,
+                crate::persistence::AofError::Format(
+                    crate::persistence::format::FormatError::Limit
+                )
+            ) {
+                return Ok(Reply::Error(crate::command::ExecutionError::AofRecordLimit));
+            }
+            tracing::error!(%error, "mutação não aplicada por falha do AOF");
+            self.requests.close();
+            return Err(DbError::Unavailable);
+        }
+        Ok(self.store.apply(prepared))
+    }
+
+    async fn expire(&mut self) -> Result<(), DbError> {
+        let mut budget = 64;
+        loop {
+            let prepared = self.store.prepare_expiration(budget);
+            match self.commit(prepared).await? {
+                Reply::Error(crate::command::ExecutionError::AofRecordLimit) if budget > 1 => {
+                    budget /= 2
+                }
+                _ => return Ok(()),
+            }
+        }
+    }
+
+    async fn compact_if_due(&mut self) {
+        if let Some(completion) = &mut self.compaction {
+            match completion.try_recv() {
+                Ok(Ok(())) => tracing::info!("compactação AOF concluída"),
+                Ok(Err(error)) => tracing::warn!(%error, "compactação AOF abortada"),
+                Err(oneshot::error::TryRecvError::Empty) => return,
+                Err(oneshot::error::TryRecvError::Closed) => {
+                    tracing::warn!("compactador AOF indisponível")
+                }
+            }
+            self.compaction = None;
+        }
+        if self.compact_after_bytes == 0 {
+            return;
+        }
+        if let Some(aof) = &self.aof
+            && let Ok((_, bytes, false)) = aof.status().await
+            && bytes >= self.compact_after_bytes
+        {
+            // Enfileira a barreira antes de aceitar outra mutação neste worker.
+            match aof.begin_compaction(self.store.snapshot()).await {
+                Ok(completion) => self.compaction = Some(completion),
+                Err(error) => {
+                    tracing::warn!(%error, "não foi possível iniciar compactação AOF")
+                }
+            }
+        }
     }
 }
 
@@ -261,7 +394,11 @@ mod tests {
         let (reply, response) = oneshot::channel();
         assert!(
             handle.requests[0]
-                .try_send(Request { command, reply })
+                .try_send(Request {
+                    command,
+                    reply,
+                    _admission: handle.barrier.clone().try_read_owned().unwrap()
+                })
                 .is_ok()
         );
         response
@@ -407,13 +544,13 @@ mod tests {
 
         let request = worker.requests.try_recv().unwrap();
         assert_eq!(request.command, set(b"key", b"first"));
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(first.await, Ok(Reply::Ok));
         assert_pending(second.as_mut()).await;
         assert_eq!(worker.requests.len(), 1);
         let request = worker.requests.try_recv().unwrap();
         assert_eq!(request.command, set(b"key", b"second"));
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(second.await, Ok(Reply::Ok));
         assert_eq!(worker.store.execute(get(b"key")), bulk(b"second"));
         drop(handle);
@@ -429,7 +566,7 @@ mod tests {
         drop(cancelled);
 
         let request = worker.requests.try_recv().unwrap();
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(first.await.unwrap(), Ok(Reply::Ok));
         assert!(matches!(
             worker.requests.try_recv(),
@@ -491,7 +628,7 @@ mod tests {
         assert_eq!(waiting.await, Err(DbError::Timeout));
 
         let request = worker.requests.try_recv().unwrap();
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(ping.await.unwrap(), Ok(Reply::Pong));
         assert!(matches!(
             worker.requests.try_recv(),
@@ -510,7 +647,7 @@ mod tests {
         advance(Duration::from_secs(3)).await;
 
         let request = worker.requests.try_recv().unwrap();
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(first.await.unwrap(), Ok(Reply::Pong));
         assert_pending(waiting.as_mut()).await;
         assert_eq!(worker.requests.len(), 1);
@@ -520,7 +657,7 @@ mod tests {
 
         let request = worker.requests.try_recv().unwrap();
         assert!(request.reply.is_closed());
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(worker.store.execute(get(b"key")), bulk(b"accepted"));
     }
 
@@ -532,7 +669,7 @@ mod tests {
         assert_pending(waiting.as_mut()).await;
         advance(Duration::from_secs(5)).await;
         let request = worker.requests.try_recv().unwrap();
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(first.await.unwrap(), Ok(Reply::Pong));
 
         assert_eq!(waiting.await, Err(DbError::Timeout));

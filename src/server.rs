@@ -8,7 +8,7 @@ use thiserror::Error;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
 use tokio::task::JoinSet;
-use tokio::time::{Instant, sleep_until};
+use tokio::time::{Instant, sleep_until, timeout_at};
 
 use crate::connection::{self, ConnectionError};
 use crate::storage::worker::{self, DbHandle};
@@ -28,22 +28,23 @@ pub enum ServerError {
     WorkerFailed(#[source] tokio::task::JoinError),
     #[error("prazo de encerramento excedido; tarefas restantes foram abortadas")]
     ShutdownTimeout,
+    #[error("persistência indisponível: {0}")]
+    Persistence(#[from] crate::persistence::AofError),
 }
 
-/// Atende o listener já aberto até o sinal de parada ou uma falha do worker.
-///
-/// O cancelamento desta future aborta as tarefas que ela possui. A parada normal
-/// drena pedidos aceitos, mas não oferece durabilidade ou rollback de timeout.
-pub async fn serve(
-    listener: TcpListener,
+/// Estado recuperado antes de abrir o listener do binário.
+pub struct PreparedServer {
+    stores: Vec<Store>,
+    recovered: Option<crate::persistence::Recovered>,
     config: ServerConfig,
-    shutdown: impl Future<Output = ()> + Send,
-) -> Result<(), ServerError> {
+}
+
+pub async fn prepare(config: &ServerConfig) -> Result<PreparedServer, ServerError> {
     config.validate()?;
-    let (stop, receiver) = watch::channel(false);
-    // Divisão fixa evita um contador de quota global no caminho de cada escrita.
-    // O resto é distribuído pelos primeiros shards sem exceder a quota total.
-    let stores = (0..config.shards)
+    let store_config = StoreConfig {
+        max_dataset_bytes: config.max_dataset_bytes,
+    };
+    let mut stores = (0..config.shards)
         .map(|index| {
             Store::with_config(
                 StoreConfig {
@@ -54,17 +55,111 @@ pub async fn serve(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let recovered = if let Some(aof) = config.aof.clone() {
+        let mut recovered = tokio::task::spawn_blocking(move || {
+            crate::persistence::recover(aof, store_config, Arc::new(SystemClock))
+        })
+        .await
+        .map_err(ServerError::WorkerFailed)??;
+        let router = crate::storage::routing::ShardRouter::new(config.shards)?;
+        let mut partitions = vec![Vec::new(); config.shards];
+        for mutation in recovered.store.snapshot() {
+            partitions[router.shard_for(mutation.key())].push(mutation);
+        }
+        for (store, partition) in stores.iter_mut().zip(partitions) {
+            store
+                .replay(&partition)
+                .map_err(crate::persistence::AofError::from)?;
+        }
+        recovered.store = Store::new();
+        Some(recovered)
+    } else {
+        None
+    };
+    Ok(PreparedServer {
+        stores,
+        recovered,
+        config: config.clone(),
+    })
+}
+
+/// Atende o listener já aberto até o sinal de parada ou uma falha do worker.
+///
+/// O cancelamento desta future aborta as tarefas que ela possui. A parada normal
+/// drena pedidos aceitos. A durabilidade segue a política AOF configurada;
+/// cancelar ou exceder o timeout não desfaz pedidos já aceitos.
+pub async fn serve(
+    listener: TcpListener,
+    config: ServerConfig,
+    shutdown: impl Future<Output = ()> + Send,
+) -> Result<(), ServerError> {
+    let prepared = prepare(&config).await?;
+    serve_prepared(listener, config, shutdown, prepared).await
+}
+
+/// Atende somente depois da recuperação. `prepare` pode executar antes do bind.
+pub async fn serve_prepared(
+    listener: TcpListener,
+    config: ServerConfig,
+    shutdown: impl Future<Output = ()> + Send,
+    prepared: PreparedServer,
+) -> Result<(), ServerError> {
+    config.validate()?;
+    if prepared.config != config {
+        return Err(ConfigError::InvalidServerLimits {
+            reason: "configuração difere do estado recuperado",
+        }
+        .into());
+    }
+    let (stop, receiver) = watch::channel(false);
+    let persistence = match prepared.recovered {
+        Some(recovered) => {
+            let (_, handle, task) = recovered.start();
+            Some((handle, task))
+        }
+        None => None,
+    };
     let (database, shard_workers) = worker::channel_with_stores(
         config.worker_queue_capacity,
         config.request_timeout,
         receiver,
-        stores,
+        prepared.stores,
     )?;
     let mut workers = JoinSet::new();
     for worker in shard_workers {
+        let worker = match &persistence {
+            Some((handle, _)) => worker.with_aof(handle.clone(), 0),
+            None => worker,
+        };
         workers.spawn(worker.run());
     }
-    supervise_workers(listener, config, shutdown, database, workers, stop).await
+    if let Some((handle, _)) = &persistence {
+        workers.spawn(database.clone().run_compaction(
+            handle.clone(),
+            config.aof.as_ref().map_or(0, |aof| aof.compact_after_bytes),
+        ));
+    }
+    let timeout = config.shutdown_timeout;
+    let mut shutdown_deadline = None;
+    let result = supervise_workers(
+        listener,
+        config,
+        shutdown,
+        database,
+        workers,
+        stop,
+        &mut shutdown_deadline,
+    )
+    .await;
+    if let Some((handle, writer)) = persistence {
+        drop(handle);
+        let deadline = shutdown_deadline.unwrap_or_else(|| Instant::now() + timeout);
+        timeout_at(deadline, writer)
+            .await
+            .map_err(|_| ServerError::ShutdownTimeout)?
+            .map_err(ServerError::WorkerFailed)??;
+    }
+    result
 }
 
 #[cfg(test)]
@@ -78,7 +173,10 @@ async fn supervise(
 ) -> Result<(), ServerError> {
     let mut workers = JoinSet::new();
     workers.spawn(worker);
-    supervise_workers(listener, config, shutdown, database, workers, stop).await
+    supervise_workers(
+        listener, config, shutdown, database, workers, stop, &mut None,
+    )
+    .await
 }
 
 async fn supervise_workers(
@@ -88,6 +186,7 @@ async fn supervise_workers(
     database: DbHandle,
     mut workers: JoinSet<()>,
     stop: watch::Sender<bool>,
+    shutdown_deadline: &mut Option<Instant>,
 ) -> Result<(), ServerError> {
     let mut connections = JoinSet::new();
     let slots = Arc::new(Semaphore::new(config.max_connections));
@@ -138,6 +237,7 @@ async fn supervise_workers(
     let deadline = Instant::now()
         .checked_add(config.shutdown_timeout)
         .ok_or(ServerError::ShutdownTimeout)?;
+    *shutdown_deadline = Some(deadline);
     let mut failure = failure;
     while !workers.is_empty() || !connections.is_empty() {
         tokio::select! {

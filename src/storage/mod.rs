@@ -1,9 +1,12 @@
 //! Armazenamento síncrono de chaves e valores binários, sem acesso ao protocolo.
 
 mod clock;
+mod mutation;
 pub mod routing;
+pub mod snapshot;
 pub mod worker;
 pub use clock::{Clock, SystemClock};
+pub use mutation::{Mutation, MutationOrigin, Prepared, ReplayError, ResolvedBatch};
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -137,6 +140,11 @@ impl Store {
     /// `GET` compartilha o conteúdo imutável de `Bytes` com a resposta. Alterar ou
     /// remover a chave depois não altera uma resposta já devolvida.
     pub fn execute(&mut self, command: Command) -> Reply {
+        let prepared = self.prepare(command);
+        self.apply(prepared)
+    }
+
+    fn execute_inner(&mut self, command: Command) -> Reply {
         let now = self.clock.now();
         match command {
             Command::Ping(None) => Reply::Pong,
@@ -342,6 +350,7 @@ impl Store {
 
     fn remove(&mut self, key: &Bytes) -> Option<Entry> {
         let entry = self.values.remove(key)?;
+        self.generation = self.generation.wrapping_add(1);
         self.used_bytes -= Self::entry_bytes(key, &entry.value).expect("entrada contabilizada");
         if let Some(deadline) = entry.expires_at {
             self.expirations

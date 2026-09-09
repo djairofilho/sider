@@ -16,6 +16,7 @@ use super::process;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const LINUX_TARGET: &str = "x86_64-unknown-linux-gnu";
+const WINDOWS_TARGET: &str = "x86_64-pc-windows-msvc";
 const MAX_RECEIPT_BYTES: usize = 1024 * 1024;
 static NEXT_RECEIPT: AtomicU64 = AtomicU64::new(0);
 
@@ -77,8 +78,11 @@ impl GateContext {
         mut lookup: impl FnMut(&str) -> Option<OsString>,
         observer: Observer,
     ) -> Result<Self, String> {
-        if !matches!(gate_id, "compatibility" | "pubsub") {
-            return Err("gate desconhecido; esperado compatibility ou pubsub".into());
+        if !matches!(
+            gate_id,
+            "compatibility" | "pubsub" | "crash" | "recovery" | "migration" | "sharding"
+        ) {
+            return Err("gate desconhecido ou sem runner implementado".into());
         }
         let mut text = |name: &str| -> Result<String, String> {
             lookup(name)
@@ -220,12 +224,17 @@ impl GateContext {
         if observed.compiled_version != expected.version {
             return Err("versão compilada do teste diverge da release".into());
         }
-        if expected.target != LINUX_TARGET
-            || observed.compiled_os != "linux"
-            || observed.compiled_arch != "x86_64"
-            || observed.compiled_env != "gnu"
-        {
-            return Err("compatibility exige execução nativa Linux x86_64 GNU".into());
+        let linux = expected.target == LINUX_TARGET
+            && observed.compiled_os == "linux"
+            && observed.compiled_arch == "x86_64"
+            && observed.compiled_env == "gnu";
+        let windows = expected.target == WINDOWS_TARGET
+            && observed.compiled_os == "windows"
+            && observed.compiled_arch == "x86_64"
+            && observed.compiled_env == "msvc";
+        let portable = matches!(self.gate.as_str(), "crash" | "recovery" | "migration");
+        if !linux && !(portable && windows) {
+            return Err("gate exige plataforma nativa e target suportados".into());
         }
         let hosts: Vec<_> = observed
             .compiler
