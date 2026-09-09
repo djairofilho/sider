@@ -5,8 +5,12 @@
 mod baseline_manifest;
 #[path = "common/gate_receipt.rs"]
 mod gate_receipt;
+#[path = "common/internal_baseline.rs"]
+mod internal_baseline;
 #[path = "common/process.rs"]
 mod process;
+#[path = "common/wire.rs"]
+mod wire;
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -992,13 +996,29 @@ fn release_migration_gate() {
     let context = gate_receipt::GateContext::from_env("migration").unwrap();
     let began = Instant::now();
     let cases = migration_cases();
+    typed_migration_preserves_legacy_string_fixture_and_new_values();
+    typed_migration_from_frozen_r04_binary_output_preserves_shards_and_elapsed_ttl();
+    sorted_set_migration_from_frozen_r05_binary_output_preserves_collections();
+    let baseline = internal_baseline::migrate_from_env().unwrap();
     context
         .publish(
-            cases,
+            cases + 5,
             began.elapsed(),
-            serde_json::json!({ "fixture": "aof-v1.hex", "unknown_version_preserved": true }),
+            serde_json::json!({ "fixture": "aof-v1.hex", "unknown_version_preserved": true, "typed_legacy_suites":3, "r10_baseline":baseline }),
         )
         .unwrap();
+}
+
+#[test]
+#[ignore = "congela baseline interna somente com pacote, builds e checkout limpo explícitos"]
+fn freeze_internal_baseline() {
+    println!("{}", internal_baseline::freeze_from_env().unwrap());
+}
+
+#[test]
+#[ignore = "ensaio curto com pacote real; não congela baseline oficial nem emite recibo"]
+fn rehearse_internal_baseline_migration() {
+    println!("{}", internal_baseline::rehearse_from_env().unwrap());
 }
 
 fn typed_command(args: &[&[u8]]) -> DbCommand {
