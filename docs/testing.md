@@ -10,6 +10,8 @@ para os comandos deste documento. A CI permanece desligada até a 1.0 inclusive.
 - [Comandos sem rede](#comandos-sem-rede)
 - [Worker, TCP e binário](#worker-tcp-e-binário)
 - [Diferenciais e robustez](#diferenciais-e-robustez)
+- [Suítes das capacidades integradas](#suítes-das-capacidades-integradas)
+- [Pacotes e estabilização](#pacotes-e-estabilização)
 - [Referência Redis descartável](#referência-redis-descartável)
 - [O que as fixtures cobrem](#o-que-as-fixtures-cobrem)
 - [Execução registrada](#execução-registrada)
@@ -28,9 +30,9 @@ Use testes focados durante a implementação. Antes de integrar, o check executa
 formatação, Clippy, build do binário e testes nativos uma vez. Clippy já verifica
 os targets; não repita `cargo check` na mesma sequência.
 
-O teste externo aparece explicitamente como `ignored` no ciclo normal. Isso não
-significa aprovação da referência. Para concluir R01-01, execute o teste externo
-abaixo e confira seu resultado, além dos testes locais.
+As entradas externas aparecem como `ignored` no ciclo normal. Isso não significa
+aprovação da referência, do pacote ou de qualquer gate. Execute explicitamente
+a entrada relevante e confira seus casos, resultados e requisitos de ambiente.
 
 ## Codec isolado
 
@@ -101,7 +103,63 @@ comparam tipos e respostas completas e observam o estado final das chaves. O cam
 Linux compartilhado também executa `redis-cli` contra o Sider. Docker ou imagem
 ausentes causam falha; esses entrypoints não rodam implicitamente na suíte comum.
 
-Os gates escrevem recibos apenas após sucesso e validação do checkout limpo.
+Os runners externos escrevem recibos apenas após sucesso e validação do checkout limpo.
+
+## Suítes das capacidades integradas
+
+Escolha as suítes afetadas pela mudança. A tabela aponta os testes e os guias
+com contratos, comandos opt-in e limites da evidência:
+
+| Capacidade | Suítes Rust | Guia |
+| --- | --- | --- |
+| Strings, TTL e quota | `strings`, `expiration`, `memory` | [Strings](strings.md) |
+| AOF, crash e recuperação | `persistence`, `aof_migration` | [Persistência](persistence.md), [migração](aof-migration.md) |
+| Shards e snapshots globais | `sharding`, módulos `storage::snapshot` e `storage::worker` | [Shards](sharding.md) |
+| Hashes, listas, sets e sorted sets | `collections`, `sorted_sets`, `collections_differential` | [Coleções](collections.md), [ordenação](sorted-sets.md), [AOF tipado](types-persistence.md) |
+| Transações e WATCH | `transactions`, `transactions_persistence` | [Transações](transactions.md) |
+| Assinaturas e publicações | `pubsub` | [Pub/Sub](pubsub.md) |
+| Replicação, retomada e promoção | `replication_protocol`, `replication_journal`, `replication_storage`, `replication_persistence`, `replication_network` | [Replicação](replication.md) |
+| Backup durante tráfego e restauração | `backup`, `backup_process` | [Backup](backup.md) |
+| INFO e diagnóstico | `metrics`, `cli` | [Operação](metrics.md) |
+| Sequências cruzadas entre famílias | `compatibility`, helper `common/cross_family.rs` | [Matriz](compatibility-matrix.md), [diferenciais](differential.md#auditoria-r11-entre-famílias) |
+
+Por exemplo, uma alteração no backup pode ser verificada com:
+
+```sh
+cargo test --locked --test backup --test backup_process
+```
+
+O corpus novo da auditoria cruzada também pode ser executado isoladamente,
+com a referência e a rede preparadas conforme o guia de diferenciais:
+
+```sh
+cargo test --locked --test compatibility -- --ignored --exact cross_family_audit_only --nocapture
+```
+
+Ele preserva as contagens históricas R01/R02 e registra separadamente os casos
+entre tipos, TTL, transações e Pub/Sub. Os testes de persistência precisam rodar
+nativamente em Windows MSVC e Linux GNU quando filesystem ou durabilidade mudarem.
+
+## Pacotes e estabilização
+
+O [smoke de pacotes](packages.md) executa os quatro binários realmente extraídos.
+O [ensaio Docker](docker.md) verifica build sem recompilação, usuário sem
+privilégio, TCP, AOF/reinício, sinais e a imagem depois de `save`/compressão/`load`.
+O [backup do pacote](backup.md#evidência-reproduzível) exercita exportação e restauração sob
+tráfego; não se limita ao binário de desenvolvimento.
+
+O [soak](soak.md) mantém carga por pelo menos 3600 segundos e observa invariantes,
+TTL, clientes lentos, compactação e recuperação da replicação. O ensaio curto
+serve para verificar o runner e não aprova o gate de duração.
+Os [benchmarks](benchmarks.md) medem o pacote extraído com cenários e repetições
+fixados, amostras de latência/RSS e registro da configuração. Compile o harness
+antes de reservar a máquina e não execute benchmarks junto de builds ou outra carga.
+
+A candidata usa os [20 recibos de gates](releases.md#gates-do-produto),
+distribuídos entre as duas plataformas, além dos pacotes e seus hashes.
+A migração 1.0 deve consumir a baseline interna R10 preservada; fixtures de
+formatos antigos continuam complementares. Resultados de desenvolvimento não
+são transferidos a outro SHA. A final promove os mesmos arquivos aprovados na RC.
 
 ## Referência Redis descartável
 
