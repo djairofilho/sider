@@ -282,6 +282,118 @@ async fn metrics_dataset_tracks_committed_quota_and_expiration() {
     worker.await.unwrap();
 }
 
+#[tokio::test]
+async fn metrics_four_shards_remain_observable_during_snapshot_waiting_for_apply() {
+    let (stop, shutdown) = watch::channel(false);
+    let stores = (0..4)
+        .map(|_| {
+            Store::with_config(
+                StoreConfig {
+                    max_dataset_bytes: 300,
+                },
+                Arc::new(SystemClock),
+            )
+            .unwrap()
+        })
+        .collect();
+    let (database, mut owners) =
+        worker::channel_with_stores(1, Duration::from_secs(5), shutdown, stores).unwrap();
+    let slow = owners.remove(0);
+    let mut running = tokio::task::JoinSet::new();
+    for owner in owners {
+        running.spawn(owner.run());
+    }
+    let key = |shard| {
+        (0..10000)
+            .map(|number| Bytes::from(format!("key-{number}")))
+            .find(|key| database.router().shard_for(key) == shard)
+            .unwrap()
+    };
+    let first_key = key(0);
+    let other_key = key(1);
+    let mut accepted = Box::pin(database.execute(Command::Set {
+        key: first_key.clone(),
+        value: Bytes::from_static(b"pending"),
+    }));
+    poll_fn(|cx| {
+        assert!(accepted.as_mut().poll(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    assert_eq!(
+        database
+            .execute(Command::Set {
+                key: other_key.clone(),
+                value: Bytes::from_static(b"applied")
+            })
+            .await
+            .unwrap(),
+        Reply::Ok
+    );
+    let mut snapshot = Box::pin(database.snapshot(None));
+    poll_fn(|cx| {
+        assert!(snapshot.as_mut().poll(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    let (mut client, stream) = tokio::io::duplex(8192);
+    let connection = tokio::spawn(crate::connection::run(
+        stream,
+        ServerConfig {
+            shards: 4,
+            ..ServerConfig::default()
+        },
+        database.clone(),
+        stop.subscribe(),
+    ));
+    client
+        .write_all(&request(&[b"INFO", b"stats", b"memory"]))
+        .await
+        .unwrap();
+    let Frame::Bulk(Some(info)) = read_frame(&mut client).await else {
+        panic!()
+    };
+    let observed = fields(&info);
+    assert_eq!(observed["worker_queue_used"], "1");
+    assert_eq!(observed["worker_queue_capacity"], "4");
+    assert_eq!(
+        observed["dataset_keys"], "1",
+        "aceitação não publica estado antes de apply"
+    );
+    assert_eq!(observed["dataset_quota_bytes"], "1200");
+    running.spawn(slow.run());
+    let captured = snapshot.await.unwrap();
+    assert_eq!(accepted.await.unwrap(), Reply::Ok);
+    assert_eq!(captured.mutations.len(), 2);
+    assert!(
+        captured
+            .mutations
+            .iter()
+            .any(|mutation| mutation.key() == &first_key)
+    );
+    assert!(
+        captured
+            .mutations
+            .iter()
+            .any(|mutation| mutation.key() == &other_key)
+    );
+    let mut restored = Store::new();
+    restored.replay(&captured.mutations).unwrap();
+    let observed = fields(&database.info(InfoSections::ALL));
+    assert_eq!(observed["dataset_keys"], "2");
+    assert_eq!(
+        observed["dataset_logical_bytes"],
+        restored.used_bytes().to_string()
+    );
+    assert_eq!(observed["worker_queue_used"], "0");
+    drop(client);
+    connection.await.unwrap().unwrap();
+    stop.send_replace(true);
+    while let Some(result) = running.join_next().await {
+        result.unwrap();
+    }
+}
+
 #[test]
 fn metrics_pubsub_counts_delivery_eviction_and_raii_cleanup_without_labels() {
     let metrics = Metrics::default();

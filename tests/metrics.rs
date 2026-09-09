@@ -97,6 +97,7 @@ async fn metrics_tcp_reports_admission_effective_configuration_and_private_datas
     let config = sider::ServerConfig {
         bind_addr: address,
         max_connections: 1,
+        shards: 4,
         ..sider::ServerConfig::default()
     };
     let (stop, stopped) = oneshot::channel();
@@ -134,8 +135,14 @@ async fn metrics_tcp_reports_admission_effective_configuration_and_private_datas
     assert_eq!(fields["rejected_connections"], "1");
     assert_eq!(fields["commands_received_total"], "3");
     assert_eq!(fields["worker_requests_accepted_total"], "2");
-    assert_eq!(fields["worker_queue_capacity"], "32");
-    assert_eq!(fields["shards"], "1");
+    assert_eq!(fields["worker_queue_capacity"], "128");
+    assert_eq!(fields["worker_queue_capacity_per_shard"], "32");
+    assert_eq!(
+        fields.len(),
+        text.lines().filter(|line| line.contains(':')).count(),
+        "cada indicador precisa ter nome único mesmo em INFO all"
+    );
+    assert_eq!(fields["shards"], "4");
     assert_eq!(fields["dataset_keys"], "1");
     assert_eq!(fields["aof_enabled"], "0");
     assert!(!text.contains("secret"));
@@ -202,9 +209,12 @@ async fn metrics_tcp_info_in_exec_reads_real_aof_without_appending_a_record() {
     let directory = Directory::new();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
+    let mut aof = directory.config();
+    aof.layout.shard_count = 4;
     let config = sider::ServerConfig {
         bind_addr: address,
-        aof: Some(directory.config()),
+        shards: 4,
+        aof: Some(aof),
         ..sider::ServerConfig::default()
     };
     let (stop, stopped) = tokio::sync::oneshot::channel();
@@ -238,6 +248,10 @@ async fn metrics_tcp_info_in_exec_reads_real_aof_without_appending_a_record() {
     assert!(text.contains("aof_written_sequence:1\r\n"));
     assert!(text.contains("aof_synced_sequence:1\r\n"));
     assert!(text.contains("aof_records_written_total:1\r\n"));
+    assert!(
+        text.contains("aof_queue_capacity:32\r\n"),
+        "o escritor é global, sem multiplicar a capacidade por shard"
+    );
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();
 }

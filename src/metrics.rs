@@ -364,7 +364,12 @@ pub(crate) fn configuration(config: &ServerConfig) -> String {
     resp!(max_depth);
     field!(shards);
     field!(max_connections);
-    field!(worker_queue_capacity);
+    writeln!(
+        text,
+        "worker_queue_capacity_per_shard:{}\r",
+        config.worker_queue_capacity
+    )
+    .unwrap();
     field!(pubsub_max_channels);
     field!(pubsub_queue_capacity);
     field!(transaction_max_commands);

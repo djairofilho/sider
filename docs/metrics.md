@@ -168,8 +168,9 @@ dessa seção só existem quando esse consumidor real está presente.
 | `aof_last_error` | Última categoria estática de erro, ou `none`; não é apagada por um sucesso posterior |
 
 As categorias incluem `io`, `record_limit`, `format`, `configuration`, `replay`,
-`directory_locked`, `unavailable`, `sequence`, `compaction_busy` e
-`compaction_delta_limit`. Elas não retêm o texto original do erro nem caminhos.
+`directory_locked`, `unavailable`, `sequence`, `compaction_busy`,
+`compaction_delta_limit`, `layout_mismatch`, `cross_shard`, `shard_quota` e
+`migration`. Elas não retêm o texto original do erro nem caminhos.
 O gauge de fila fica em zero quando o observador já não encontra um canal ativo.
 
 Escrita na AOF e aplicação no Store são fronteiras diferentes. Uma falha antes
@@ -186,6 +187,10 @@ shards, dataset, Pub/Sub, transações, WATCH e prazos em milissegundos. Quando
 AOF está configurado, também imprime capacidade de fila, limites de registros,
 mutações e delta, limiar de compactação e política de sincronização. Opções
 de arquivo são expostas somente por flags de presença.
+
+`worker_queue_capacity_per_shard` é a capacidade configurada de cada canal;
+`worker_queue_capacity`, na seção `stats`, é a soma observada de todos eles.
+Os nomes permanecem únicos mesmo quando todas as seções são selecionadas.
 
 Esta entrega instrumenta os consumidores já integrados. Não publica contadores
 de replicação sem uma sessão real: a integração de R09 deve fornecer papel,
@@ -220,10 +225,12 @@ cargo test --locked --test cli metrics_ -- --nocapture
 cargo clippy --locked --lib --test metrics --test cli -- -D warnings
 ```
 
-Os oito testes nativos cobrem concorrência sem perda de incrementos, nomes
+Os nove testes nativos cobrem concorrência sem perda de incrementos, nomes
 fixos, seções desconhecidas/binárias, Pub/Sub lento/rápido, cancelamento,
 contagens de EXEC, fila saturada, timeout, quota, expiração e limites de saída.
-Quatro testes de integração conferem dois cenários TCP e o diagnóstico AOF em
+Um deles usa quatro shards: mantém um pedido aceito sem executar, consulta INFO
+enquanto o snapshot global aguarda esse pedido e confere os gauges após apply.
+Quatro testes de integração conferem dois cenários TCP com quatro shards e o diagnóstico AOF em
 append, compactação, falha fatal de disco e rejeição recuperável por tamanho.
 Dois testes CLI verificam código de saída, ocultação de valores inválidos e
 ausência de efeitos em listener, diretório AOF e arquivo de prontidão.
