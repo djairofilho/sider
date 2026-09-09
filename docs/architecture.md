@@ -50,6 +50,11 @@ worker proprietário. `DbHandle` roteia o comando pela chave e confere todas as
 chaves antes do enqueue. Cada shard tem um canal `mpsc` limitado; respostas usam
 `oneshot`. `PING` e `ECHO` passam pelo worker zero. O padrão continua com um shard.
 
+Pub/Sub usa um hub separado, que protege apenas metadados e envios sem espera
+para filas limitadas. Cada conexão possui uma inscrição RAII, liberada também em
+cancelamento. O socket tem um único escritor para confirmações/notificações;
+PING no modo assinante não usa o worker. Nenhuma inscrição pertence ao dataset.
+
 A fila define a ordem de execução entre conexões. Cada conexão aguarda sua
 resposta antes de despachar o próximo comando. Assim, a versão 0.1 mantém um
 pedido em voo por cliente e preserva a ordem dos comandos concatenados daquele

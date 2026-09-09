@@ -5,6 +5,7 @@ O objetivo é oferecer um subconjunto explícito de compatibilidade
 com Redis pelo protocolo RESP2. O nome é Redis ao contrário.
 
 O binário atende strings, operações multichave, opções de `SET` e TTL por RESP2/TCP.
+Pub/Sub oferece canais binários, assinaturas por conexão e filas limitadas.
 Workers proprietários serializam cada shard, com filas, conexões e buffers
 limitados e quota lógica total de 64 MiB por padrão. Ainda não há persistência ou
 autenticação. O [guia de strings](docs/strings.md) descreve comandos e limites.
@@ -132,6 +133,7 @@ com execução manual e evidências nas plataformas previstas.
 | [docs/testing.md](docs/testing.md) | Testes locais e reprodução da referência Redis |
 | [docs/resp.md](docs/resp.md) | Contratos, limites e uso do codec RESP2 |
 | [docs/network.md](docs/network.md) | Configuração TCP, aceitação, timeouts e encerramento |
+| [docs/pubsub.md](docs/pubsub.md) | Canais binários, modo assinante, filas limitadas e diferencial Pub/Sub |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Fluxo de trabalho e critérios de revisão |
 
 ## Próximo passo

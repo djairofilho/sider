@@ -67,6 +67,8 @@ inteiros e prazos em milissegundos. `1 MiB` corresponde a `1048576` bytes.
 | `SIDER_MAX_CONNECTIONS` | `32` | Conexões admitidas simultaneamente |
 | `SIDER_WORKER_QUEUE_CAPACITY` | `32` | Comandos que podem aguardar na fila de cada worker |
 | `SIDER_SHARDS` | `1` | Workers proprietários, entre 1 e 256; configuração fixa |
+| `SIDER_PUBSUB_MAX_CHANNELS` | `32` | Canais distintos por conexão |
+| `SIDER_PUBSUB_QUEUE_CAPACITY` | `32` | Notificações pendentes por conexão; fila cheia desconecta |
 | `SIDER_MAX_FRAME_BYTES` | `4194304` | Frame de entrada completo, incluindo framing |
 | `SIDER_MAX_BULK_BYTES` | `1048576` | Payload de cada bulk string de entrada |
 | `SIDER_MAX_LINE_BYTES` | `1024` | Linha ou cabeçalho de entrada, incluindo prefixo e CRLF |
@@ -130,6 +132,11 @@ por chegada ao socket ou de justiça estrita.
 O [guia de shards](sharding.md) define hash tags, divisão da quota e rejeição de
 comandos multichave entre shards antes do envio. Filas independentes permitem
 progresso de um shard mesmo quando outro está saturado.
+
+Pub/Sub usa um registro separado do dataset. A conexão serializa confirmações e
+notificações pelo mesmo escritor, com fila limitada e prazo de escrita. No modo
+assinante, PING responde sem passar pela fila de dados. SUBSCRIBE, UNSUBSCRIBE e
+PUBLISH não chegam ao Store. Consulte [Pub/Sub](pubsub.md).
 
 O cliente pode enviar vários comandos em uma escrita TCP. A conexão decodifica,
 envia ao worker, recebe e escreve uma resposta antes de despachar o comando

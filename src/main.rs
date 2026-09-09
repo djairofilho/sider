@@ -17,6 +17,7 @@ fn main() -> ExitCode {
                  SIDER_ADDR: IP e porta (padrão: 127.0.0.1:6379).\n\
                  SIDER_READY_FILE: arquivo JSON de prontidão opcional.\n\
                  Limites: SIDER_MAX_CONNECTIONS, SIDER_WORKER_QUEUE_CAPACITY,\n\
+                 SIDER_PUBSUB_MAX_CHANNELS, SIDER_PUBSUB_QUEUE_CAPACITY,\n\
                  SIDER_MAX_FRAME_BYTES, SIDER_MAX_BULK_BYTES, SIDER_MAX_LINE_BYTES,\n\
                  SIDER_MAX_NODES, SIDER_MAX_DEPTH, SIDER_MAX_INPUT_BUFFER_BYTES,\n\
                  SIDER_MAX_RESPONSE_BYTES, SIDER_MAX_DATASET_BYTES, SIDER_SHARDS. Prazos em milissegundos:\n\

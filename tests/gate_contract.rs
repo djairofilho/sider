@@ -24,6 +24,27 @@ const IMAGE: &str =
     "redis:8.10.1@sha256:76961cd2a0f40ef6fdd334b6b1b3a76a2bad1848d89f3030ca30a7521d4a9493";
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
+#[test]
+fn pubsub_receipt_requires_its_gate_in_the_plan() {
+    let fixture = Fixture::new();
+    assert!(fixture.context("pubsub").is_err());
+    fixture.change(|state| {
+        state.plan["releases"][0]["required_gates"] = json!(["compatibility", "pubsub"])
+    });
+    let context = fixture.context("pubsub").unwrap();
+    context
+        .publish(
+            1,
+            Duration::from_secs(1),
+            json!({"suite":"pubsub-contract"}),
+        )
+        .unwrap();
+    let receipt: Value =
+        serde_json::from_slice(&fs::read(fixture.out.join("receipt-pubsub.json")).unwrap())
+            .unwrap();
+    assert_eq!(receipt["gate"], "pubsub");
+}
+
 struct Fixture {
     root: PathBuf,
     out: PathBuf,

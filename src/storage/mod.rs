@@ -217,6 +217,9 @@ impl Store {
                 self.insert(key, entry.value.clone(), None);
                 Reply::Integer(1)
             }
+            Command::Subscribe { .. } | Command::Unsubscribe { .. } | Command::Publish { .. } => {
+                Reply::Error(ExecutionError::ConnectionOnly)
+            }
         }
     }
 
@@ -661,5 +664,25 @@ mod tests {
         drop(store);
         assert_eq!(first.as_ref(), &[0xff, 0, b'\r', b'\n', 0x80]);
         assert_eq!(second, first);
+    }
+
+    #[test]
+    fn pubsub_commands_cannot_execute_in_the_store() {
+        let mut store = Store::new();
+        for command in [
+            Command::Subscribe {
+                channels: vec![Bytes::new()],
+            },
+            Command::Unsubscribe { channels: vec![] },
+            Command::Publish {
+                channel: Bytes::new(),
+                message: Bytes::new(),
+            },
+        ] {
+            assert_eq!(
+                store.execute(command),
+                Reply::Error(ExecutionError::ConnectionOnly)
+            );
+        }
     }
 }
