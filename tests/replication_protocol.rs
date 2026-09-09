@@ -71,6 +71,18 @@ fn protocol_rejects_every_truncation_and_single_byte_corruption() {
         Message::Ack(CURSOR),
         Message::Heartbeat(CURSOR),
         Message::Reject(Reject::FullRequired),
+        Message::StatusRequest,
+        Message::Promote,
+        Message::Promoted(CURSOR),
+        Message::Status {
+            readonly: true,
+            cursor: CURSOR,
+            upstream_sequence: Some(12),
+            connected: true,
+            backlog_bytes: 0,
+            full_syncs: 1,
+            partial_syncs: 2,
+        },
     ];
     for message in messages {
         let frame = protocol::encode(&message, Limits::default()).unwrap();

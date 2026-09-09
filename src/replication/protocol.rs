@@ -115,6 +115,18 @@ pub enum Message {
     Ack(Cursor),
     Heartbeat(Cursor),
     Reject(Reject),
+    StatusRequest,
+    Promote,
+    Promoted(Cursor),
+    Status {
+        readonly: bool,
+        cursor: Cursor,
+        upstream_sequence: Option<u64>,
+        connected: bool,
+        backlog_bytes: u64,
+        full_syncs: u64,
+        partial_syncs: u64,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -249,6 +261,37 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
             body.extend_from_slice(&max_snapshot_bytes.to_le_bytes());
             10
         }
+        Message::StatusRequest => {
+            body.push(0);
+            11
+        }
+        Message::Promote => {
+            body.push(0);
+            12
+        }
+        Message::Promoted(cursor) => {
+            write_cursor(&mut body, *cursor);
+            13
+        }
+        Message::Status {
+            readonly,
+            cursor,
+            upstream_sequence,
+            connected,
+            backlog_bytes,
+            full_syncs,
+            partial_syncs,
+        } => {
+            body.push(u8::from(*readonly));
+            write_cursor(&mut body, *cursor);
+            body.push(u8::from(upstream_sequence.is_some()));
+            body.extend_from_slice(&upstream_sequence.unwrap_or(0).to_le_bytes());
+            body.push(u8::from(*connected));
+            for value in [backlog_bytes, full_syncs, partial_syncs] {
+                body.extend_from_slice(&value.to_le_bytes());
+            }
+            14
+        }
     };
     let size = body.len().checked_add(HEADER_BYTES).ok_or(Error::Limit)?;
     if size > limits.max_frame_bytes {
@@ -277,7 +320,7 @@ fn header(header: &[u8], limits: Limits) -> Result<(u8, usize), Error> {
     if version != VERSION {
         return Err(Error::Version(version));
     }
-    if !(1..=10).contains(&header[10]) {
+    if !(1..=14).contains(&header[10]) {
         return Err(Error::Invalid("tipo de mensagem"));
     }
     let len = u32::from_le_bytes(header[12..16].try_into().unwrap());
@@ -295,6 +338,9 @@ fn header(header: &[u8], limits: Limits) -> Result<(u8, usize), Error> {
         5 => len == 36,
         9 => len == 1,
         10 => len <= 45,
+        11 | 12 => len == 1,
+        13 => len == 24,
+        14 => len == 59,
         _ => true,
     };
     if !valid_size {
@@ -321,6 +367,13 @@ impl Fields {
     }
     fn byte(&mut self) -> Result<u8, Error> {
         Ok(self.take(1)?[0])
+    }
+    fn boolean(&mut self) -> Result<bool, Error> {
+        match self.byte()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(Error::Invalid("flag booleana")),
+        }
     }
     fn u32(&mut self) -> Result<u32, Error> {
         Ok(u32::from_le_bytes(
@@ -433,6 +486,35 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
             };
             encode(&message, limits)?;
             message
+        }
+        11 | 12 => {
+            if fields.byte()? != 0 {
+                return Err(Error::Invalid("pedido administrativo"));
+            }
+            if kind == 11 {
+                Message::StatusRequest
+            } else {
+                Message::Promote
+            }
+        }
+        13 => Message::Promoted(fields.cursor()?),
+        14 => {
+            let readonly = fields.boolean()?;
+            let cursor = fields.cursor()?;
+            let has_upstream = fields.boolean()?;
+            let sequence = fields.u64()?;
+            if !has_upstream && sequence != 0 {
+                return Err(Error::Invalid("posição upstream ausente"));
+            }
+            Message::Status {
+                readonly,
+                cursor,
+                upstream_sequence: has_upstream.then_some(sequence),
+                connected: fields.boolean()?,
+                backlog_bytes: fields.u64()?,
+                full_syncs: fields.u64()?,
+                partial_syncs: fields.u64()?,
+            }
         }
         _ => return Err(Error::Invalid("tipo de mensagem")),
     };
