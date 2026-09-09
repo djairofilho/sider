@@ -1,9 +1,10 @@
 //! Worker proprietário do armazenamento, com fila limitada e respostas individuais.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use thiserror::Error;
-use tokio::sync::{Semaphore, mpsc, oneshot, watch};
+use tokio::sync::{OwnedRwLockReadGuard, RwLock, Semaphore, mpsc, oneshot, watch};
 use tokio::time::{Instant, MissedTickBehavior, interval, sleep_until};
 
 use crate::command::{Command, Reply};
@@ -29,6 +30,8 @@ pub enum DbError {
 pub(crate) struct Request {
     pub(crate) command: Command,
     pub(crate) reply: oneshot::Sender<Result<Reply, DbError>>,
+    // Mantido desde a admissão até o apply e a resposta, mesmo se o cliente sair.
+    pub(crate) _admission: OwnedRwLockReadGuard<()>,
 }
 
 /// Acesso clonável ao mesmo armazenamento, sem compartilhar o mapa diretamente.
@@ -36,8 +39,10 @@ pub(crate) struct Request {
 pub struct DbHandle {
     requests: Vec<mpsc::Sender<Request>>,
     router: ShardRouter,
-    request_timeout: Duration,
-    shutdown: watch::Receiver<bool>,
+    pub(super) request_timeout: Duration,
+    pub(super) shutdown: watch::Receiver<bool>,
+    pub(super) barrier: Arc<RwLock<()>>,
+    pub(super) snapshots: Vec<mpsc::Sender<oneshot::Sender<Vec<super::Mutation>>>>,
 }
 
 /// Proprietário único do mapa e do lado receptor da fila.
@@ -48,6 +53,8 @@ pub struct Worker {
     compaction: Option<oneshot::Receiver<Result<(), crate::persistence::AofError>>>,
     requests: mpsc::Receiver<Request>,
     shutdown: watch::Receiver<bool>,
+    barrier: Arc<RwLock<()>>,
+    snapshots: mpsc::Receiver<oneshot::Sender<Vec<super::Mutation>>>,
 }
 
 /// Cria um mapa vazio e seu canal limitado, sem iniciar uma tarefa.
@@ -105,8 +112,12 @@ pub fn channel_with_stores(
 
     let mut senders = Vec::with_capacity(stores.len());
     let mut workers = Vec::with_capacity(stores.len());
+    let mut snapshots = Vec::with_capacity(stores.len());
+    let barrier = Arc::new(RwLock::new(()));
     for store in stores {
         let (sender, receiver) = mpsc::channel(capacity);
+        let (snapshot_sender, snapshot_receiver) = mpsc::channel(1);
+        snapshots.push(snapshot_sender);
         senders.push(sender);
         workers.push(Worker {
             store,
@@ -115,6 +126,8 @@ pub fn channel_with_stores(
             compaction: None,
             requests: receiver,
             shutdown: shutdown.clone(),
+            barrier: barrier.clone(),
+            snapshots: snapshot_receiver,
         });
     }
     Ok((
@@ -123,6 +136,8 @@ pub fn channel_with_stores(
             router,
             request_timeout,
             shutdown: shutdown.clone(),
+            barrier,
+            snapshots,
         },
         workers,
     ))
@@ -150,8 +165,18 @@ impl DbHandle {
             .checked_add(self.request_timeout)
             .ok_or(DbError::Timeout)?;
         let mut shutdown = self.shutdown.clone();
+        let admission = tokio::select! {
+            biased;
+            () = sleep_until(deadline) => return Err(DbError::Timeout),
+            () = stopping(&mut shutdown) => return Err(DbError::ShuttingDown),
+            guard = self.barrier.clone().read_owned() => guard,
+        };
         let (reply, response) = oneshot::channel();
-        let request = Request { command, reply };
+        let request = Request {
+            command,
+            reply,
+            _admission: admission,
+        };
 
         tokio::select! {
             biased;
@@ -179,6 +204,7 @@ impl Worker {
         compact_after_bytes: u64,
     ) -> Self {
         self.aof = Some(aof);
+        // Compactação local só é válida quando este worker é o único shard.
         self.compact_after_bytes = compact_after_bytes;
         self
     }
@@ -199,8 +225,12 @@ impl Worker {
                 }
                 () = async { match &self.aof { Some(aof) => aof.failed().await, None => std::future::pending().await } } => return,
                 _ = expiration.tick() => {
+                    let Ok(_admission) = self.barrier.clone().try_read_owned() else { continue; };
                     if self.expire().await.is_err() { return; }
                     self.compact_if_due().await;
+                }
+                Some(reply) = self.snapshots.recv() => {
+                    let _ = reply.send(self.store.snapshot());
                 }
                 request = self.requests.recv() => {
                     match request {
@@ -355,7 +385,11 @@ mod tests {
         let (reply, response) = oneshot::channel();
         assert!(
             handle.requests[0]
-                .try_send(Request { command, reply })
+                .try_send(Request {
+                    command,
+                    reply,
+                    _admission: handle.barrier.clone().try_read_owned().unwrap()
+                })
                 .is_ok()
         );
         response

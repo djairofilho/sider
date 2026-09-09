@@ -3,6 +3,7 @@
 mod clock;
 mod mutation;
 pub mod routing;
+pub mod snapshot;
 pub mod worker;
 pub use clock::{Clock, SystemClock};
 pub use mutation::{Mutation, MutationOrigin, Prepared, ReplayError, ResolvedBatch};

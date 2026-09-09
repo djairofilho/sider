@@ -34,43 +34,66 @@ pub enum ServerError {
 
 /// Estado recuperado antes de abrir o listener do binário.
 pub struct PreparedServer {
-    store: Option<Store>,
+    stores: Vec<Store>,
     recovered: Option<crate::persistence::Recovered>,
+    config: ServerConfig,
 }
 
 pub async fn prepare(config: &ServerConfig) -> Result<PreparedServer, ServerError> {
     config.validate()?;
     if config.aof.is_some() && config.shards != 1 {
         return Err(ConfigError::InvalidServerLimits {
-            reason: "AOF v1 requer um shard; migra??o dur?vel ? expl?cita",
+            reason: "AOF v1 requer um shard; migração durável é explícita",
         }
         .into());
     }
     let store_config = StoreConfig {
         max_dataset_bytes: config.max_dataset_bytes,
     };
-    if let Some(aof) = config.aof.clone() {
-        let recovered = tokio::task::spawn_blocking(move || {
+    let mut stores = (0..config.shards)
+        .map(|index| {
+            Store::with_config(
+                StoreConfig {
+                    max_dataset_bytes: config.max_dataset_bytes / config.shards
+                        + usize::from(index < config.max_dataset_bytes % config.shards),
+                },
+                Arc::new(SystemClock),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let recovered = if let Some(aof) = config.aof.clone() {
+        let mut recovered = tokio::task::spawn_blocking(move || {
             crate::persistence::recover(aof, store_config, Arc::new(SystemClock))
         })
         .await
         .map_err(ServerError::WorkerFailed)??;
-        Ok(PreparedServer {
-            store: None,
-            recovered: Some(recovered),
-        })
+        let router = crate::storage::routing::ShardRouter::new(config.shards)?;
+        let mut partitions = vec![Vec::new(); config.shards];
+        for mutation in recovered.store.snapshot() {
+            partitions[router.shard_for(mutation.key())].push(mutation);
+        }
+        for (store, partition) in stores.iter_mut().zip(partitions) {
+            store
+                .replay(&partition)
+                .map_err(crate::persistence::AofError::from)?;
+        }
+        recovered.store = Store::new();
+        Some(recovered)
     } else {
-        Ok(PreparedServer {
-            store: Some(Store::with_config(store_config, Arc::new(SystemClock))?),
-            recovered: None,
-        })
-    }
+        None
+    };
+    Ok(PreparedServer {
+        stores,
+        recovered,
+        config: config.clone(),
+    })
 }
 
 /// Atende o listener já aberto até o sinal de parada ou uma falha do worker.
 ///
 /// O cancelamento desta future aborta as tarefas que ela possui. A parada normal
-/// drena pedidos aceitos, mas não oferece durabilidade ou rollback de timeout.
+/// drena pedidos aceitos. A durabilidade segue a política AOF configurada;
+/// cancelar ou exceder o timeout não desfaz pedidos já aceitos.
 pub async fn serve(
     listener: TcpListener,
     config: ServerConfig,
@@ -88,45 +111,39 @@ pub async fn serve_prepared(
     prepared: PreparedServer,
 ) -> Result<(), ServerError> {
     config.validate()?;
-    let (stop, receiver) = watch::channel(false);
-    let (store, persistence) = match prepared.recovered {
-        Some(recovered) => {
-            let (store, handle, task) = recovered.start();
-            (store, Some((handle, task)))
+    if prepared.config != config {
+        return Err(ConfigError::InvalidServerLimits {
+            reason: "configuração difere do estado recuperado",
         }
-        None => (prepared.store.expect("estado preparado"), None),
-    };
-    let stores = if persistence.is_some() {
-        vec![store]
-    } else {
-        (0..config.shards)
-            .map(|index| {
-                Store::with_config(
-                    StoreConfig {
-                        max_dataset_bytes: config.max_dataset_bytes / config.shards
-                            + usize::from(index < config.max_dataset_bytes % config.shards),
-                    },
-                    Arc::new(SystemClock),
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?
+        .into());
+    }
+    let (stop, receiver) = watch::channel(false);
+    let persistence = match prepared.recovered {
+        Some(recovered) => {
+            let (_, handle, task) = recovered.start();
+            Some((handle, task))
+        }
+        None => None,
     };
     let (database, shard_workers) = worker::channel_with_stores(
         config.worker_queue_capacity,
         config.request_timeout,
         receiver,
-        stores,
+        prepared.stores,
     )?;
     let mut workers = JoinSet::new();
     for worker in shard_workers {
         let worker = match &persistence {
-            Some((handle, _)) => worker.with_aof(
-                handle.clone(),
-                config.aof.as_ref().map_or(0, |aof| aof.compact_after_bytes),
-            ),
+            Some((handle, _)) => worker.with_aof(handle.clone(), 0),
             None => worker,
         };
         workers.spawn(worker.run());
+    }
+    if let Some((handle, _)) = &persistence {
+        workers.spawn(database.clone().run_compaction(
+            handle.clone(),
+            config.aof.as_ref().map_or(0, |aof| aof.compact_after_bytes),
+        ));
     }
     let timeout = config.shutdown_timeout;
     let result = supervise_workers(listener, config, shutdown, database, workers, stop).await;
