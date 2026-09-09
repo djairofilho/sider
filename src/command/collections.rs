@@ -13,6 +13,14 @@ pub enum HashCommand {
     GetAll,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ListCommand {
+    Push { left: bool, values: Vec<Bytes> },
+    Pop { left: bool },
+    Len,
+    Range { start: i64, stop: i64 },
+}
+
 pub(super) fn parse(
     name: Bytes,
     mut args: std::vec::IntoIter<Bytes>,
@@ -25,12 +33,41 @@ pub(super) fn parse(
         b"HEXISTS" => ("hexists", args.len() == 2),
         b"HLEN" => ("hlen", args.len() == 1),
         b"HGETALL" => ("hgetall", args.len() == 1),
+        b"LPUSH" => ("lpush", args.len() >= 2),
+        b"RPUSH" => ("rpush", args.len() >= 2),
+        b"LPOP" => ("lpop", args.len() == 1),
+        b"RPOP" => ("rpop", args.len() == 1),
+        b"LLEN" => ("llen", args.len() == 1),
+        b"LRANGE" => ("lrange", args.len() == 3),
         _ => return Err(RequestError::UnknownCommand),
     };
     if !valid {
         return Err(RequestError::WrongArity(canonical));
     }
     let key = args.next().ok_or(RequestError::WrongArity(canonical))?;
+    if name[0] == b'L' || name[0] == b'R' {
+        let operation = match name.as_slice() {
+            b"LPUSH" | b"RPUSH" => ListCommand::Push {
+                left: name[0] == b'L',
+                values: args.collect(),
+            },
+            b"LPOP" | b"RPOP" => ListCommand::Pop {
+                left: name[0] == b'L',
+            },
+            b"LLEN" => ListCommand::Len,
+            b"LRANGE" => {
+                let start =
+                    super::parse_decimal(&args.next().ok_or(RequestError::WrongArity(canonical))?)
+                        .ok_or(RequestError::InvalidInteger)?;
+                let stop =
+                    super::parse_decimal(&args.next().ok_or(RequestError::WrongArity(canonical))?)
+                        .ok_or(RequestError::InvalidInteger)?;
+                ListCommand::Range { start, stop }
+            }
+            _ => unreachable!("nome validado"),
+        };
+        return Ok(Command::List { key, operation });
+    }
     let operation = match name.as_slice() {
         b"HSET" => {
             let mut entries = Vec::with_capacity(args.len() / 2);

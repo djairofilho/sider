@@ -3,7 +3,7 @@
 mod collections;
 mod parser;
 mod reply;
-pub use collections::HashCommand;
+pub use collections::{HashCommand, ListCommand};
 
 use bytes::Bytes;
 use std::time::Duration;
@@ -61,6 +61,8 @@ pub(crate) fn parse_decimal(value: &[u8]) -> Option<i64> {
 pub enum Command {
     /// Operação sobre campos e valores binários de um hash.
     Hash { key: Bytes, operation: HashCommand },
+    /// Operação de lista, incluindo pops individuais e ranges por índice.
+    List { key: Bytes, operation: ListCommand },
     /// Responde PONG ou devolve a mensagem binária.
     Ping(Option<Bytes>),
     /// Devolve exatamente o payload.
@@ -139,6 +141,7 @@ impl Command {
             Self::Ping(_) | Self::Echo(_) => {}
             Self::Get { key }
             | Self::Hash { key, .. }
+            | Self::List { key, .. }
             | Self::Set { key, .. }
             | Self::SetWithOptions { key, .. }
             | Self::Incr { key }

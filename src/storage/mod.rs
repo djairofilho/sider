@@ -151,6 +151,7 @@ impl Store {
         let now = self.clock.now();
         match command {
             Command::Hash { key, operation } => self.hash(key, operation, now),
+            Command::List { key, operation } => self.list(key, operation, now),
             Command::Ping(None) => Reply::Pong,
             Command::Ping(Some(message)) | Command::Echo(message) => Reply::Bulk(Some(message)),
             Command::Get { key } => {

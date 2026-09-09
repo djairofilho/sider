@@ -180,6 +180,15 @@ fn blob_size(value: &Bytes) -> Result<usize, FormatError> {
 fn value_size(value: &Value) -> Result<usize, FormatError> {
     match value {
         Value::String(value) => blob_size(value),
+        Value::List(values) => {
+            if values.is_empty() || values.len() > u32::MAX as usize {
+                return Err(FormatError::Corrupt("quantidade de elementos"));
+            }
+            values.iter().try_fold(4usize, |size, value| {
+                size.checked_add(blob_size(value)?)
+                    .ok_or(FormatError::Limit)
+            })
+        }
         Value::Hash(fields) => {
             if fields.is_empty() || fields.len() > u32::MAX as usize {
                 return Err(FormatError::Corrupt("quantidade de campos"));
@@ -261,6 +270,10 @@ fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
             value: Value::Hash(_),
             ..
         } => 3,
+        Mutation::Put {
+            value: Value::List(_),
+            ..
+        } => 4,
     });
     output.extend_from_slice(&(mutation.key().len() as u32).to_le_bytes());
     output.extend_from_slice(mutation.key());
@@ -272,6 +285,12 @@ fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
     {
         match value {
             Value::String(value) => encode_blob(output, value),
+            Value::List(values) => {
+                output.extend_from_slice(&(values.len() as u32).to_le_bytes());
+                for value in values.iter() {
+                    encode_blob(output, value);
+                }
+            }
             Value::Hash(fields) => {
                 output.extend_from_slice(&(fields.len() as u32).to_le_bytes());
                 for (field, value) in fields.iter() {
@@ -366,9 +385,19 @@ impl Cursor {
         let tag = self.byte()?;
         let key = self.blob()?;
         match tag {
-            1 | 3 => {
+            1 | 3 | 4 => {
                 let value = if tag == 1 {
                     Value::String(self.blob()?)
+                } else if tag == 4 {
+                    let count = self.u32()? as usize;
+                    if count == 0 || count > (self.bytes.len() - self.offset) / 4 {
+                        return Err(FormatError::Corrupt("quantidade de elementos"));
+                    }
+                    let mut values = std::collections::VecDeque::new();
+                    for _ in 0..count {
+                        values.push_back(self.blob()?);
+                    }
+                    Value::List(std::sync::Arc::new(values))
                 } else {
                     let count = self.u32()? as usize;
                     if count == 0 || count > (self.bytes.len() - self.offset) / 8 {
