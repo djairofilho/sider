@@ -50,6 +50,106 @@ fn mutation(key: &'static [u8], value: Bytes) -> sider::storage::ResolvedBatch {
         .batch
 }
 
+async fn tcp_command(client: &mut tokio::net::TcpStream, args: &[&[u8]]) -> sider::resp::Frame {
+    use sider::resp::{Decoder, Frame, RespLimits, encode};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut output = bytes::BytesMut::new();
+    encode(
+        &Frame::Array(Some(
+            args.iter()
+                .map(|arg| Frame::Bulk(Some(Bytes::copy_from_slice(arg))))
+                .collect(),
+        )),
+        &mut output,
+        RespLimits::default(),
+    )
+    .unwrap();
+    client.write_all(&output).await.unwrap();
+    let mut input = bytes::BytesMut::new();
+    let mut decoder = Decoder::new(RespLimits::default()).unwrap();
+    loop {
+        if let Some(frame) = decoder.decode(&mut input).unwrap() {
+            return frame;
+        }
+        assert_ne!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                client.read_buf(&mut input)
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+            0
+        );
+    }
+}
+
+#[tokio::test]
+async fn metrics_tcp_reports_admission_effective_configuration_and_private_dataset() {
+    use sider::resp::Frame;
+    use tokio::{
+        io::AsyncReadExt,
+        net::{TcpListener, TcpStream},
+        sync::oneshot,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let config = sider::ServerConfig {
+        bind_addr: address,
+        max_connections: 1,
+        ..sider::ServerConfig::default()
+    };
+    let (stop, stopped) = oneshot::channel();
+    let server = tokio::spawn(sider::server::serve(listener, config, async {
+        let _ = stopped.await;
+    }));
+    let mut client = TcpStream::connect(address).await.unwrap();
+    assert_eq!(
+        tcp_command(&mut client, &[b"PING"]).await,
+        Frame::Simple(Bytes::from_static(b"PONG"))
+    );
+    let mut excess = TcpStream::connect(address).await.unwrap();
+    let closed = tokio::time::timeout(std::time::Duration::from_secs(5), excess.read(&mut [0; 1]))
+        .await
+        .unwrap();
+    assert!(
+        matches!(closed, Ok(0))
+            || matches!(closed, Err(ref error) if error.kind() == io::ErrorKind::ConnectionReset)
+    );
+    assert_eq!(
+        tcp_command(&mut client, &[b"SET", b"secret-key", b"secret-value"]).await,
+        Frame::Simple(Bytes::from_static(b"OK"))
+    );
+    let Frame::Bulk(Some(info)) = tcp_command(&mut client, &[b"INFO"]).await else {
+        panic!()
+    };
+    let text = std::str::from_utf8(&info).unwrap();
+    let fields: std::collections::BTreeMap<_, _> = text
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .collect();
+    assert_eq!(fields["tcp_port"], address.port().to_string());
+    assert_eq!(fields["connected_clients"], "1");
+    assert_eq!(fields["total_connections_received"], "1");
+    assert_eq!(fields["rejected_connections"], "1");
+    assert_eq!(fields["commands_received_total"], "3");
+    assert_eq!(fields["worker_requests_accepted_total"], "2");
+    assert_eq!(fields["worker_queue_capacity"], "32");
+    assert_eq!(fields["shards"], "1");
+    assert_eq!(fields["dataset_keys"], "1");
+    assert_eq!(fields["aof_enabled"], "0");
+    assert!(!text.contains("secret"));
+    let Frame::Bulk(Some(filtered)) =
+        tcp_command(&mut client, &[b"INFO", b"memory", b"unknown-secret"]).await
+    else {
+        panic!()
+    };
+    assert!(filtered.starts_with(b"# Memory\r\n"));
+    assert!(!filtered.windows(8).any(|bytes| bytes == b"# Server"));
+    stop.send(()).unwrap();
+    server.await.unwrap().unwrap();
+}
+
 #[tokio::test]
 async fn metrics_aof_reports_confirmed_sequences_and_compaction_without_io_reads() {
     let directory = Directory::new();
@@ -95,6 +195,53 @@ async fn metrics_aof_reports_confirmed_sequences_and_compaction_without_io_reads
 }
 
 struct DiskFailure;
+
+#[tokio::test]
+async fn metrics_tcp_info_in_exec_reads_real_aof_without_appending_a_record() {
+    use sider::resp::Frame;
+    let directory = Directory::new();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let config = sider::ServerConfig {
+        bind_addr: address,
+        aof: Some(directory.config()),
+        ..sider::ServerConfig::default()
+    };
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(sider::server::serve(listener, config, async {
+        let _ = stopped.await;
+    }));
+    let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+    assert_eq!(
+        tcp_command(&mut client, &[b"MULTI"]).await,
+        Frame::Simple(Bytes::from_static(b"OK"))
+    );
+    assert_eq!(
+        tcp_command(&mut client, &[b"INFO", b"persistence"]).await,
+        Frame::Simple(Bytes::from_static(b"QUEUED"))
+    );
+    let Frame::Array(Some(replies)) = tcp_command(&mut client, &[b"EXEC"]).await else {
+        panic!()
+    };
+    let Frame::Bulk(Some(info)) = &replies[0] else {
+        panic!()
+    };
+    let text = std::str::from_utf8(info).unwrap();
+    assert!(text.contains("aof_enabled:1\r\n"));
+    assert!(text.contains("aof_running:1\r\n"));
+    assert!(text.contains("aof_records_written_total:0\r\n"));
+    tcp_command(&mut client, &[b"SET", b"key", b"value"]).await;
+    let Frame::Bulk(Some(info)) = tcp_command(&mut client, &[b"INFO", b"persistence"]).await else {
+        panic!()
+    };
+    let text = std::str::from_utf8(&info).unwrap();
+    assert!(text.contains("aof_written_sequence:1\r\n"));
+    assert!(text.contains("aof_synced_sequence:1\r\n"));
+    assert!(text.contains("aof_records_written_total:1\r\n"));
+    stop.send(()).unwrap();
+    server.await.unwrap().unwrap();
+}
+
 impl FaultInjector for DiskFailure {
     fn hit(&self, point: &'static str) -> io::Result<()> {
         if point == "before_sync" {

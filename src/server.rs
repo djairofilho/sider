@@ -190,7 +190,9 @@ async fn supervise_workers(
 ) -> Result<(), ServerError> {
     let mut connections = JoinSet::new();
     let slots = Arc::new(Semaphore::new(config.max_connections));
-    let pubsub = crate::pubsub::Hub::default();
+    let metrics = database.metrics.clone();
+    metrics.configure(&config, listener.local_addr()?.port());
+    let pubsub = crate::pubsub::Hub::with_metrics(metrics.clone());
     tokio::pin!(shutdown);
     tracing::info!(address = %listener.local_addr()?, "servidor TCP iniciado");
 
@@ -211,10 +213,12 @@ async fn supervise_workers(
                     Err(error) => break Some(error.into()),
                 };
                 let Ok(slot) = slots.clone().try_acquire_owned() else {
+                    metrics.add(crate::metrics::Counter::RejectedConnections, 1);
                     tracing::warn!("conexão excedente recusada");
                     continue;
                 };
                 if let Err(error) = stream.set_nodelay(true) {
+                    metrics.add(crate::metrics::Counter::ConnectionFailures, 1);
                     tracing::warn!(%error, "falha ao configurar conexão");
                     continue;
                 }

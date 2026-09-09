@@ -78,7 +78,11 @@ pub fn parse(frame: Frame) -> Result<Command, RequestError> {
     let mut arguments = arguments.ok_or(RequestError::InvalidFormat)?.into_iter();
     let name = arguments.next().ok_or(RequestError::InvalidFormat)?;
     let count = arguments.len();
-    if name.eq_ignore_ascii_case(b"PING") {
+    if name.eq_ignore_ascii_case(b"INFO") {
+        Ok(Command::Info(super::InfoSections::from_names(
+            arguments.as_slice().iter().map(|value| value.as_ref()),
+        )))
+    } else if name.eq_ignore_ascii_case(b"PING") {
         if count > 1 {
             return Err(RequestError::WrongArity("ping"));
         }
