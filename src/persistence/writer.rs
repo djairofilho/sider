@@ -414,7 +414,9 @@ impl Writer {
             match request {
                 Ok(Some(Request::Append(batch, reply))) => {
                     let result = self.append(batch);
-                    if result.is_err() {
+                    if result.is_err()
+                        && !matches!(result, Err(AofError::Format(FormatError::Limit)))
+                    {
                         let _ = reply.send(result);
                         return Err(AofError::Unavailable);
                     }

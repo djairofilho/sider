@@ -20,7 +20,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_record_bytes: 8 * 1024 * 1024,
+            max_record_bytes: MAX_RECORD_BYTES,
             max_mutations: 100_000,
         }
     }

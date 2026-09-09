@@ -824,16 +824,83 @@ fn aof_config_is_injected_and_rejects_invalid_policy_and_limits() {
 }
 
 #[test]
+fn oversized_aof_record_is_rejected_without_losing_the_connection_or_state() {
+    runtime().block_on(async {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let directory = Directory::new();
+        let mut aof = directory.config();
+        aof.limits.max_record_bytes = 64;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop, shutdown) = tokio::sync::oneshot::channel::<()>();
+        let config = sider::ServerConfig {
+            aof: Some(aof),
+            ..sider::ServerConfig::default()
+        };
+        let running = tokio::spawn(sider::server::serve(listener, config, async {
+            let _ = shutdown.await;
+        }));
+        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+        async fn exchange(client: &mut tokio::net::TcpStream, request: &[u8], expected: &[u8]) {
+            client.write_all(request).await.unwrap();
+            let mut response = vec![0; expected.len()];
+            tokio::time::timeout(TIMEOUT, client.read_exact(&mut response))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(response, expected);
+        }
+        exchange(
+            &mut client,
+            b"*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$3\r\nold\r\n",
+            b"+OK\r\n",
+        )
+        .await;
+        let mut large = b"*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$100\r\n".to_vec();
+        large.extend_from_slice(&[b'x'; 100]);
+        large.extend_from_slice(b"\r\n");
+        exchange(&mut client, &large, b"-ERR AOF record limit exceeded\r\n").await;
+        exchange(&mut client, b"*1\r\n$4\r\nPING\r\n", b"+PONG\r\n").await;
+        exchange(
+            &mut client,
+            b"*2\r\n$3\r\nGET\r\n$1\r\nk\r\n",
+            b"$3\r\nold\r\n",
+        )
+        .await;
+        exchange(
+            &mut client,
+            b"*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$3\r\nnew\r\n",
+            b"+OK\r\n",
+        )
+        .await;
+        drop(client);
+        stop.send(()).unwrap();
+        running.await.unwrap().unwrap();
+        let mut recovered = recover(&directory);
+        assert_eq!(
+            get(&mut recovered.store, b"k"),
+            Reply::Bulk(Some(Bytes::from_static(b"new")))
+        );
+    });
+}
+
+#[test]
 #[ignore = "gate de release exige contexto exato; suíte interna roda diretamente"]
 fn release_crash_gate() {
     let context = gate_receipt::GateContext::from_env("crash").unwrap();
     let began = Instant::now();
     let cases = crash_cases();
+    short_writes_leave_only_an_unapplied_tail();
+    append_and_sync_errors_never_reply_success_and_stop_admission();
+    periodic_sync_runs_without_a_second_write();
+    snapshot_disk_error_keeps_old_aof_writable();
+    bounded_delta_abort_preserves_writes_and_allows_retry();
+    expiration_tombstone_during_snapshot_prevents_resurrection();
     context
         .publish(
-            cases,
+            cases + 14,
             began.elapsed(),
-            serde_json::json!({ "process_crash_points": cases, "scope": "process_crash" }),
+            serde_json::json!({ "process_crash_points": cases, "injected_io_cases": 14, "policies": ["always", "periodic"], "scope": "process_crash" }),
         )
         .unwrap();
 }
@@ -845,9 +912,11 @@ fn release_recovery_gate() {
     let began = Instant::now();
     let cases = recovery_cases();
     replay_restores_quota_and_absolute_deadlines_after_clock_movement();
+    removed_snapshot_record_is_rejected_even_when_other_checksums_are_valid();
+    binary_refuses_corrupt_aof_before_bind_and_readiness();
     context
         .publish(
-            cases + 4,
+            cases + 6,
             began.elapsed(),
             serde_json::json!({ "prefixes_and_corruption": cases, "absolute_ttl_and_quota": true }),
         )

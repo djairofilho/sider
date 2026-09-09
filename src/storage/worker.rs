@@ -199,8 +199,7 @@ impl Worker {
                 }
                 () = async { match &self.aof { Some(aof) => aof.failed().await, None => std::future::pending().await } } => return,
                 _ = expiration.tick() => {
-                    let prepared = self.store.prepare_expiration(64);
-                    if self.commit(prepared).await.is_err() { return; }
+                    if self.expire().await.is_err() { return; }
                     self.compact_if_due().await;
                 }
                 request = self.requests.recv() => {
@@ -240,11 +239,32 @@ impl Worker {
             && !prepared.batch.mutations.is_empty()
             && let Err(error) = aof.append(prepared.batch.clone()).await
         {
+            if matches!(
+                error,
+                crate::persistence::AofError::Format(
+                    crate::persistence::format::FormatError::Limit
+                )
+            ) {
+                return Ok(Reply::Error(crate::command::ExecutionError::AofRecordLimit));
+            }
             tracing::error!(%error, "mutação não aplicada por falha do AOF");
             self.requests.close();
             return Err(DbError::Unavailable);
         }
         Ok(self.store.apply(prepared))
+    }
+
+    async fn expire(&mut self) -> Result<(), DbError> {
+        let mut budget = 64;
+        loop {
+            let prepared = self.store.prepare_expiration(budget);
+            match self.commit(prepared).await? {
+                Reply::Error(crate::command::ExecutionError::AofRecordLimit) if budget > 1 => {
+                    budget /= 2
+                }
+                _ => return Ok(()),
+            }
+        }
     }
 
     async fn compact_if_due(&mut self) {

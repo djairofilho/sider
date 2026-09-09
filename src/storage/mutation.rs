@@ -84,6 +84,12 @@ mod tests {
             now: Instant::now(),
             unix_ms: 500,
         });
+        let passive = store.prepare(Command::Get {
+            key: Bytes::from_static(b"k"),
+        });
+        assert_eq!(passive.batch.origin, MutationOrigin::Expiration);
+        assert_eq!(passive.reply, Reply::Bulk(None));
+        assert_eq!(store.len(), 1);
         let expiration = store.prepare_expiration(1);
         assert_eq!(expiration.batch.origin, MutationOrigin::Expiration);
         assert_eq!(
@@ -195,6 +201,17 @@ impl Store {
     /// Resolve condições, inteiros, TTL e quota sem copiar nem modificar o dataset.
     /// A cópia temporária contém somente metadados das chaves do comando; Bytes é compartilhado.
     pub fn prepare(&self, command: Command) -> Prepared {
+        let origin = if matches!(
+            &command,
+            Command::Get { .. }
+                | Command::MGet { .. }
+                | Command::Exists { .. }
+                | Command::Ttl { .. }
+        ) {
+            MutationOrigin::Expiration
+        } else {
+            MutationOrigin::Client
+        };
         let mut keys = BTreeSet::new();
         command.visit_keys(|key| {
             keys.insert(key.clone());
@@ -228,7 +245,7 @@ impl Store {
                 entries.push((key, after.cloned()));
             }
         }
-        self.prepared(reply, entries, MutationOrigin::Client)
+        self.prepared(reply, entries, origin)
     }
 
     /// Prepara tombstones limitados, sem remover uma chave antes do append.
