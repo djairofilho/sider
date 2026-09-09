@@ -65,10 +65,13 @@ inteiros e prazos em milissegundos. `1 MiB` corresponde a `1048576` bytes.
 | --- | --- | --- |
 | `SIDER_ADDR` | `127.0.0.1:6379` | IP literal e porta do listener |
 | `SIDER_MAX_CONNECTIONS` | `32` | Conexões admitidas simultaneamente |
-| `SIDER_WORKER_QUEUE_CAPACITY` | `32` | Comandos que podem aguardar na fila de cada worker |
+| `SIDER_WORKER_QUEUE_CAPACITY` | `32` | Pedidos que podem aguardar na fila de cada worker; cada EXEC ocupa um pedido |
 | `SIDER_SHARDS` | `1` | Workers proprietários, entre 1 e 256; configuração fixa |
 | `SIDER_PUBSUB_MAX_CHANNELS` | `32` | Canais distintos por conexão |
 | `SIDER_PUBSUB_QUEUE_CAPACITY` | `32` | Notificações pendentes por conexão; fila cheia desconecta |
+| `SIDER_TRANSACTION_MAX_COMMANDS` | `128` | Comandos retidos entre MULTI e EXEC |
+| `SIDER_TRANSACTION_MAX_BYTES` | `1048576` | Soma dos bytes RESP dos comandos enfileirados |
+| `SIDER_WATCH_MAX_KEYS` | `128` | Chaves distintas observadas por conexão |
 | `SIDER_MAX_FRAME_BYTES` | `4194304` | Frame de entrada completo, incluindo framing |
 | `SIDER_MAX_BULK_BYTES` | `1048576` | Payload de cada bulk string de entrada |
 | `SIDER_MAX_LINE_BYTES` | `1024` | Linha ou cabeçalho de entrada, incluindo prefixo e CRLF |

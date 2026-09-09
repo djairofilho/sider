@@ -77,11 +77,13 @@ comandos tipados; a conexão intercepta os três comandos Pub/Sub antes de chama
 `DbHandle::execute`. Uma chamada direta ao `Store` retorna
 `ERR command requires connection context`, protegendo essa fronteira.
 
-Transações e AOF ainda não fazem parte desta implementação. A integração futura
-de `MULTI`/`EXEC` precisa definir a fila e o ponto de publicação do efeito efêmero
-e testar a interação com o modo assinante. Comandos Pub/Sub não devem entrar no
-log persistente nem ser enviados a um shard como comandos de chave. Esta entrega
-não comprova comportamento transacional ou replay de AOF.
+`MULTI` pode enfileirar comandos Pub/Sub junto dos comandos de banco. O worker
+aprova o único append durável antes de aplicar os efeitos; erro de AOF impede
+publicações e inscrições daquele lote. A execução efêmera mantém a ordem no hub
+sem esperar sockets e não produz registros Pub/Sub na AOF. Em `EXEC`, mensagens
+para a própria conexão aparecem depois das respostas do lote. A saída completa
+continua sujeita ao limite de resposta. Consulte [transações](transactions.md)
+para WATCH, framing RESP2, limites e evidências da integração.
 
 ## Reprodução e evidências
 
