@@ -9,7 +9,7 @@
     "sharding": {"command": ["cargo", "test", "--locked", "--test", "sharding", "--", "--ignored", "--exact", "release_sharding_gate", "--nocapture"], "timeout_seconds": 600},
     "types": {"command": ["cargo", "test", "--locked", "--test", "collections_differential", "--", "--ignored", "--exact", "release_types_gate", "--nocapture"], "timeout_seconds": 600},
     "sorted_sets": {"command": ["cargo", "test", "--locked", "--test", "collections_differential", "--", "--ignored", "--exact", "release_sorted_sets_gate", "--nocapture"], "timeout_seconds": 600},
-    "transactions": {"command": null, "timeout_seconds": 600},
+    "transactions": {"command": ["cargo", "test", "--locked", "--test", "transactions", "--", "--ignored", "--exact", "release_transactions_gate", "--nocapture"], "timeout_seconds": 600},
     "pubsub": {"command": ["cargo", "test", "--locked", "--test", "pubsub", "--", "--ignored", "--exact", "release_pubsub_gate", "--nocapture"], "timeout_seconds": 600},
     "replication": {"command": null, "timeout_seconds": 1200},
     "docker": {"command": null, "timeout_seconds": 1200},
