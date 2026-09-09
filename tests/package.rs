@@ -33,10 +33,16 @@ const BACKUP_NAME: &str = if cfg!(windows) {
 } else {
     "sider-backup"
 };
+const REPLICA_NAME: &str = if cfg!(windows) {
+    "sider-replica.exe"
+} else {
+    "sider-replica"
+};
 const PACKAGE_FILES: &[&str] = &[
     BINARY_NAME,
     MIGRATOR_NAME,
     BACKUP_NAME,
+    REPLICA_NAME,
     "README.md",
     "LICENSE",
 ];
@@ -57,6 +63,8 @@ struct ExtractedPackage {
     migrator_bytes: u64,
     backup: PathBuf,
     backup_bytes: u64,
+    replica: PathBuf,
+    replica_bytes: u64,
 }
 
 fn select_package(
@@ -89,6 +97,11 @@ fn select_package(
     if backup_bytes == 0 {
         return Err("CLI de backup do pacote está vazia".into());
     }
+    let replica = directory.join(REPLICA_NAME);
+    let replica_bytes = regular_file(&replica)?.len();
+    if replica_bytes == 0 {
+        return Err("CLI de replicação do pacote está vazia".into());
+    }
     for (name, expected) in [("README.md", readme), ("LICENSE", license)] {
         if expected.is_empty() {
             return Err(format!("{name} do checkout está vazio"));
@@ -103,6 +116,8 @@ fn select_package(
         migrator_bytes,
         backup,
         backup_bytes,
+        replica,
+        replica_bytes,
     })
 }
 
@@ -240,6 +255,17 @@ fn smoke(
     if !backup.status.success() || backup.stdout != format!("sider-backup {version}\n").as_bytes() {
         return Err("versão da CLI de backup extraída diverge".into());
     }
+    let replica = process::run(
+        std::process::Command::new(&package.replica).arg("--help"),
+        IO_TIMEOUT,
+    )?;
+    if !replica.status.success()
+        || !replica
+            .stdout
+            .starts_with(b"Uso: sider-replica --addr IP:PORTA")
+    {
+        return Err("CLI de replicação extraída não executou sua ajuda".into());
+    }
     // Esta é a única origem do executável: não há fallback para um target local.
     let mut sider = SiderProcess::try_start(&package.binary, version)?;
     pipeline(sider.address())?;
@@ -254,6 +280,7 @@ fn smoke(
     if verified.binary_bytes != package.binary_bytes
         || verified.migrator_bytes != package.migrator_bytes
         || verified.backup_bytes != package.backup_bytes
+        || verified.replica_bytes != package.replica_bytes
     {
         return Err("tamanho do executável mudou durante o smoke".into());
     }
@@ -272,6 +299,9 @@ fn smoke(
         "backup": BACKUP_NAME,
         "backup_bytes": package.backup_bytes,
         "backup_version_checked": true,
+        "replica": REPLICA_NAME,
+        "replica_bytes": package.replica_bytes,
+        "replica_help_checked": true,
         "readme_matches_checkout": true,
         "readme_source": "releases/README.md",
         "license_matches_checkout": true,
@@ -335,7 +365,7 @@ mod tests {
                             fs::write(fixture.checkout().join(name), &contents).unwrap();
                             fs::write(fixture.package().join(name), contents).unwrap();
                         }
-                        for name in [BINARY_NAME, MIGRATOR_NAME, BACKUP_NAME] {
+                        for name in [BINARY_NAME, MIGRATOR_NAME, BACKUP_NAME, REPLICA_NAME] {
                             fs::write(fixture.package().join(name), b"fixture, not executable")
                                 .unwrap();
                         }
@@ -375,6 +405,11 @@ mod tests {
             fs::copy(
                 env!("CARGO_BIN_EXE_sider-backup"),
                 self.package().join(BACKUP_NAME),
+            )
+            .unwrap();
+            fs::copy(
+                env!("CARGO_BIN_EXE_sider-replica"),
+                self.package().join(REPLICA_NAME),
             )
             .unwrap();
             for (name, contents) in [

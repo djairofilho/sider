@@ -30,6 +30,7 @@ struct Options {
     binary_sha: String,
     migrator_sha: String,
     backup_sha: String,
+    replica_sha: String,
     version: String,
     runner_id: Option<String>,
 }
@@ -76,6 +77,7 @@ impl Options {
             binary_sha: hex(text("SIDER_DOCKER_BINARY_SHA256")?, 64)?,
             migrator_sha: hex(text("SIDER_DOCKER_MIGRATOR_SHA256")?, 64)?,
             backup_sha: hex(text("SIDER_DOCKER_BACKUP_SHA256")?, 64)?,
+            replica_sha: hex(text("SIDER_DOCKER_REPLICA_SHA256")?, 64)?,
             version: env!("CARGO_PKG_VERSION").into(),
             runner_id,
         })
@@ -436,6 +438,7 @@ fn exercise(options: Options) -> Result<Value, String> {
         ("sider", &options.binary_sha),
         ("sider-aof-migrate", &options.migrator_sha),
         ("sider-backup", &options.backup_sha),
+        ("sider-replica", &options.replica_sha),
     ] {
         regular(&options.package.join(file))?;
         if &runner.hash(&options.package.join(file))? != expected {
@@ -446,6 +449,7 @@ fn exercise(options: Options) -> Result<Value, String> {
         "sider",
         "sider-aof-migrate",
         "sider-backup",
+        "sider-replica",
         "README.md",
         "LICENSE",
         "licenses",
@@ -500,6 +504,8 @@ fn exercise(options: Options) -> Result<Value, String> {
                 &format!("SIDER_MIGRATOR_SHA256={}", options.migrator_sha),
                 "--build-arg",
                 &format!("SIDER_BACKUP_SHA256={}", options.backup_sha),
+                "--build-arg",
+                &format!("SIDER_REPLICA_SHA256={}", options.replica_sha),
             ])
             .arg(&context),
         BUILD_TIMEOUT,
@@ -554,6 +560,7 @@ fn exercise(options: Options) -> Result<Value, String> {
         || loaded["Config"]["Labels"]["org.opencontainers.image.version"] != options.version
         || loaded["Config"]["Labels"]["org.opencontainers.image.revision"] != options.source_sha
         || loaded["Config"]["Labels"]["io.sider.backup.sha256"] != options.backup_sha
+        || loaded["Config"]["Labels"]["io.sider.replica.sha256"] != options.replica_sha
     {
         return Err("identidade/configuração da imagem recarregada divergente".into());
     }
@@ -568,10 +575,11 @@ fn exercise(options: Options) -> Result<Value, String> {
         "/usr/local/bin/sider",
         "/usr/local/bin/sider-aof-migrate",
         "/usr/local/bin/sider-backup",
+        "/usr/local/bin/sider-replica",
     ])?;
     let expected_hashes = format!(
-        "{}  /usr/local/bin/sider\n{}  /usr/local/bin/sider-aof-migrate\n{}  /usr/local/bin/sider-backup\n",
-        options.binary_sha, options.migrator_sha, options.backup_sha
+        "{}  /usr/local/bin/sider\n{}  /usr/local/bin/sider-aof-migrate\n{}  /usr/local/bin/sider-backup\n{}  /usr/local/bin/sider-replica\n",
+        options.binary_sha, options.migrator_sha, options.backup_sha, options.replica_sha
     );
     if hashes != expected_hashes {
         return Err("imagem recarregada não contém os executáveis selecionados".into());
@@ -609,6 +617,16 @@ fn exercise(options: Options) -> Result<Value, String> {
     {
         return Err("versão da CLI de backup da imagem diverge".into());
     }
+    runner.docker(&[
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--entrypoint",
+        "/usr/local/bin/sider-replica",
+        &image,
+        "--help",
+    ])?;
     let invalid_name = format!("sider-invalid-{suffix}");
     runner.containers.push(invalid_name.clone());
     let invalid = runner.run(
@@ -687,8 +705,8 @@ fn exercise(options: Options) -> Result<Value, String> {
         "image_id": loaded["Id"], "image_tag": image,
         "network": if options.runner_id.is_some() { "private_runner_namespace" } else { "host_loopback_published_port" },
         "artifact": {"name": archive_name, "size": size, "sha256": archive_sha},
-        "binaries": {"sider": options.binary_sha, "sider-aof-migrate": options.migrator_sha, "sider-backup": options.backup_sha},
-        "cases": 8, "scenarios": ["save_gzip_remove_load_identity", "exact_binary_hashes", "version_migrator_and_backup", "uid_and_pid1", "binary_tcp", "aof_volume_restart_ttl", "sigterm_drain", "invalid_configuration"],
+        "binaries": {"sider": options.binary_sha, "sider-aof-migrate": options.migrator_sha, "sider-backup": options.backup_sha, "sider-replica": options.replica_sha},
+        "cases": 8, "scenarios": ["save_gzip_remove_load_identity", "exact_binary_hashes", "versions_and_operational_clis", "uid_and_pid1", "binary_tcp", "aof_volume_restart_ttl", "sigterm_drain", "invalid_configuration"],
         "status": "success", "source_provenance": "SHA declarado pelo empacotador; bytes conferidos contra hashes fornecidos, sem inferir SHA do nome do arquivo"
     });
     fs::write(
