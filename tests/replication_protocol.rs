@@ -43,6 +43,11 @@ fn batch() -> ResolvedBatch {
 fn protocol_rejects_every_truncation_and_single_byte_corruption() {
     let messages = [
         Message::Hello(hello()),
+        Message::Export {
+            sider_version: hello().sider_version,
+            max_record_bytes: 4096,
+            max_snapshot_bytes: 65536,
+        },
         Message::Continue(CURSOR),
         Message::FullStart {
             cursor: CURSOR,

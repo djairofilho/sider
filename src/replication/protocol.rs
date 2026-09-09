@@ -89,6 +89,12 @@ pub enum Reject {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
     Hello(Hello),
+    /// Snapshot único para backup; não cria assinatura incremental nem exige ACK.
+    Export {
+        sider_version: Bytes,
+        max_record_bytes: u32,
+        max_snapshot_bytes: u64,
+    },
     Continue(Cursor),
     FullStart {
         cursor: Cursor,
@@ -220,6 +226,25 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
             body.push(*reject as u8);
             9
         }
+        Message::Export {
+            sider_version,
+            max_record_bytes,
+            max_snapshot_bytes,
+        } => {
+            if sider_version.is_empty()
+                || sider_version.len() > 32
+                || !sider_version.iter().all(u8::is_ascii_graphic)
+                || *max_record_bytes == 0
+                || *max_snapshot_bytes == 0
+            {
+                return Err(Error::Invalid("pedido de exportação"));
+            }
+            body.push(sider_version.len() as u8);
+            body.extend_from_slice(sider_version);
+            body.extend_from_slice(&max_record_bytes.to_le_bytes());
+            body.extend_from_slice(&max_snapshot_bytes.to_le_bytes());
+            10
+        }
     };
     let size = body.len().checked_add(HEADER_BYTES).ok_or(Error::Limit)?;
     if size > limits.max_frame_bytes {
@@ -248,7 +273,7 @@ fn header(header: &[u8], limits: Limits) -> Result<(u8, usize), Error> {
     if version != VERSION {
         return Err(Error::Version(version));
     }
-    if !(1..=9).contains(&header[10]) {
+    if !(1..=10).contains(&header[10]) {
         return Err(Error::Invalid("tipo de mensagem"));
     }
     let len = u32::from_le_bytes(header[12..16].try_into().unwrap());
@@ -265,6 +290,7 @@ fn header(header: &[u8], limits: Limits) -> Result<(u8, usize), Error> {
         3 => len == 32,
         5 => len == 36,
         9 => len == 1,
+        10 => len <= 45,
         _ => true,
     };
     if !valid_size {
@@ -393,6 +419,16 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
             6 => Reject::Unavailable,
             _ => return Err(Error::Invalid("motivo de rejeição")),
         }),
+        10 => {
+            let length = fields.byte()? as usize;
+            let message = Message::Export {
+                sider_version: fields.take(length)?,
+                max_record_bytes: fields.u32()?,
+                max_snapshot_bytes: fields.u64()?,
+            };
+            encode(&message, limits)?;
+            message
+        }
         _ => return Err(Error::Invalid("tipo de mensagem")),
     };
     if fields.position != fields.bytes.len() {
