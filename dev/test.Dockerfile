@@ -1,4 +1,4 @@
-# Ambiente de desenvolvimento local. Não é a imagem de distribuição do Sider.
+# Local development environment. This is not the Sider distribution image.
 FROM docker:29.2.1-cli@sha256:cab69e2d0a1a2ea9a1ce1060252f439e83483ae41ec09317aecb33b08a0656a5 AS docker_cli
 FROM ubuntu:24.04@sha256:1e0a86e57d247923571b75e0aaf48a1449cf8c543d51fb3e07a4a7d7bfa79316
 
