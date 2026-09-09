@@ -366,6 +366,32 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn r02_discarded_mset_reply_still_applies_the_complete_batch() {
+        let (_stop, handle, worker) = setup(2);
+        let mut abandoned = Box::pin(handle.execute(Command::MSet {
+            entries: vec![
+                (Bytes::from_static(b"a"), Bytes::from_static(b"first")),
+                (Bytes::from_static(b"b"), Bytes::from_static(b"second")),
+            ],
+        }));
+        assert_pending(abandoned.as_mut()).await;
+        assert_eq!(worker.requests.len(), 1);
+        drop(abandoned);
+        let observed = enqueue(
+            &handle,
+            Command::MGet {
+                keys: vec![Bytes::from_static(b"a"), Bytes::from_static(b"b")],
+            },
+        );
+        drop(handle);
+        worker.run().await;
+        assert_eq!(
+            observed.await.unwrap(),
+            Ok(Reply::Array(vec![bulk(b"first"), bulk(b"second")]))
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn timeout_while_waiting_for_capacity_has_no_effect() {
         let (_stop, handle, mut worker) = setup(1);
         let ping = enqueue(&handle, Command::Ping(None));

@@ -266,6 +266,11 @@ fn suite(require_cli: bool) -> (u64, Value) {
     fixtures(&mut pair);
     sequences(&mut pair);
     boundary_payloads(&mut pair);
+    let r01_comparisons = pair.cases;
+    r02_strings(&mut pair);
+    r02_set_options(&mut pair);
+    let r02_temporal_observations = r02_expiration(&mut pair);
+    let r02_comparisons = pair.cases - r01_comparisons - r02_temporal_observations;
     let comparisons = pair.finish();
     let cli_cases = if require_cli {
         cli_suite(&reference, sider.address())
@@ -276,15 +281,197 @@ fn suite(require_cli: bool) -> (u64, Value) {
     sider.finish();
     reference.finish();
     let report = json!({
-        "suite": "resp2-strings-r01", "seeds": SEEDS,
+        "suite": "resp2-strings-r01-r02", "seeds": SEEDS,
         "operations_per_seed": OPERATIONS, "pipeline_size": PIPELINE,
-        "fixture_cases": resp_fixtures::CASES.len(), "binary_comparisons": comparisons,
+        "fixture_cases": resp_fixtures::CASES.len(), "checks": comparisons,
+        "binary_comparisons": comparisons - r02_temporal_observations,
+        "r01_binary_comparisons": r01_comparisons, "r02_binary_comparisons": r02_comparisons,
+        "r02_temporal_observations": r02_temporal_observations,
+        "r02_pttl_tolerance_ms": 100, "r02_ttl_tolerance_seconds": 1,
         "cli_cases": cli_cases, "cli_verified": require_cli,
         "maximum_bulk_bytes": 1024 * 1024, "cleanup_confirmed": true,
         "sider_version": env!("CARGO_PKG_VERSION"),
     });
     eprintln!("{report}");
     (comparisons + cli_cases, report)
+}
+
+fn r02_exchange(pair: &mut Pair, args: &[&[u8]]) -> Observed {
+    pair.exchange(
+        &args.iter().map(|arg| arg.to_vec()).collect::<Vec<_>>(),
+        "R02 strings/options",
+    )
+}
+
+fn r02_strings(pair: &mut Pair) {
+    let key = b"r02:\0\xff";
+    let other = b"r02:other";
+    let missing = b"r02:absent";
+    r02_exchange(pair, &[b"MSET", key, b"first", other, b"", key, b"last"]);
+    r02_exchange(pair, &[b"EXISTS", key, key, other, missing]);
+    r02_exchange(pair, &[b"MGET", key, missing, other, key]);
+    for args in [
+        vec![b"EXISTS".as_slice()],
+        vec![b"MGET".as_slice()],
+        vec![b"INCR".as_slice()],
+        vec![b"DECR", key, other],
+        vec![b"MSET".as_slice()],
+        vec![b"MSET", key, b"new", other],
+    ] {
+        r02_exchange(pair, &args);
+    }
+    r02_exchange(pair, &[b"MGET", key, other, missing]);
+    for value in [
+        b"0".as_slice(),
+        b"-1",
+        b"9223372036854775807",
+        b"-9223372036854775808",
+        b"9223372036854775808",
+        b"-9223372036854775809",
+        b"+1",
+        b"-0",
+        b"01",
+        b" 1",
+        b"1\0",
+        b"\xff",
+        b"",
+    ] {
+        for name in [b"INCR".as_slice(), b"DECR"] {
+            r02_exchange(pair, &[b"SET", key, value]);
+            r02_exchange(pair, &[name, key]);
+            r02_exchange(pair, &[b"GET", key]);
+            r02_exchange(pair, &[b"PING"]);
+        }
+    }
+    for name in [b"INCR".as_slice(), b"DECR"] {
+        r02_exchange(pair, &[b"DEL", key]);
+        r02_exchange(pair, &[name, key]);
+    }
+    r02_exchange(pair, &[b"DEL", key, other, missing]);
+    let large = vec![0xff; 1024 * 1024];
+    r02_exchange(pair, &[b"SET", key, &large]);
+    r02_exchange(pair, &[b"MGET", key, key, key]);
+    r02_exchange(pair, &[b"DEL", key]);
+}
+
+fn r02_set_options(pair: &mut Pair) {
+    let key = b"r02:options";
+    for present in [false, true] {
+        for condition in [None, Some(b"NX".as_slice()), Some(b"XX".as_slice())] {
+            for expiry in [
+                &[][..],
+                &[b"EX".as_slice(), b"60"][..],
+                &[b"PX".as_slice(), b"60000"][..],
+                &[b"KEEPTTL".as_slice()][..],
+            ] {
+                for get in [false, true] {
+                    r02_exchange(pair, &[b"DEL", key]);
+                    if present {
+                        r02_exchange(pair, &[b"SET", key, b"old", b"PX", b"60000"]);
+                    }
+                    let mut args = vec![b"SET".as_slice(), key, b"new\0\xff"];
+                    args.extend(condition);
+                    args.extend_from_slice(expiry);
+                    if get {
+                        args.push(b"GET");
+                    }
+                    r02_exchange(pair, &args);
+                    r02_exchange(pair, &[b"GET", key]);
+                    r02_exchange(pair, &[b"PERSIST", key]);
+                    r02_exchange(pair, &[b"TTL", key]);
+                }
+            }
+        }
+    }
+    let invalid: &[&[&[u8]]] = &[
+        &[b"NX", b"XX"],
+        &[b"EX"],
+        &[b"PX"],
+        &[b"EX", b"1", b"PX", b"2"],
+        &[b"KEEPTTL", b"EX", b"1"],
+        &[b"EX", b"1", b"KEEPTTL"],
+        &[b"EX", b"0"],
+        &[b"PX", b"-1"],
+        &[b"PX", b"+1"],
+        &[b"PX", b"9223372036854775807"],
+        &[b"EX", b"9223372036854775807"],
+        &[b"EX", b"not-an-integer"],
+        &[b"INVALID"],
+    ];
+    for options in invalid {
+        r02_exchange(pair, &[b"SET", key, b"old", b"PX", b"60000"]);
+        let mut args = vec![b"SET".as_slice(), key, b"new"];
+        args.extend_from_slice(options);
+        r02_exchange(pair, &args);
+        r02_exchange(pair, &[b"GET", key]);
+        r02_exchange(pair, &[b"PERSIST", key]);
+    }
+    r02_exchange(
+        pair,
+        &[
+            b"SET", key, b"last", b"EX", b"invalid", b"EX", b"60", b"GET", b"GET",
+        ],
+    );
+    r02_exchange(pair, &[b"GET", key]);
+    r02_exchange(pair, &[b"DEL", key]);
+}
+
+fn r02_expiration(pair: &mut Pair) -> u64 {
+    let mut temporal_observations = 0;
+    let key = b"r02:expiration";
+    r02_exchange(pair, &[b"TTL", key]);
+    r02_exchange(pair, &[b"PTTL", key]);
+    r02_exchange(pair, &[b"PERSIST", key]);
+    r02_exchange(pair, &[b"SET", key, b"1"]);
+    r02_exchange(pair, &[b"PEXPIRE", key, b"60000"]);
+    for (command, tolerance, max) in [(b"PTTL".as_slice(), 100, 60000), (b"TTL".as_slice(), 1, 60)]
+    {
+        pair.send(&wire::request(&[command.to_vec(), key.to_vec()]));
+        let sider = wire::read_response(&mut pair.sider).unwrap();
+        let redis = wire::read_response(&mut pair.redis).unwrap();
+        let (Response::Integer(sider), Response::Integer(redis)) = (sider.value, redis.value)
+        else {
+            panic!("TTL deve ser inteiro");
+        };
+        assert!((1..=max).contains(&sider) && (1..=max).contains(&redis));
+        assert!(
+            (sider - redis).abs() <= tolerance,
+            "R02 prazo: sider={sider} redis={redis}"
+        );
+        pair.cases += 1;
+        temporal_observations += 1;
+    }
+    r02_exchange(pair, &[b"INCR", key]);
+    r02_exchange(pair, &[b"PERSIST", key]);
+    r02_exchange(pair, &[b"TTL", key]);
+    for (command, value) in [(b"EXPIRE".as_slice(), b"0".as_slice()), (b"PEXPIRE", b"-1")] {
+        r02_exchange(pair, &[b"SET", key, b"v"]);
+        r02_exchange(pair, &[command, key, value]);
+        r02_exchange(pair, &[b"EXISTS", key]);
+    }
+    for name in [b"EXPIRE".as_slice(), b"PEXPIRE"] {
+        r02_exchange(pair, &[name, key, b"+1"]);
+        r02_exchange(pair, &[name, key, b"9223372036854775807"]);
+    }
+    r02_exchange(pair, &[b"SET", key, b"v", b"PX", b"1"]);
+    // Expiração real observada por polling limitado; não assume ordenação de timers entre processos.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        pair.send(&wire::request(&[b"PTTL".to_vec(), key.to_vec()]));
+        let sider = wire::read_response(&mut pair.sider).unwrap();
+        let redis = wire::read_response(&mut pair.redis).unwrap();
+        pair.cases += 1;
+        temporal_observations += 1;
+        if sider.value == Response::Integer(-2) && redis.value == Response::Integer(-2) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "R02 expiração não observada nos dois servidores"
+        );
+    }
+    r02_exchange(pair, &[b"GET", key]);
+    temporal_observations
 }
 
 #[test]
