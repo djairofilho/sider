@@ -187,6 +187,23 @@ fn ok(response: Response) {
     assert!(!matches!(response, Response::Error(_)), "{response:?}");
 }
 
+fn dataset_metrics(node: &Node) -> Vec<(String, String)> {
+    let Response::Bulk(Some(bytes)) = node.command(&[b"INFO", b"memory"]) else {
+        panic!("INFO memory ausente");
+    };
+    let text = String::from_utf8(bytes).unwrap();
+    let fields: Vec<_> = text
+        .lines()
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.starts_with("dataset_")
+                .then(|| (name.to_owned(), value.to_owned()))
+        })
+        .collect();
+    assert_eq!(fields.len(), 4);
+    fields
+}
+
 async fn caught_up(primary: &Node, replica: &Node) -> Message {
     let expected = primary.cursor().await;
     let deadline = Instant::now() + DEADLINE;
@@ -237,6 +254,11 @@ async fn replication_processes_full_delta_export_continue_and_durable_promotion(
     for query in &queries {
         assert_eq!(primary.command(query), replica.command(query));
     }
+    assert_eq!(
+        dataset_metrics(&primary),
+        dataset_metrics(&replica),
+        "métricas após FULL"
+    );
     assert!(
         matches!(replica.command(&[b"SET", b"{s}:forbidden", b"x"]), Response::Error(error) if error.starts_with(b"READONLY"))
     );
@@ -259,6 +281,11 @@ async fn replication_processes_full_delta_export_continue_and_durable_promotion(
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     caught_up(&primary, &replica).await;
+    assert_eq!(
+        dataset_metrics(&primary),
+        dataset_metrics(&replica),
+        "métricas após lote e TTL"
+    );
     assert_eq!(
         replica.command(&[b"MGET", b"{s}:string", b"{s}:other", b"{s}:ttl"]),
         primary.command(&[b"MGET", b"{s}:string", b"{s}:other", b"{s}:ttl"])

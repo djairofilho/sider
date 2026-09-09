@@ -648,6 +648,7 @@ impl Worker {
         match control {
             Control::Replace { store, reply } => {
                 self.store = store;
+                self.metrics.dataset(self.shard, self.store.dataset_stats());
                 let _ = reply.send(());
                 true
             }
@@ -661,9 +662,10 @@ impl Worker {
                     let aof = self
                         .aof
                         .as_ref()
-                        .ok_or(crate::replication::Error::Sequence)?;
+                        .ok_or(crate::replication::Error::Sequence)?
+                        .clone();
                     aof.append_expected(sequence, batch).await?;
-                    self.store.apply(prepared);
+                    self.apply_prepared(prepared);
                     aof.flush().await?;
                     Ok::<_, crate::replication::Error>(())
                 }
