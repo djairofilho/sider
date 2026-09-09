@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, watch};
 
-use super::DurableLayout;
 use super::format::{self, FormatError, Limits, Next, Record};
+use super::{DurableLayout, ReplicationMetadata, Role};
 use crate::ConfigError;
 use crate::storage::{Clock, Mutation, ReplayError, ResolvedBatch, Store, StoreConfig};
 
@@ -139,6 +139,13 @@ enum Request {
     Flush(Response<u64>),
     Compact(Vec<Mutation>, Response<()>),
     Status(Response<(u64, u64, bool)>),
+    Install {
+        snapshot: Vec<Mutation>,
+        sequence: u64,
+        metadata: ReplicationMetadata,
+        reply: Response<()>,
+    },
+    Journal(crate::replication::journal::Journal, Response<()>),
 }
 
 /// Canal limitado para um escritor global; clones podem ser compartilhados entre workers.
@@ -168,6 +175,38 @@ impl AofDiagnosticsHandle {
 }
 
 impl AofHandle {
+    /// O coordenador mantém a exclusão global até trocar todos os stores.
+    pub async fn install_snapshot(
+        &self,
+        snapshot: Vec<Mutation>,
+        sequence: u64,
+        metadata: ReplicationMetadata,
+    ) -> Result<(), AofError> {
+        let (reply, response) = oneshot::channel();
+        self.requests
+            .send(Request::Install {
+                snapshot,
+                sequence,
+                metadata,
+                reply,
+            })
+            .await
+            .map_err(|_| AofError::Unavailable)?;
+        response.await.map_err(|_| AofError::Unavailable)?
+    }
+
+    /// Vincula o journal à mesma época/posição do escritor, sob a barreira global.
+    pub async fn attach_journal(
+        &self,
+        journal: crate::replication::journal::Journal,
+    ) -> Result<(), AofError> {
+        let (reply, response) = oneshot::channel();
+        self.requests
+            .send(Request::Journal(journal, reply))
+            .await
+            .map_err(|_| AofError::Unavailable)?;
+        response.await.map_err(|_| AofError::Unavailable)?
+    }
     /// Lê campos numéricos e categorias fixas sem esperar pelo escritor ou fazer I/O.
     pub fn diagnostics(&self) -> super::AofDiagnostics {
         self.diagnostics_handle().snapshot()
@@ -247,6 +286,7 @@ pub struct RecoveryMetadata {
     pub shard_usage: Vec<usize>,
     pub valid_bytes: u64,
     pub incomplete_tail_bytes: u64,
+    pub replication: Option<ReplicationMetadata>,
 }
 impl Recovered {
     /// Inicia somente após replay completo; o JoinHandle supervisiona sync, append e fechamento.
@@ -309,6 +349,10 @@ struct Writer {
     compaction: Option<Compaction>,
     faults: Arc<dyn FaultInjector>,
     diagnostics: super::diagnostics::Shared,
+    replication: Option<ReplicationMetadata>,
+    journal: Option<crate::replication::journal::Journal>,
+    store_config: StoreConfig,
+    clock: Arc<dyn Clock>,
 }
 
 pub(super) struct DirectoryLock(File);
@@ -380,6 +424,15 @@ fn load(
     let mut generations = Vec::new();
     for entry in fs::read_dir(&config.directory)? {
         let entry = entry?;
+        if !read_only
+            && entry.file_type()?.is_file()
+            && entry.file_name().to_str().is_some_and(|name| {
+                name.starts_with("replication-install-") && name.ends_with(".tmp")
+            })
+        {
+            fs::remove_file(entry.path())?;
+            continue;
+        }
         if let Some(name) = entry.file_name().to_str()
             && let Some(value) = name
                 .strip_prefix("generation-")
@@ -422,7 +475,7 @@ fn load(
         .read(true)
         .write(!read_only)
         .open(&path)?;
-    let mut store = Store::with_config(store_config, clock)?;
+    let mut store = Store::with_config(store_config, clock.clone())?;
     let header = format::read_header_with_layout(&mut file)?;
     if header.layout != config.layout {
         return Err(AofError::LayoutMismatch {
@@ -528,6 +581,7 @@ fn load(
             shard_usage,
             valid_bytes,
             incomplete_tail_bytes,
+            replication: header.replication,
         },
         writer: Writer {
             config,
@@ -540,6 +594,10 @@ fn load(
             synced: Instant::now(),
             compaction: None,
             faults,
+            replication: header.replication,
+            journal: None,
+            store_config,
+            clock,
             diagnostics: super::diagnostics::Shared(Arc::new(std::sync::Mutex::new(
                 super::AofDiagnostics {
                     written_sequence: sequence,
@@ -656,8 +714,45 @@ impl Writer {
                         self.compaction.is_some(),
                     )));
                 }
+                Ok(Some(Request::Install {
+                    snapshot,
+                    sequence,
+                    metadata,
+                    reply,
+                })) => {
+                    let result = self.install_snapshot(snapshot, sequence, metadata);
+                    if let Err(error) = &result {
+                        self.diagnostics.error(error);
+                    }
+                    let fatal = matches!(result, Err(AofError::Unavailable));
+                    let _ = reply.send(result);
+                    if fatal {
+                        return Err(AofError::Unavailable);
+                    }
+                }
+                Ok(Some(Request::Journal(journal, reply))) => {
+                    let valid = journal.status().is_ok_and(|status| {
+                        status.head.sequence == self.sequence
+                            && self.replication
+                                == Some(ReplicationMetadata {
+                                    role: Role::Primary,
+                                    epoch: status.head.epoch,
+                                })
+                    });
+                    if valid {
+                        if let Some(previous) = self.journal.replace(journal) {
+                            previous.close();
+                        }
+                        let _ = reply.send(Ok(()));
+                    } else {
+                        let _ = reply.send(Err(AofError::Sequence));
+                    }
+                }
                 Ok(None) => {
                     self.sync()?;
+                    if let Some(journal) = &self.journal {
+                        journal.close();
+                    }
                     return Ok(());
                 }
                 Err(_) => {}
@@ -676,6 +771,23 @@ impl Writer {
     fn append(&mut self, batch: ResolvedBatch) -> Result<u64, AofError> {
         batch_shard(&batch.mutations, self.config.layout)?;
         let sequence = self.sequence.checked_add(1).ok_or(AofError::Sequence)?;
+        let replication_frame = if self.journal.is_some() {
+            Some(
+                crate::replication::protocol::encode(
+                    &crate::replication::protocol::Message::Batch {
+                        sequence,
+                        batch: batch.clone(),
+                    },
+                    crate::replication::protocol::Limits::default(),
+                )
+                .map_err(|error| match error {
+                    crate::replication::protocol::Error::Record(error) => AofError::Format(error),
+                    _ => AofError::Sequence,
+                })?,
+            )
+        } else {
+            None
+        };
         let encoded = format::encode(&Record::Batch { sequence, batch }, self.config.limits)?;
         self.faults.hit("before_append")?;
         self.faults.write_append(&mut self.file, &encoded)?;
@@ -707,6 +819,11 @@ impl Writer {
         if self.config.sync == SyncPolicy::Always {
             self.sync()?;
         }
+        if let (Some(journal), Some(frame)) = (&self.journal, replication_frame) {
+            journal
+                .publish(sequence, frame)
+                .map_err(|_| AofError::Unavailable)?;
+        }
         self.faults.hit("before_reply")?;
         Ok(sequence)
     }
@@ -723,6 +840,106 @@ impl Writer {
             state.syncs_total = state.syncs_total.saturating_add(1);
         });
         self.refresh_diagnostics();
+        Ok(())
+    }
+
+    fn install_snapshot(
+        &mut self,
+        snapshot: Vec<Mutation>,
+        sequence: u64,
+        metadata: ReplicationMetadata,
+    ) -> Result<(), AofError> {
+        if self.compaction.is_some() {
+            return Err(AofError::Compacting);
+        }
+        let generation = self.generation.checked_add(1).ok_or(AofError::Sequence)?;
+        // Valida todas as pós-imagens e quotas antes de criar a geração candidata.
+        let mut checked = Store::with_config(self.store_config, self.clock.clone())?;
+        let mut usage = vec![0; self.config.layout.shard_count as usize];
+        let mut previous = None;
+        for mutation in &snapshot {
+            if !matches!(mutation, Mutation::Put { .. })
+                || previous.as_ref().is_some_and(|key| key >= mutation.key())
+            {
+                return Err(AofError::Sequence);
+            }
+            previous = Some(mutation.key().clone());
+            replay_routed(
+                &mut checked,
+                std::slice::from_ref(mutation),
+                self.config.layout,
+                self.store_config.max_dataset_bytes,
+                &mut usage,
+            )?;
+        }
+        drop(checked);
+        let temporary = temporary_path(&self.config.directory, "replication-install");
+        let destination = generation_path(&self.config.directory, generation);
+        let result = (|| {
+            self.faults.hit("replication_before_install")?;
+            let mut file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&temporary)?;
+            format::write_header_with_replication(
+                &mut file,
+                sequence,
+                self.config.layout,
+                Some(metadata),
+            )?;
+            let mut entries = 0u64;
+            let mut digest = 0;
+            for mutation in snapshot {
+                let encoded = format::encode(&Record::Snapshot(mutation), self.config.limits)?;
+                digest = format::snapshot_digest(digest, &encoded);
+                entries += 1;
+                file.write_all(&encoded)?;
+            }
+            file.write_all(&format::encode(
+                &Record::Seal {
+                    sequence,
+                    entries,
+                    digest,
+                },
+                self.config.limits,
+            )?)?;
+            file.sync_all()?;
+            self.faults.hit("replication_before_publish")?;
+            fs::rename(&temporary, &destination)?;
+            sync_directory(&self.config.directory)?;
+            self.faults.hit("replication_after_publish")?;
+            self.file = file;
+            self.generation = generation;
+            self.sequence = sequence;
+            self.replication = Some(metadata);
+            if let Some(journal) = self.journal.take() {
+                journal.close();
+            }
+            self.bytes_since_compact = 0;
+            self.dirty = false;
+            self.synced = Instant::now();
+            self.diagnostics
+                .update(|state| state.synced_sequence = sequence);
+            self.refresh_diagnostics();
+            Ok(())
+        })();
+        if let Err(error) = result {
+            if destination.exists() {
+                self.diagnostics.error(&error);
+                return Err(AofError::Unavailable);
+            }
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        if let Some(obsolete) = generation.checked_sub(2) {
+            let path = generation_path(&self.config.directory, obsolete);
+            if path.exists()
+                && let Err(error) = fs::remove_file(path)
+            {
+                tracing::warn!(%error, "não foi possível retirar geração anterior à instalação");
+            }
+        }
         Ok(())
     }
 
@@ -744,6 +961,7 @@ impl Writer {
         let sequence = self.sequence;
         let limits = self.config.limits;
         let layout = self.config.layout;
+        let replication = self.replication;
         std::thread::spawn(move || {
             let result = (|| {
                 faults.hit("compact_before_snapshot")?;
@@ -752,7 +970,7 @@ impl Writer {
                     .write(true)
                     .create_new(true)
                     .open(&path)?;
-                format::write_header_with_layout(&mut file, sequence, layout)?;
+                format::write_header_with_replication(&mut file, sequence, layout, replication)?;
                 let mut previous = None;
                 let mut entries = 0u64;
                 let mut digest = 0u32;
