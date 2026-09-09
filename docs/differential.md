@@ -36,6 +36,48 @@ segundos confirma expiração real nos dois servidores. Seu número de iteraçõ
 registrado separadamente. O [guia de strings](strings.md) reúne a semântica e os
 testes determinísticos que verificam limites exatos e quota.
 
+## Auditoria R11 entre famílias
+
+O helper [cross_family.rs](../tests/common/cross_family.rs) é consumido pelo
+gate `compatibility` com os processos já abertos. Seu relatório fica em
+`r11_cross_family`; `r01_binary_comparisons`, `r02_binary_comparisons` e
+`r01_cli_cases` preservam as contagens históricas. Totais incluem o corpus novo,
+sem atribuí-lo a R01/R02.
+
+São quatro seeds: `1`, `42`, `0x511de011` e `0xfeedfacedeadbeef`. Cada seed usa
+40 rodadas de tipos/TTL, dez de transações e quatro de Pub/Sub. O gerador
+`Sequence` existente fornece payloads binários reproduzíveis, incluindo vazio.
+Os casos alternam string, hash, lista, set e sorted set na mesma chave; conferem
+tipo/estado após rejeição, substituição com KEEPTTL, remoção imediata por TTL,
+WATCH por expiração e criação/remoção, erros individuais dentro de EXEC,
+DISCARD/UNWATCH e publicações junto de mutações transacionais.
+
+O corpus passou em 9 de setembro de 2026 com **5.128 comparações binárias**
+no Windows e no Linux. O caminho Linux acrescentou **16 casos de redis-cli**
+contra os dois servidores, totalizando 5.144 verificações novas. A referência
+Redis/CLI 8.10.1 e seu digest foram conferidos pelo harness. Não houve divergência
+não declarada nesses casos. Processos, assinaturas, chaves e contêiner Redis
+foram recolhidos ao terminar.
+
+Todas as respostas deste corpus são exatas. Ele evita leituras sem ordem pública
+e usa PEXPIRE zero, TTL ausente/persistente e PERSIST para conferir presença do
+prazo sem acrescentar tolerância de relógio. Fronteiras temporais exatas continuam
+nos testes com relógio injetado; PTTL/TTL positivos mantêm as tolerâncias R02.
+Não testa eviction, replica Redis, comandos fora da matriz ou equivalência de RSS.
+Persistência, shards e falhas de transporte continuam nos respectivos runners;
+este corpus novo não substitui a matriz de gates.
+
+Durante desenvolvimento, execute somente o corpus novo:
+
+```powershell
+cargo test --locked --test compatibility -- --ignored --exact cross_family_audit_only --nocapture
+```
+
+No runner Linux isolado da receita abaixo, use esse mesmo nome no lugar de
+`sider_matches_redis_and_cli`. A presença de `SIDER_TEST_RUNNER_CONTAINER` habilita
+os 16 casos CLI. A candidata usa `release_compatibility_gate`, que inclui
+R01, R02, CLI e R11 juntos. A execução parcial não produz recibo de release.
+
 ## Ciclo nativo, sem infraestrutura externa
 
 ```sh
