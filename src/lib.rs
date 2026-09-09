@@ -7,6 +7,7 @@ pub mod config;
 mod connection;
 pub mod error;
 mod pubsub;
+pub mod persistence;
 pub mod readiness;
 pub mod resp;
 pub mod server;
