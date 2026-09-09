@@ -66,8 +66,9 @@ Hashes, listas e sets estão descritos no [guia de coleções](collections.md), 
 2.383 comparações diferenciais. Sorted sets estão no [guia de scores e ordem](sorted-sets.md),
 com 8.561 respostas exatas. As famílias preservam TTL e quota; `WRONGTYPE` rejeita
 operações entre tipos, `MGET` retorna nulo para coleções e `SET` sem `GET` pode
-substituir qualquer tipo. A validação do writer AOF completo permanece separada
-da evidência do codec e do replay.
+substituir qualquer tipo. A [validação do writer AOF completo](types-persistence.md)
+permanece separada da comparação de comandos e distingue evolução do formato de
+migração entre executáveis congelados.
 
 ## Subconjunto alvo
 

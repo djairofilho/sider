@@ -85,6 +85,7 @@ de padrões IEEE-754. Nos lotes, padrões NaN/inf são filtrados para manter o l
 válido; fixtures separadas verificam infinitos e rejeição de NaN. Scores, pares
 e ordenação nunca são normalizados pelo comparador.
 
-Os testes de codec/replay não substituem crash, compactação e migração de
-arquivos reais. Essas evidências pertencem à integração do writer AOF completo;
-também não comprovam execução nativa Linux ou aprovação de pacote de release.
+Os [testes do writer AOF completo](types-persistence.md) também verificam crash,
+compactação, recuperação dos scores e evolução da fixture de strings. A evidência
+separa a migração do formato da migração entre executáveis de baselines internas;
+não comprova execução nativa Linux ou aprovação de pacote de release.

@@ -82,6 +82,7 @@ As quatro seeds estão no teste e cada uma executa 256 operações com leituras
 intermediárias e conferência do estado final.
 
 Os testes nativos cobrem quota, TTL, tipos, binários, aridade, índices extremos,
-codec e replay. Crash, compactação e migração da baseline anterior precisam da
-integração com o writer AOF e suas evidências específicas. Esse diferencial não
-comprova essas operações nem execução nativa em Linux.
+codec e replay. A [integração com o writer AOF](types-persistence.md) verifica
+crash, compactação, recuperação e evolução da fixture de strings. O diferencial
+de comandos permanece separado dessas evidências e não comprova execução nativa
+em Linux.
