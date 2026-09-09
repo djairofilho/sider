@@ -1,17 +1,17 @@
-# Plano de implementação do Sider
+# Plano inicial do Sider: registro da versão 0.1
 
-Sider será um servidor de banco de dados em memória, escrito em Rust, com um
-subconjunto explícito de compatibilidade com Redis. O nome é Redis ao contrário.
+Este documento preserva o desenho inicial de setembro de 2026 para o núcleo
+RESP2 da versão 0.1. O futuro verbal, o worker único e as limitações nas seções
+abaixo pertencem àquele escopo histórico; não descrevem todas as capacidades
+do checkout atual. As etapas R01-01 a R01-05 foram implementadas e sua evidência
+permanece vinculada aos SHAs registrados no [guia de testes](docs/testing.md).
 
-Este plano detalha a versão 0.1. O [ROADMAP](ROADMAP.md) e seu
-[manifesto versionado](releases/plan.json) definem a sequência oficial até a 1.0,
-com tarefas, dependências e critérios. O [guia de releases](docs/releases.md)
-descreve checkpoints internos e a publicação da 1.0. O bootstrap já contém pacote Rust, configuração de
-endereço e binário com testes. A referência Redis e o codec RESP2 isolado estão
-implementados, assim como parser e armazenamento síncrono dos cinco comandos.
-Worker e servidor TCP também estão implementados em R01-04. A suíte diferencial
-e a integração com CLI de R01-05 estão implementadas. As execuções
-e seus limites estão no [guia de testes](docs/testing.md).
+O [README](README.md) e a [matriz de compatibilidade](docs/compatibility-matrix.md)
+descrevem a implementação atual, incluindo coleções, TTL, persistência, shards,
+transações, replicação e backup. O [ROADMAP](ROADMAP.md) e seu
+[manifesto versionado](releases/plan.json) definem tarefas, dependências e critérios
+até a 1.0. O [guia de releases](docs/releases.md) governa os checkpoints internos
+e a publicação; este registro inicial não substitui esses contratos.
 
 CI e publicação automática foram adiadas para depois da 1.0. Até a 1.0 inclusive,
 as etapas avançam com testes locais proporcionais. Os marcos 0.1–0.10 não exigem

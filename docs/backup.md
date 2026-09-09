@@ -134,6 +134,10 @@ comandos, saídas, códigos de término e hashes. Preserve backup e dados origin
 para a baseline interna R10 e a migração 1.0. Não transfira resultados para outro
 SHA nem reescreva baselines anteriores.
 
+O [runbook da baseline interna](internal-baseline.md) registra esse ciclo com
+pacotes extraídos em um e quatro shards. Na migração, o backup R10 é restaurado
+pela CLI congelada da origem antes de abrir os dados com o servidor novo.
+
 `cargo test --locked --test backup` cobre a CLI real por TCP, os cinco tipos,
 bytes binários, TTL absoluto, layout, corrupção, quotas, diretórios existentes,
 EOF com prazo e cancelamento em Linux e Windows. Usa relógios injetados e portas

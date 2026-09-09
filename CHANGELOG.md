@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+- Transações de um shard com `MULTI`, `EXEC`, `DISCARD`, `WATCH` e `UNWATCH`;
+  validação antes de aplicar, um lote AOF por EXEC e erros individuais sem rollback.
+  Publicações em transações preservam a ordem após aplicar o lote confirmado
+  segundo a política AOF configurada.
+- Replicação assíncrona Sider → Sider com snapshot, histórico limitado,
+  reconexão por FULL/CONTINUE, réplica somente leitura e promoção manual durável.
+  O cabeçalho AOF v3 preserva papel e época; leitores atuais mantêm suporte a v1/v2.
+- `sider-backup` exporta snapshots consistentes durante tráfego, confere manifesto
+  e checksums e restaura em diretório novo, preservando tipos, lotes e TTL absoluto.
+- `INFO`, seções operacionais e `sider --diagnose` para métricas, filas, persistência,
+  replicação e validação da configuração sem iniciar listeners.
+- Pacotes Windows/Linux com quatro executáveis: servidor, migrador AOF,
+  backup e administração de réplica. Imagem Docker privada usa os binários do
+  pacote, usuário sem privilégio, persistência e ensaio real de exportação/load.
+- Matriz completa de compatibilidade e auditoria diferencial de sequências
+  entre tipos, TTL, transações e Pub/Sub, com seeds fixas e contagens próprias.
+- Runners de soak de 3600 segundos e benchmarks do pacote extraído, com amostras,
+  hashes e limites documentados. Aprovação depende da execução no build candidato.
 - Hashes, listas, sets e sorted sets binários, com WRONGTYPE, TTL e quota atômica;
   AOF preserva postimages tipadas, scores e deadlines em replay/compactação.
 - Diferenciais de coleções e ordenação contra Redis; conversão de scores em Rust
@@ -37,7 +55,7 @@
   preservando IDs e escopo. Somente R11 publica candidata e final.
 - Manifesto de artefatos v2: o build já usa `1.0.0` na candidata, e a final promove
   o mesmo SHA e arquivos. Divergências de identidade ou hashes são rejeitadas.
-- Migração para 1.0 a partir de baseline interna R10, sem publicação intermediária.
+- Contrato de migração para 1.0 a partir de baseline interna R10, sem publicação intermediária.
 
 ## [0.1.0] - Preparação anterior, não publicada
 

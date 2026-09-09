@@ -275,6 +275,11 @@ logs. Não existe comando de redefinição dos contadores nesta entrega.
 
 ## Verificação reproduzível
 
+O [ensaio operacional do pacote extraído](operational-package.md) exercita
+diagnóstico, quota, limite de conexões, cliente lento e erro real de abertura
+da AOF com as CLIs distribuídas. Sua execução é explícita e registra JSON;
+não transforma um teste ignorado em aprovação de release.
+
 ```sh
 cargo test --locked --lib metrics_ -- --nocapture
 cargo test --locked --test metrics -- --nocapture
