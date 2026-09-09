@@ -1221,6 +1221,65 @@ fn typed_migration_from_frozen_r04_binary_output_preserves_shards_and_elapsed_tt
 }
 
 #[test]
+fn sorted_set_migration_from_frozen_r05_binary_output_preserves_collections() {
+    // Saída real a615f705; SHA256 87d12a8fc88698266882a6dce88506249fdd7dac3ffe594fc12e42cded47242b.
+    let directory = Directory::new();
+    let bytes: Vec<_> = include_str!("fixtures/aof-r05-collections.hex")
+        .trim()
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect();
+    fs::write(
+        directory.0.join("generation-00000000000000000000.aof"),
+        bytes,
+    )
+    .unwrap();
+    let mut config = directory.config();
+    config.layout.shard_count = 4;
+    let clock = TypedClock::at(1789527108000);
+    let reads = [
+        typed_command(&[b"GET", b"{r05}string"]),
+        typed_command(&[b"LRANGE", b"{r05}list", b"0", b"-1"]),
+        typed_command(&[b"SMEMBERS", b"{r05}set"]),
+    ];
+    let expected = runtime().block_on(async {
+        let recovered = persistence::recover(config.clone(), StoreConfig::default(), clock.clone()).unwrap();
+        assert_eq!(recovered.metadata.sequence, 5);
+        assert_eq!(recovered.metadata.layout.shard_count, 4);
+        let (mut store, aof, writer) = recovered.start();
+        assert_eq!(store.len(), 4);
+        assert_eq!(store.execute(typed_command(&[b"HGET", b"{r05}hash", b"a"])), Reply::Bulk(Some(Bytes::from_static(b"1"))));
+        assert_eq!(store.execute(typed_command(&[b"HLEN", b"{r05}hash"])), Reply::Integer(2));
+        assert!(matches!(store.execute(typed_command(&[b"PTTL", b"{r05}hash"])), Reply::Integer(ttl) if (404..=413).contains(&ttl)));
+        let expected: Vec<_> = reads.iter().cloned().map(|command| store.execute(command)).collect();
+        assert_eq!(expected[0], Reply::Bulk(Some(Bytes::from_static(b"alpha"))));
+        assert_eq!(store.execute(typed_command(&[b"LLEN", b"{r05}list"])), Reply::Integer(2));
+        assert_eq!(store.execute(typed_command(&[b"SCARD", b"{r05}set"])), Reply::Integer(2));
+        persist_command(&mut store, &aof, typed_create(3)).await;
+        persist_command(&mut store, &aof, typed_update(3, b"new")).await;
+        let sorted = store.execute(typed_read(3));
+        aof.compact(store.snapshot()).await.unwrap();
+        drop(aof);
+        writer.await.unwrap().unwrap();
+        (expected, sorted)
+    });
+    clock.elapsed.store(2000, Ordering::SeqCst);
+    let mut recovered = persistence::recover(config, StoreConfig::default(), clock).unwrap();
+    for (command, expected) in reads.into_iter().zip(expected.0) {
+        assert_eq!(recovered.store.execute(command), expected);
+    }
+    assert_eq!(recovered.store.execute(typed_read(3)), expected.1);
+    assert_eq!(
+        recovered
+            .store
+            .execute(typed_command(&[b"HLEN", b"{r05}hash"])),
+        Reply::Integer(0)
+    );
+    assert_eq!(recovered.store.len(), 4);
+}
+
+#[test]
 fn typed_quota_type_and_record_rejections_preserve_writer_and_dataset() {
     for family in 0..4 {
         let directory = Directory::new();
