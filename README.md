@@ -5,8 +5,8 @@ O objetivo é oferecer um subconjunto explícito de compatibilidade
 com Redis pelo protocolo RESP2. O nome é Redis ao contrário.
 
 O binário atende strings, operações multichave, opções de `SET` e TTL por RESP2/TCP.
-Um worker proprietário serializa o armazenamento, com filas, conexões e buffers
-limitados e quota lógica de 64 MiB por padrão. Ainda não há persistência ou
+Workers proprietários serializam cada shard, com filas, conexões e buffers
+limitados e quota lógica total de 64 MiB por padrão. Ainda não há persistência ou
 autenticação. O [guia de strings](docs/strings.md) descreve comandos e limites.
 A suíte diferencial compara o binário com Redis 8.10.1; os cinco comandos iniciais
 também foram verificados com `redis-cli`. A
@@ -52,6 +52,7 @@ comandos suportados. Dados em memória são perdidos ao terminar o processo.
 | `SIDER_ADDR` | `127.0.0.1:6379` | Endereço IP e porta; IPv6 entre colchetes |
 | `SIDER_READY_FILE` | Ausente | Arquivo novo de prontidão com PID, IP e porta efetiva |
 | `SIDER_MAX_DATASET_BYTES` | `67108864` | Quota lógica positiva, distinta do RSS; sem eviction |
+| `SIDER_SHARDS` | `1` | Entre 1 e 256 workers, com quota dividida e configuração fixa |
 
 O endereço é validado de forma estrita. Use um IP, como `127.0.0.1:6380` ou
 `[::1]:6380`, em vez de um hostname. Configuração inválida encerra o programa com
@@ -150,8 +151,10 @@ sem nova publicação da 0.1. A implementação segue por dependências reais at
 a 1.0; as evidências anteriores continuam vinculadas aos seus próprios SHAs.
 
 R02 acrescenta `EXISTS`, `INCR`, `DECR`, `MGET`, `MSET`, opções de `SET`, expiração
-ativa/passiva e quota com rejeição atômica de crescimento. Persistência e múltiplos
-shards são as próximas capacidades. O [plano da 0.1](PLANO.md) preserva o desenho
+ativa/passiva e quota com rejeição atômica de crescimento. R04-01 a R04-03
+acrescentam [shards](docs/sharding.md) em memória, com rejeição de comandos
+multichave entre shards. Sua integração durável permanece pendente de AOF.
+O [plano da 0.1](PLANO.md) preserva o desenho
 inicial e o [ROADMAP](ROADMAP.md) organiza as dependências posteriores.
 
 Banco, testes e ferramentas próprias usam Rust. Não há scripts Python nem workflows

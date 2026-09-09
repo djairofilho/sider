@@ -45,10 +45,10 @@ antecipa módulos vazios nem várias crates sem consumidores independentes.
 
 ### Propriedade do armazenamento
 
-`Store` já possui o `HashMap` e executa cada comando de forma síncrona. Um único
-worker é seu proprietário durante o atendimento TCP. Conexões enviam pedidos por
-um canal `mpsc` limitado e recebem a resposta por um canal `oneshot`. Todos os
-comandos válidos, inclusive `PING` e `ECHO`, passam por esse worker.
+Cada `Store` possui seu `HashMap` e executa comandos de forma síncrona, com um único
+worker proprietário. `DbHandle` roteia o comando pela chave e confere todas as
+chaves antes do enqueue. Cada shard tem um canal `mpsc` limitado; respostas usam
+`oneshot`. `PING` e `ECHO` passam pelo worker zero. O padrão continua com um shard.
 
 A fila define a ordem de execução entre conexões. Cada conexão aguarda sua
 resposta antes de despachar o próximo comando. Assim, a versão 0.1 mantém um
@@ -113,9 +113,10 @@ tarefas pertencentes ao servidor se a future de supervisão for cancelada.
 
 ## Evolução
 
-A base mantém dados em memória e um worker. TTL, quota do dataset e strings
-adicionais estão implementados em R02; AOF fica para a 0.3 e múltiplos shards para a 0.4.
-Essas versões exigem decisões adicionais de semântica, durabilidade e ordenação.
+A base mantém dados em memória com workers independentes por shard. TTL, quota e
+strings adicionais estão implementados em R02; roteamento, filas e restrição
+multichave estão em R04-01 a R04-03. AOF e integração durável de shards permanecem
+pendentes. O [contrato de shards](sharding.md) descreve a divisão fixa de quota.
 
 A divisão em várias crates e otimizações de cópia, alocação ou hashing dependerão
 de necessidades concretas e medições. Não há resultados de desempenho publicados

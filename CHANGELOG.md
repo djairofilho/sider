@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Shards fixos com workers e filas independentes, hash binário estável e hash tags.
+  Comandos multichave entre shards são rejeitados antes do enqueue; quota total
+  é dividida entre workers. Integração durável permanece na tarefa R04-04.
 - Strings adicionais (`EXISTS`, `INCR`, `DECR`, `MGET`, `MSET`) e SET com NX, XX,
   EX, PX, GET e KEEPTTL, com overflow e rejeições sem alterações parciais.
 - EXPIRE, PEXPIRE, TTL, PTTL e PERSIST; relógio injetável e limpeza ativa limitada.
