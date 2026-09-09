@@ -242,6 +242,59 @@ fn arguments(args: &[&[u8]]) -> Vec<u8> {
 }
 
 #[tokio::test]
+async fn r05_list_response_limit_closes_without_partial_array_or_mutation() {
+    let server = TestServer::start(ServerConfig {
+        resp_limits: sider::resp::RespLimits {
+            max_frame_bytes: 256,
+            max_bulk_bytes: 64,
+            max_line_bytes: 64,
+            max_nodes: 8,
+            max_depth: 2,
+        },
+        max_input_buffer_bytes: 256,
+        max_response_bytes: 128,
+        ..ServerConfig::default()
+    })
+    .await;
+    let mut client = server.connect().await;
+    exchange(
+        &mut client,
+        &arguments(&[b"RPUSH", b"{r05}list", &[b'x'; 55], &[b'x'; 55]]),
+        b":2\r\n",
+    )
+    .await;
+    let mut expected = b"*2\r\n".to_vec();
+    for _ in 0..2 {
+        expected.extend_from_slice(b"$55\r\n");
+        expected.extend_from_slice(&[b'x'; 55]);
+        expected.extend_from_slice(b"\r\n");
+    }
+    assert_eq!(expected.len(), 128);
+    exchange(
+        &mut client,
+        &arguments(&[b"LRANGE", b"{r05}list", b"0", b"-1"]),
+        &expected,
+    )
+    .await;
+    exchange(
+        &mut client,
+        &arguments(&[b"RPUSH", b"{r05}list", b""]),
+        b":3\r\n",
+    )
+    .await;
+    write(
+        &mut client,
+        &arguments(&[b"LRANGE", b"{r05}list", b"0", b"-1"]),
+    )
+    .await;
+    assert!(read_until_closed(&mut client).await.is_empty());
+    let mut other = server.connect().await;
+    exchange(&mut other, &arguments(&[b"LLEN", b"{r05}list"]), b":3\r\n").await;
+    exchange(&mut other, PING, PONG).await;
+    server.stop().await;
+}
+
+#[tokio::test]
 async fn r02_mget_exact_response_limit_and_one_byte_over_close_without_partial_reply() {
     let server = TestServer::start(ServerConfig {
         resp_limits: sider::resp::RespLimits {
