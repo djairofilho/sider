@@ -2,7 +2,7 @@
 
 Development follows the [ROADMAP](ROADMAP.md), backed by
 [releases/plan.json](releases/plan.json). The 0.1 contracts are in
-[PLANO.md](PLANO.md). Each deliverable must compile, pass the available checks,
+[PLAN.md](PLAN.md). Each deliverable must compile, pass the available checks,
 and document its actual behavior. A stage ends only when its exit criteria
 have been verified.
 

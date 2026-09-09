@@ -2,7 +2,7 @@
 
 ## Scope and architecture
 
-- Read `PLANO.md`, `README.md`, `ROADMAP.md`, and `docs/compatibility.md` before implementing.
+- Read `PLAN.md`, `README.md`, `ROADMAP.md`, and `docs/compatibility.md` before implementing.
 - Work on technically unblocked tasks in stages that compile and can be tested.
   R01–R10 are internal milestones; their checkpoints do not require publication. Use up to
   three workstreams in separate worktrees, with one integrator for shared contracts.

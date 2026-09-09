@@ -149,7 +149,7 @@ a persistent task. Closing a connection releases its slot.
 These limits are not a process memory quota. The queue counts messages, buffers
 may retain allocated capacity, and the system maintains its own socket buffers.
 Connection counts and maximum sizes must be considered together, as in the budget
-in the [0.1 plan](../PLANO.md#limits-and-lifecycle).
+in the [0.1 plan](../PLAN.md#limits-and-lifecycle).
 
 The R02 dataset has its own logical quota and expiration. `SET`, `MSET`, and
 increments reject growth beyond the budget without eviction. Each entry counts

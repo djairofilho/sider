@@ -163,7 +163,7 @@ with manual execution and evidence on the required platforms.
 | `rust-toolchain.toml` | Toolchain and development components |
 | `xtask/` and `.cargo/config.toml` | Local Rust tools, isolated from database dependencies |
 | `AGENTS.md` | Local instructions for coding agents |
-| [PLANO.md](PLANO.md) | Historical record of the initial 0.1 design and stages |
+| [PLAN.md](PLAN.md) | Historical record of the initial 0.1 design and stages |
 | [ROADMAP.md](ROADMAP.md) | Release sequence and dependencies through 1.0 |
 | [releases/plan.json](releases/plan.json) | Versioned source for milestones, tasks, and criteria |
 | [docs/releases.md](docs/releases.md) | Backlog execution, candidates, publication, and recovery |
@@ -188,7 +188,7 @@ the presence of runners does not mean gates have passed.
 The preparation PR sets the package version to `1.0.0`.
 The exact merge SHA will be built, packaged, and validated on both platforms
 to publish the candidate. The final release will promote the same approved files.
-The [0.1 plan](PLANO.md) preserves the historical design; the
+The [0.1 plan](PLAN.md) preserves the historical design; the
 [ROADMAP](ROADMAP.md) and issues record criteria and current progress.
 
 The database, tests, and project tools use Rust. The project has no Python scripts

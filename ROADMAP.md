@@ -76,7 +76,7 @@ limit parallelism; milestone order in this document does not create dependencies
 ### 0.1.0: RESP2 core
 
 - Implement PING, ECHO, GET, basic SET, and DEL over RESP2/TCP, with a single worker.
-- Preserve binary data, fragmentation, per-connection ordering, limits, and shutdown as defined in PLANO.md.
+- Preserve binary data, fragmentation, per-connection ordering, limits, and shutdown as defined in PLAN.md.
 
 | ID | Deliverable | Dependencies |
 | --- | --- | --- |

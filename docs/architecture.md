@@ -2,7 +2,7 @@
 
 Sider uses one Rust crate with a testable library and four executables: server,
 AOF migration, backup, and replica administration. This document summarizes the
-current boundaries. The [initial plan](../PLANO.md) preserves the historical
+current boundaries. The [initial plan](../PLAN.md) preserves the historical
 0.1 design; the [1.0 matrix](compatibility-matrix.md) defines the current subset.
 
 ## Implemented

@@ -64,7 +64,7 @@
   "releases": [
     {
       "id": "R01", "version": "0.1.0", "title": "RESP2 core", "publication": false,
-      "scope": ["Implement PING, ECHO, GET, basic SET, and DEL over RESP2/TCP, with a single worker.", "Preserve binary data, fragmentation, per-connection ordering, limits, and shutdown as defined in PLANO.md."],
+      "scope": ["Implement PING, ECHO, GET, basic SET, and DEL over RESP2/TCP, with a single worker.", "Preserve binary data, fragmentation, per-connection ordering, limits, and shutdown as defined in PLAN.md."],
       "required_gates": ["native","compatibility","tcp_smoke"],
       "tasks": [
         {
@@ -77,7 +77,7 @@
         {
           "id": "R01-02", "title": "Incremental RESP2 codec", "area": "protocol", "depends_on": ["R01-01"],
           "objective": "Implement all five RESP2 types and incremental encoding/decoding independent of sockets and storage.",
-          "deliverables": ["Frame, RespLimits, atomic encoder, and decoder with a cursor/bounded stack as specified in PLANO.md.", "The decoder preserves incomplete buffers, consumes one frame at a time, and limits bytes, nodes, and depth before allocating payloads."],
+          "deliverables": ["Frame, RespLimits, atomic encoder, and decoder with a cursor/bounded stack as specified in PLAN.md.", "The decoder preserves incomplete buffers, consumes one frame at a time, and limits bytes, nodes, and depth before allocating payloads."],
           "tests": ["Round trips, every fragmentation point in short fixtures, byte-by-byte delivery, and concatenated frames.", "Non-UTF-8 content, integer extremes, split CRLF, overflow, exact and exceeded limits; a work counter detects quadratic reprocessing."],
           "acceptance": ["Codec tested without networking or a database, with no panic on arbitrary input; encoder errors leave no partial output."]
         },

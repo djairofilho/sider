@@ -189,7 +189,7 @@ sider/
 ├── Cargo.lock
 ├── rust-toolchain.toml
 ├── README.md
-├── PLANO.md
+├── PLAN.md
 ├── src/
 │   ├── lib.rs
 │   ├── main.rs
