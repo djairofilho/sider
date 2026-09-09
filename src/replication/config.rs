@@ -21,67 +21,6 @@ pub struct Config {
     pub reconnect_max: Duration,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn config(values: &[(&str, &str)]) -> Result<crate::ServerConfig, ConfigError> {
-        crate::ServerConfig::from_lookup(|name| {
-            values
-                .iter()
-                .find(|(key, _)| *key == name)
-                .map(|(_, value)| OsString::from(value))
-        })
-    }
-
-    #[test]
-    fn replication_config_requires_aof_and_parses_injected_addresses_limits_and_paths() {
-        assert!(config(&[("SIDER_REPLICATION_ADDR", "127.0.0.1:0")]).is_err());
-        let actual = config(&[
-            ("SIDER_AOF_DIR", "aof"),
-            ("SIDER_REPLICATION_ADDR", "[::1]:0"),
-            ("SIDER_REPLICA_OF", "127.0.0.1:9123"),
-            ("SIDER_REPLICATION_READY_FILE", "réplica.json"),
-            ("SIDER_REPLICATION_MAX_CONNECTIONS", "2"),
-        ])
-        .unwrap()
-        .replication
-        .unwrap();
-        assert_eq!(actual.listen, "[::1]:0".parse().unwrap());
-        assert_eq!(actual.upstream, Some("127.0.0.1:9123".parse().unwrap()));
-        assert_eq!(actual.ready_file, Some(PathBuf::from("réplica.json")));
-        assert_eq!(actual.max_connections, 2);
-    }
-
-    #[test]
-    fn replication_config_rejects_unbounded_incoherent_and_malformed_values() {
-        for (key, value) in [
-            ("SIDER_REPLICA_OF", "127.0.0.1:0"),
-            ("SIDER_REPLICA_OF", "localhost:1234"),
-            ("SIDER_REPLICATION_MAX_CONNECTIONS", "0"),
-            ("SIDER_REPLICATION_MAX_CONNECTIONS", "18446744073709551615"),
-            ("SIDER_REPLICATION_BACKLOG_BYTES", "100"),
-            ("SIDER_REPLICATION_BACKLOG_BATCHES", "0"),
-            ("SIDER_REPLICATION_FRAME_TIMEOUT_MS", "0"),
-            ("SIDER_REPLICATION_FRAME_TIMEOUT_MS", "30001"),
-            ("SIDER_REPLICATION_SYNC_TIMEOUT_MS", "1"),
-            ("SIDER_REPLICATION_RECONNECT_MIN_MS", "5001"),
-            ("SIDER_REPLICATION_RECONNECT_MAX_MS", "60001"),
-            ("SIDER_REPLICATION_RECONNECT_MAX_MS", " 10"),
-        ] {
-            assert!(
-                config(&[
-                    ("SIDER_AOF_DIR", "aof"),
-                    ("SIDER_REPLICATION_ADDR", "127.0.0.1:0"),
-                    (key, value)
-                ])
-                .is_err(),
-                "{key}={value}"
-            );
-        }
-    }
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -201,5 +140,66 @@ impl Config {
             return Err(invalid("intervalos ou upstream da replicação inválidos"));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(values: &[(&str, &str)]) -> Result<crate::ServerConfig, ConfigError> {
+        crate::ServerConfig::from_lookup(|name| {
+            values
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| OsString::from(value))
+        })
+    }
+
+    #[test]
+    fn replication_config_requires_aof_and_parses_injected_addresses_limits_and_paths() {
+        assert!(config(&[("SIDER_REPLICATION_ADDR", "127.0.0.1:0")]).is_err());
+        let actual = config(&[
+            ("SIDER_AOF_DIR", "aof"),
+            ("SIDER_REPLICATION_ADDR", "[::1]:0"),
+            ("SIDER_REPLICA_OF", "127.0.0.1:9123"),
+            ("SIDER_REPLICATION_READY_FILE", "réplica.json"),
+            ("SIDER_REPLICATION_MAX_CONNECTIONS", "2"),
+        ])
+        .unwrap()
+        .replication
+        .unwrap();
+        assert_eq!(actual.listen, "[::1]:0".parse().unwrap());
+        assert_eq!(actual.upstream, Some("127.0.0.1:9123".parse().unwrap()));
+        assert_eq!(actual.ready_file, Some(PathBuf::from("réplica.json")));
+        assert_eq!(actual.max_connections, 2);
+    }
+
+    #[test]
+    fn replication_config_rejects_unbounded_incoherent_and_malformed_values() {
+        for (key, value) in [
+            ("SIDER_REPLICA_OF", "127.0.0.1:0"),
+            ("SIDER_REPLICA_OF", "localhost:1234"),
+            ("SIDER_REPLICATION_MAX_CONNECTIONS", "0"),
+            ("SIDER_REPLICATION_MAX_CONNECTIONS", "18446744073709551615"),
+            ("SIDER_REPLICATION_BACKLOG_BYTES", "100"),
+            ("SIDER_REPLICATION_BACKLOG_BATCHES", "0"),
+            ("SIDER_REPLICATION_FRAME_TIMEOUT_MS", "0"),
+            ("SIDER_REPLICATION_FRAME_TIMEOUT_MS", "30001"),
+            ("SIDER_REPLICATION_SYNC_TIMEOUT_MS", "1"),
+            ("SIDER_REPLICATION_RECONNECT_MIN_MS", "5001"),
+            ("SIDER_REPLICATION_RECONNECT_MAX_MS", "60001"),
+            ("SIDER_REPLICATION_RECONNECT_MAX_MS", " 10"),
+        ] {
+            assert!(
+                config(&[
+                    ("SIDER_AOF_DIR", "aof"),
+                    ("SIDER_REPLICATION_ADDR", "127.0.0.1:0"),
+                    (key, value)
+                ])
+                .is_err(),
+                "{key}={value}"
+            );
+        }
     }
 }
