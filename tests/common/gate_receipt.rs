@@ -77,8 +77,8 @@ impl GateContext {
         mut lookup: impl FnMut(&str) -> Option<OsString>,
         observer: Observer,
     ) -> Result<Self, String> {
-        if gate_id != "compatibility" {
-            return Err("gate desconhecido; esperado compatibility".into());
+        if !matches!(gate_id, "compatibility" | "pubsub") {
+            return Err("gate desconhecido; esperado compatibility ou pubsub".into());
         }
         let mut text = |name: &str| -> Result<String, String> {
             lookup(name)

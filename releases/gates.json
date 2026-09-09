@@ -10,7 +10,7 @@
     "types": {"command": null, "timeout_seconds": 600},
     "sorted_sets": {"command": null, "timeout_seconds": 600},
     "transactions": {"command": null, "timeout_seconds": 600},
-    "pubsub": {"command": null, "timeout_seconds": 600},
+    "pubsub": {"command": ["cargo", "test", "--locked", "--test", "pubsub", "--", "--ignored", "--exact", "release_pubsub_gate", "--nocapture"], "timeout_seconds": 600},
     "replication": {"command": null, "timeout_seconds": 1200},
     "docker": {"command": null, "timeout_seconds": 1200},
     "soak": {"command": null, "timeout_seconds": 3900, "minimum_seconds": 3600},
