@@ -9,7 +9,8 @@ impl InfoSections {
     pub const MEMORY: u8 = 8;
     pub const PERSISTENCE: u8 = 16;
     pub const CONFIG: u8 = 32;
-    pub const ALL: Self = Self(63);
+    pub const REPLICATION: u8 = 64;
+    pub const ALL: Self = Self(127);
 
     pub fn from_names<'a>(names: impl IntoIterator<Item = &'a [u8]>) -> Self {
         let mut selection = 0;
@@ -28,6 +29,8 @@ impl InfoSections {
                 Self::PERSISTENCE
             } else if name.eq_ignore_ascii_case(b"config") {
                 Self::CONFIG
+            } else if name.eq_ignore_ascii_case(b"replication") {
+                Self::REPLICATION
             } else if name.eq_ignore_ascii_case(b"all")
                 || name.eq_ignore_ascii_case(b"default")
                 || name.eq_ignore_ascii_case(b"everything")

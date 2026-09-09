@@ -234,6 +234,107 @@ async fn caught_up(primary: &Node, replica: &Node) -> Message {
     }
 }
 
+fn replication_metrics(response: Response) -> std::collections::BTreeMap<String, String> {
+    let Response::Bulk(Some(bytes)) = response else {
+        panic!("INFO replication ausente")
+    };
+    let text = String::from_utf8(bytes).unwrap();
+    assert!(text.starts_with("# Replication\r\n"));
+    assert!(!text.contains("sensitive"));
+    text.lines()
+        .filter_map(|line| line.split_once(':'))
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn metrics_replication_observes_full_delta_disconnect_and_promotion_over_tcp() {
+    let directory = Directory::new();
+    let mut primary = Node::start(&directory.0.join("primary"), None).await;
+    ok(primary.command(&[b"SET", b"sensitive-key", b"sensitive-value"]));
+    let replica = Node::start(&directory.0.join("replica"), Some(primary.internal)).await;
+    caught_up(&primary, &replica).await;
+    ok(primary.command(&[b"SET", b"sensitive-key", b"sensitive-next"]));
+    caught_up(&primary, &replica).await;
+    let read = || replication_metrics(replica.command(&[b"INFO", b"replication"]));
+    let deadline = Instant::now() + DEADLINE;
+    let current = loop {
+        let current = read();
+        if current
+            .get("replication_lag_batches")
+            .is_some_and(|lag| lag == "0")
+        {
+            break current;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "head observado após aplicar delta: {current:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    let origin = replication_metrics(primary.command(&[b"INFO", b"replication"]));
+    assert_eq!(origin["replication_role"], "primary");
+    assert_eq!(current["replication_role"], "replica");
+    assert_eq!(current["replication_connected"], "1");
+    assert_eq!(current["replication_full_syncs_total"], "1");
+    assert_eq!(current["replication_partial_syncs_total"], "0");
+    assert_eq!(current["replication_epoch"], origin["replication_epoch"]);
+    assert_eq!(
+        current["replication_applied_sequence"],
+        origin["replication_head_sequence"]
+    );
+    assert_eq!(
+        current["replication_upstream_sequence"],
+        origin["replication_head_sequence"]
+    );
+    assert_eq!(
+        replica.command(&[b"GET", b"sensitive-key"]),
+        Response::Bulk(Some(b"sensitive-next".to_vec()))
+    );
+    let mut tx = replica.connect();
+    ok(request(&mut tx, &[b"MULTI"]));
+    ok(request(&mut tx, &[b"INFO", b"replication"]));
+    let Response::Array(Some(mut replies)) = request(&mut tx, &[b"EXEC"]) else {
+        panic!("EXEC INFO")
+    };
+    assert_eq!(replies.len(), 1);
+    assert_eq!(
+        replication_metrics(replies.remove(0))["replication_role"],
+        "replica"
+    );
+    primary.stop();
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        let current = read();
+        if current["replication_connected"] == "0" {
+            assert_eq!(current["replication_lag_known"], "0");
+            assert!(!current.contains_key("replication_lag_batches"));
+            assert_eq!(
+                current["replication_applied_sequence"],
+                origin["replication_head_sequence"]
+            );
+            break;
+        }
+        assert!(Instant::now() < deadline, "desconexão não observada");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(matches!(
+        replica.admin(Message::Promote).await,
+        Message::Promoted(_)
+    ));
+    let promoted = read();
+    assert_eq!(promoted["replication_role"], "primary");
+    assert_ne!(promoted["replication_epoch"], origin["replication_epoch"]);
+    assert_eq!(
+        promoted["replication_head_sequence"],
+        origin["replication_head_sequence"]
+    );
+    assert_eq!(promoted["replication_backlog_batches"], "0");
+    assert_eq!(promoted["replication_lag_known"], "0");
+    assert!(!promoted.contains_key("replication_upstream_sequence"));
+    assert!(!promoted.contains_key("replication_applied_sequence"));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn replication_processes_full_delta_export_continue_and_durable_promotion() {
     let directory = Directory::new();

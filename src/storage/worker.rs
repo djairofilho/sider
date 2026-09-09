@@ -216,6 +216,7 @@ impl DbHandle {
     }
 
     pub fn with_replication(mut self, replication: crate::replication::state::Runtime) -> Self {
+        self.metrics.replication(replication.clone());
         self.replication = Some(replication);
         self
     }
