@@ -91,6 +91,7 @@ async fn supervise_workers(
 ) -> Result<(), ServerError> {
     let mut connections = JoinSet::new();
     let slots = Arc::new(Semaphore::new(config.max_connections));
+    let pubsub = crate::pubsub::Hub::default();
     tokio::pin!(shutdown);
     tracing::info!(address = %listener.local_addr()?, "servidor TCP iniciado");
 
@@ -121,9 +122,10 @@ async fn supervise_workers(
                 let config = config.clone();
                 let database = database.clone();
                 let shutdown = stop.subscribe();
+                let pubsub = pubsub.clone();
                 connections.spawn(async move {
                     let _slot = slot;
-                    connection::run(stream, config, database, shutdown).await
+                    connection::run_with_pubsub(stream, config, database, shutdown, pubsub).await
                 });
             }
         }

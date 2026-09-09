@@ -20,6 +20,9 @@ pub enum ExecutionError {
     InvalidExpiry(&'static str),
     #[error("OOM dataset memory quota exceeded")]
     OutOfMemory,
+    /// Pub/Sub depende do contexto da conexão e não executa no mapa.
+    #[error("ERR command requires connection context")]
+    ConnectionOnly,
 }
 
 /// Resultado da execução síncrona no armazenamento.

@@ -206,6 +206,28 @@ pub fn parse(frame: Frame) -> Result<Command, RequestError> {
         } else {
             Command::Ttl { key, milliseconds }
         })
+    } else if name.eq_ignore_ascii_case(b"SUBSCRIBE") {
+        if count == 0 {
+            return Err(RequestError::WrongArity("subscribe"));
+        }
+        Ok(Command::Subscribe {
+            channels: arguments.collect(),
+        })
+    } else if name.eq_ignore_ascii_case(b"UNSUBSCRIBE") {
+        Ok(Command::Unsubscribe {
+            channels: arguments.collect(),
+        })
+    } else if name.eq_ignore_ascii_case(b"PUBLISH") {
+        if count != 2 {
+            return Err(RequestError::WrongArity("publish"));
+        }
+        let channel = arguments
+            .next()
+            .ok_or(RequestError::WrongArity("publish"))?;
+        let message = arguments
+            .next()
+            .ok_or(RequestError::WrongArity("publish"))?;
+        Ok(Command::Publish { channel, message })
     } else {
         Err(RequestError::UnknownCommand)
     }
@@ -368,5 +390,34 @@ mod tests {
             panic!("echo esperado")
         };
         assert_eq!(value.as_ptr(), address);
+    }
+
+    #[test]
+    fn pubsub_arity_and_binary_arguments() {
+        assert_eq!(
+            parse(request(&[b"sUbScRiBe", b"", b"\xff\0"])).unwrap(),
+            Command::Subscribe {
+                channels: vec![Bytes::new(), Bytes::from_static(b"\xff\0")]
+            }
+        );
+        assert_eq!(
+            parse(request(&[b"UNSUBSCRIBE"])).unwrap(),
+            Command::Unsubscribe { channels: vec![] }
+        );
+        assert_eq!(
+            parse(request(&[b"PUBLISH", b"", b"\xff\0"])).unwrap(),
+            Command::Publish {
+                channel: Bytes::new(),
+                message: Bytes::from_static(b"\xff\0")
+            }
+        );
+        for args in [
+            vec![b"SUBSCRIBE".as_slice()],
+            vec![b"PUBLISH".as_slice()],
+            vec![b"PUBLISH".as_slice(), b"a"],
+            vec![b"PUBLISH".as_slice(), b"a", b"b", b"c"],
+        ] {
+            assert!(parse(request(&args)).is_err());
+        }
     }
 }

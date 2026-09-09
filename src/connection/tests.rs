@@ -15,6 +15,257 @@ use super::*;
 const PING: &[u8] = b"*1\r\n$4\r\nPING\r\n";
 const LATER_SET: &[u8] = b"*3\r\n$3\r\nSET\r\n$5\r\nlater\r\n$5\r\nvalue\r\n";
 
+const SUBSCRIBE: &[u8] = b"*2\r\n$9\r\nSUBSCRIBE\r\n$1\r\na\r\n";
+const SUBSCRIBED: &[u8] = b"*3\r\n$9\r\nsubscribe\r\n$1\r\na\r\n:1\r\n";
+
+#[tokio::test(start_paused = true)]
+async fn pubsub_eviction_interrupts_blocked_write_and_cleans_every_channel() {
+    let config = ServerConfig {
+        pubsub_queue_capacity: 1,
+        ..ServerConfig::default()
+    };
+    let (stop, database, _worker) = setup(&config);
+    let hub = Hub::default();
+    let (mut client, stream) = duplex(64);
+    let mut connection = Box::pin(run_with_pubsub(
+        stream,
+        config,
+        database,
+        stop.subscribe(),
+        hub.clone(),
+    ));
+    feed(&mut client, connection.as_mut(), SUBSCRIBE).await;
+    read_exact_ready(&mut client, SUBSCRIBED).await;
+    let message = || Message {
+        channel: Bytes::from_static(b"a"),
+        payload: Bytes::from(vec![0xff; 128]),
+    };
+    assert_eq!(hub.publish(message()), 1);
+    assert_pending(connection.as_mut()).await; // A escrita de 128 bytes bloqueia no duplex de 64.
+    assert_eq!(hub.publish(message()), 1);
+    assert_eq!(hub.publish(message()), 0); // Fila cheia remove o assinante sem esperar I/O.
+    assert!(matches!(
+        ready(connection.as_mut()).await,
+        Err(ConnectionError::PubSub(PubSubError::Closed))
+    ));
+    drop(connection);
+    assert_eq!(hub.publish(message()), 0);
+    let mut remaining = Vec::new();
+    client.read_to_end(&mut remaining).await.unwrap();
+    assert_eq!(remaining.len(), 64);
+}
+
+#[tokio::test(start_paused = true)]
+async fn pubsub_write_timeout_and_future_cancellation_release_subscriptions() {
+    for cancel in [false, true] {
+        let config = ServerConfig {
+            write_timeout: Duration::from_secs(1),
+            ..ServerConfig::default()
+        };
+        let (stop, database, _worker) = setup(&config);
+        let hub = Hub::default();
+        let (mut client, stream) = duplex(64);
+        let mut connection = Box::pin(run_with_pubsub(
+            stream,
+            config,
+            database,
+            stop.subscribe(),
+            hub.clone(),
+        ));
+        feed(&mut client, connection.as_mut(), SUBSCRIBE).await;
+        read_exact_ready(&mut client, SUBSCRIBED).await;
+        let message = || Message {
+            channel: Bytes::from_static(b"a"),
+            payload: Bytes::from(vec![0; 128]),
+        };
+        assert_eq!(hub.publish(message()), 1);
+        assert_pending(connection.as_mut()).await;
+        if !cancel {
+            advance(Duration::from_secs(1)).await;
+            assert!(matches!(
+                ready(connection.as_mut()).await,
+                Err(ConnectionError::WriteTimeout)
+            ));
+        }
+        drop(connection);
+        assert_eq!(hub.publish(message()), 0);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn pubsub_shutdown_and_eof_remove_subscriptions() {
+    for eof in [false, true] {
+        let config = ServerConfig::default();
+        let (stop, database, _worker) = setup(&config);
+        let hub = Hub::default();
+        let (mut client, stream) = duplex(128);
+        let mut connection = Box::pin(run_with_pubsub(
+            stream,
+            config,
+            database,
+            stop.subscribe(),
+            hub.clone(),
+        ));
+        feed(&mut client, connection.as_mut(), SUBSCRIBE).await;
+        read_exact_ready(&mut client, SUBSCRIBED).await;
+        if eof {
+            client.shutdown().await.unwrap();
+        } else {
+            stop.send_replace(true);
+        }
+        ready(connection.as_mut()).await.unwrap();
+        drop(connection);
+        assert_eq!(
+            hub.publish(Message {
+                channel: Bytes::from_static(b"a"),
+                payload: Bytes::new()
+            }),
+            0
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn pubsub_limit_is_atomic_and_intercepted_without_polling_worker() {
+    let config = ServerConfig {
+        pubsub_max_channels: 1,
+        ..ServerConfig::default()
+    };
+    let (stop, database, _worker) = setup(&config);
+    let hub = Hub::default();
+    let (mut client, stream) = duplex(256);
+    let mut connection = Box::pin(run_with_pubsub(
+        stream,
+        config,
+        database,
+        stop.subscribe(),
+        hub.clone(),
+    ));
+    feed(&mut client, connection.as_mut(), SUBSCRIBE).await;
+    read_exact_ready(&mut client, SUBSCRIBED).await;
+    feed(
+        &mut client,
+        connection.as_mut(),
+        b"*3\r\n$9\r\nSUBSCRIBE\r\n$1\r\nb\r\n$1\r\na\r\n",
+    )
+    .await;
+    read_exact_ready(&mut client, b"-ERR pubsub channel limit exceeded\r\n").await;
+    feed(&mut client, connection.as_mut(), PING).await;
+    read_exact_ready(&mut client, b"*2\r\n$4\r\npong\r\n$0\r\n\r\n").await;
+    assert_eq!(
+        hub.publish(Message {
+            channel: Bytes::from_static(b"b"),
+            payload: Bytes::new()
+        }),
+        0
+    );
+    assert_eq!(
+        hub.publish(Message {
+            channel: Bytes::from_static(b"a"),
+            payload: Bytes::new()
+        }),
+        1
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn pubsub_oversized_notification_is_rejected_before_fanout() {
+    let config = ServerConfig {
+        resp_limits: RespLimits {
+            max_bulk_bytes: 64,
+            ..RespLimits::default()
+        },
+        max_response_bytes: 128,
+        ..ServerConfig::default()
+    };
+    let (stop, database, _worker) = setup(&config);
+    let hub = Hub::default();
+    let channel = Bytes::from(vec![b'c'; 64]);
+    let mut subscriber = hub.connect(1, 1).unwrap();
+    subscriber.subscribe(vec![channel.clone()]).unwrap();
+    let (mut client, stream) = duplex(512);
+    let mut connection = Box::pin(run_with_pubsub(
+        stream,
+        config,
+        database,
+        stop.subscribe(),
+        hub,
+    ));
+    let request = Frame::Array(Some(vec![
+        Frame::Bulk(Some(Bytes::from_static(b"PUBLISH"))),
+        Frame::Bulk(Some(channel)),
+        Frame::Bulk(Some(Bytes::from(vec![0xff; 64]))),
+    ]));
+    let mut bytes = BytesMut::new();
+    encode(&request, &mut bytes, RespLimits::default()).unwrap();
+    feed(&mut client, connection.as_mut(), &bytes).await;
+    read_exact_ready(
+        &mut client,
+        b"-ERR pubsub message exceeds response limit\r\n",
+    )
+    .await;
+    assert!(subscriber.try_message().is_none());
+    assert!(subscriber.active());
+}
+
+#[tokio::test(start_paused = true)]
+async fn pubsub_slow_socket_does_not_block_fast_socket_or_database() {
+    let config = ServerConfig {
+        pubsub_queue_capacity: 1,
+        ..ServerConfig::default()
+    };
+    let (stop, database, owner) = setup(&config);
+    let mut worker = Box::pin(owner.run());
+    let hub = Hub::default();
+    let (mut slow_client, slow_stream) = duplex(64);
+    let (mut fast_client, fast_stream) = duplex(512);
+    let mut slow = Box::pin(run_with_pubsub(
+        slow_stream,
+        config.clone(),
+        database.clone(),
+        stop.subscribe(),
+        hub.clone(),
+    ));
+    let mut fast = Box::pin(run_with_pubsub(
+        fast_stream,
+        config,
+        database.clone(),
+        stop.subscribe(),
+        hub.clone(),
+    ));
+    feed(&mut slow_client, slow.as_mut(), SUBSCRIBE).await;
+    read_exact_ready(&mut slow_client, SUBSCRIBED).await;
+    feed(&mut fast_client, fast.as_mut(), SUBSCRIBE).await;
+    read_exact_ready(&mut fast_client, SUBSCRIBED).await;
+    for index in 0..3_u8 {
+        let message = Message {
+            channel: Bytes::from_static(b"a"),
+            payload: Bytes::from(vec![index; 128]),
+        };
+        let mut expected = BytesMut::new();
+        encode(
+            &message.clone().into_frame(),
+            &mut expected,
+            RespLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(hub.publish(message), if index == 2 { 1 } else { 2 });
+        if index == 0 {
+            assert_pending(slow.as_mut()).await;
+        }
+        assert_pending(fast.as_mut()).await;
+        read_exact_ready(&mut fast_client, &expected).await;
+        let mut request = Box::pin(database.execute(Command::Ping(None)));
+        assert_pending(request.as_mut()).await;
+        assert_pending(worker.as_mut()).await;
+        assert_eq!(ready(request.as_mut()).await.unwrap(), Reply::Pong);
+    }
+    assert!(matches!(
+        ready(slow.as_mut()).await,
+        Err(ConnectionError::PubSub(PubSubError::Closed))
+    ));
+}
+
 async fn guard(test: impl Future<Output = ()>) {
     timeout(Duration::from_secs(600), test)
         .await

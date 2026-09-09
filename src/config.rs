@@ -26,6 +26,10 @@ pub struct ServerConfig {
     pub worker_queue_capacity: usize,
     /// Quantidade fixa de workers proprietários; não admite resharding online.
     pub shards: usize,
+    /// Quantidade máxima de canais distintos por assinante Pub/Sub.
+    pub pubsub_max_channels: usize,
+    /// Notificações pendentes por assinante; lotação encerra a conexão.
+    pub pubsub_queue_capacity: usize,
     /// Bytes não consumidos que uma conexão pode manter no buffer de entrada.
     pub max_input_buffer_bytes: usize,
     /// Bytes de uma resposta completa, incluindo framing.
@@ -52,6 +56,8 @@ impl Default for ServerConfig {
             max_connections: 32,
             worker_queue_capacity: 32,
             shards: 1,
+            pubsub_max_channels: 32,
+            pubsub_queue_capacity: 32,
             max_input_buffer_bytes: 4 * 1024 * 1024,
             max_response_bytes: 4 * 1024 * 1024,
             max_dataset_bytes: crate::storage::StoreConfig::default().max_dataset_bytes,
@@ -98,6 +104,8 @@ impl ServerConfig {
         read_size!(config.max_connections, "SIDER_MAX_CONNECTIONS");
         read_size!(config.worker_queue_capacity, "SIDER_WORKER_QUEUE_CAPACITY");
         read_size!(config.shards, "SIDER_SHARDS");
+        read_size!(config.pubsub_max_channels, "SIDER_PUBSUB_MAX_CHANNELS");
+        read_size!(config.pubsub_queue_capacity, "SIDER_PUBSUB_QUEUE_CAPACITY");
         read_size!(config.resp_limits.max_frame_bytes, "SIDER_MAX_FRAME_BYTES");
         read_size!(config.resp_limits.max_bulk_bytes, "SIDER_MAX_BULK_BYTES");
         read_size!(config.resp_limits.max_line_bytes, "SIDER_MAX_LINE_BYTES");
@@ -145,6 +153,14 @@ impl ServerConfig {
         }
         for (value, reason) in [
             (
+                self.pubsub_max_channels,
+                "pubsub_max_channels precisa ser maior que zero",
+            ),
+            (
+                self.pubsub_queue_capacity,
+                "pubsub_queue_capacity precisa ser maior que zero",
+            ),
+            (
                 self.max_connections,
                 "SIDER_MAX_CONNECTIONS (max_connections) precisa ser maior que zero",
             ),
@@ -167,6 +183,8 @@ impl ServerConfig {
         }
         if self.max_connections > tokio::sync::Semaphore::MAX_PERMITS
             || self.worker_queue_capacity > tokio::sync::Semaphore::MAX_PERMITS
+            || self.pubsub_max_channels > tokio::sync::Semaphore::MAX_PERMITS
+            || self.pubsub_queue_capacity > tokio::sync::Semaphore::MAX_PERMITS
         {
             return Err(invalid(
                 "conexões e capacidade da fila não podem exceder Semaphore::MAX_PERMITS",
@@ -256,9 +274,11 @@ fn parse_integer<T: FromStr>(name: &'static str, value: OsString) -> Result<T, C
 mod tests {
     use super::*;
 
-    const NUMERIC_NAMES: [&str; 15] = [
+    const NUMERIC_NAMES: [&str; 17] = [
         "SIDER_SHARDS",
         "SIDER_MAX_DATASET_BYTES",
+        "SIDER_PUBSUB_MAX_CHANNELS",
+        "SIDER_PUBSUB_QUEUE_CAPACITY",
         "SIDER_MAX_CONNECTIONS",
         "SIDER_WORKER_QUEUE_CAPACITY",
         "SIDER_MAX_FRAME_BYTES",
@@ -292,6 +312,8 @@ mod tests {
         assert_eq!(config.max_connections, 32);
         assert_eq!(config.worker_queue_capacity, 32);
         assert_eq!(config.shards, 1);
+        assert_eq!(config.pubsub_max_channels, 32);
+        assert_eq!(config.pubsub_queue_capacity, 32);
         assert_eq!(config.max_input_buffer_bytes, 4 * 1024 * 1024);
         assert_eq!(config.max_response_bytes, 4 * 1024 * 1024);
         assert_eq!(config.max_dataset_bytes, 64 * 1024 * 1024);
@@ -318,6 +340,17 @@ mod tests {
         assert!(config_with(&[("SIDER_SHARDS", "257")]).is_err());
         assert!(config_with(&[("SIDER_SHARDS", "4"), ("SIDER_MAX_DATASET_BYTES", "3")]).is_err());
         assert!(config_with(&[("SIDER_SHARDS", "4"), ("SIDER_MAX_DATASET_BYTES", "4")]).is_ok());
+    }
+
+    #[test]
+    fn pubsub_limits_are_read_from_injected_configuration() {
+        let config = config_with(&[
+            ("SIDER_PUBSUB_MAX_CHANNELS", "4"),
+            ("SIDER_PUBSUB_QUEUE_CAPACITY", "7"),
+        ])
+        .unwrap();
+        assert_eq!(config.pubsub_max_channels, 4);
+        assert_eq!(config.pubsub_queue_capacity, 7);
     }
 
     #[test]
@@ -514,6 +547,12 @@ mod tests {
         assert!(config.validate().is_err());
         config.max_connections = 1;
         config.worker_queue_capacity = max + 1;
+        assert!(config.validate().is_err());
+        config.worker_queue_capacity = 1;
+        config.pubsub_max_channels = max + 1;
+        assert!(config.validate().is_err());
+        config.pubsub_max_channels = 1;
+        config.pubsub_queue_capacity = max + 1;
         assert!(config.validate().is_err());
     }
 

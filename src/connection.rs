@@ -9,7 +9,8 @@ use tokio::sync::watch;
 use tokio::time::{Instant, sleep_until, timeout_at};
 
 use crate::ServerConfig;
-use crate::command::parse;
+use crate::command::{Command, parse};
+use crate::pubsub::{Hub, Message, PubSubError, Subscription};
 use crate::resp::{Decoder, EncodeError, Frame, ProtocolError, RespLimits, encode};
 use crate::storage::worker::{DbError, DbHandle};
 
@@ -35,6 +36,8 @@ pub(crate) enum ConnectionError {
     Database(#[from] DbError),
     #[error("configuração da conexão inválida: {0}")]
     Config(#[from] crate::ConfigError),
+    #[error("falha do assinante: {0}")]
+    PubSub(#[from] PubSubError),
 }
 
 pub(crate) async fn stopped(shutdown: &mut watch::Receiver<bool>) {
@@ -42,16 +45,31 @@ pub(crate) async fn stopped(shutdown: &mut watch::Receiver<bool>) {
     let _ = shutdown.wait_for(|stopping| *stopping).await;
 }
 
+#[cfg(test)]
 pub(crate) async fn run<S>(
+    stream: S,
+    config: ServerConfig,
+    database: DbHandle,
+    shutdown: watch::Receiver<bool>,
+) -> Result<(), ConnectionError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    run_with_pubsub(stream, config, database, shutdown, Hub::default()).await
+}
+
+pub(crate) async fn run_with_pubsub<S>(
     mut stream: S,
     config: ServerConfig,
     database: DbHandle,
     mut shutdown: watch::Receiver<bool>,
+    hub: Hub,
 ) -> Result<(), ConnectionError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     config.validate()?;
+    let mut subscription = hub.connect(config.pubsub_max_channels, config.pubsub_queue_capacity)?;
     let mut decoder = Decoder::new(config.resp_limits)?;
     let mut input = BytesMut::new();
     let mut output = BytesMut::new();
@@ -63,21 +81,109 @@ where
         if *shutdown.borrow() || shutdown.has_changed().is_err() {
             return Ok(());
         }
+        if subscription.is_evicted() {
+            return Err(PubSubError::Closed.into());
+        }
+        // Uma notificação por volta mantém comandos e mensagens progredindo.
+        if let Some(message) = subscription.try_message() {
+            write_subscriber_response(
+                &mut stream,
+                &mut output,
+                message.into_frame(),
+                &config,
+                &mut subscription,
+            )
+            .await?;
+        }
         match decoder.decode(&mut input) {
             Ok(Some(frame)) => {
                 // Só lemos enquanto o frame anterior estava incompleto. Logo,
                 // qualquer sufixo novo veio necessariamente da última leitura.
                 frame_started = if input.is_empty() { None } else { last_read_at };
+                let command_name = match &frame {
+                    Frame::Array(Some(parts)) => match parts.first() {
+                        Some(Frame::Bulk(Some(name))) => name.to_ascii_lowercase(),
+                        _ => Vec::new(),
+                    },
+                    _ => Vec::new(),
+                };
                 let response = match parse(frame) {
-                    Ok(command) => match database.execute(command).await {
-                        Ok(reply) => Frame::from(reply),
-                        Err(DbError::ShuttingDown) => return Ok(()),
-                        Err(error) => return Err(error.into()),
+                    Ok(command) => match command {
+                        Command::Subscribe { channels } => match subscription.subscribe(channels) {
+                            Ok(frames) => {
+                                for frame in frames {
+                                    write_subscriber_response(
+                                        &mut stream,
+                                        &mut output,
+                                        frame,
+                                        &config,
+                                        &mut subscription,
+                                    )
+                                    .await?;
+                                }
+                                continue;
+                            }
+                            Err(error) => Frame::Error(Bytes::from(error.to_string())),
+                        },
+                        Command::Unsubscribe { channels } => {
+                            for frame in subscription.unsubscribe(channels)? {
+                                write_subscriber_response(
+                                    &mut stream,
+                                    &mut output,
+                                    frame,
+                                    &config,
+                                    &mut subscription,
+                                )
+                                .await?;
+                            }
+                            continue;
+                        }
+                        Command::Ping(payload) if subscription.active() => {
+                            Frame::Array(Some(vec![
+                                Frame::Bulk(Some(Bytes::from_static(b"pong"))),
+                                Frame::Bulk(Some(payload.unwrap_or_default())),
+                            ]))
+                        }
+                        _ if subscription.active() => Frame::Error(Bytes::from(format!(
+                            "ERR Can't execute '{}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context",
+                            String::from_utf8_lossy(&command_name),
+                        ))),
+                        Command::Publish { channel, message } => {
+                            let message = Message {
+                                channel,
+                                payload: message,
+                            };
+                            output.clear();
+                            if encode(
+                                &message.clone().into_frame(),
+                                &mut output,
+                                response_limits(&config),
+                            )
+                            .is_err()
+                            {
+                                Frame::Error(Bytes::from_static(
+                                    b"ERR pubsub message exceeds response limit",
+                                ))
+                            } else {
+                                Frame::Integer(hub.publish(message))
+                            }
+                        }
+                        command => match database.execute(command).await {
+                            Ok(reply) => Frame::from(reply),
+                            Err(DbError::ShuttingDown) => return Ok(()),
+                            Err(error) => return Err(error.into()),
+                        },
                     },
                     Err(error) => {
                         let fatal = error.is_fatal();
-                        write_response(&mut stream, &mut output, error.into_frame(), &config)
-                            .await?;
+                        write_subscriber_response(
+                            &mut stream,
+                            &mut output,
+                            error.into_frame(),
+                            &config,
+                            &mut subscription,
+                        )
+                        .await?;
                         if fatal {
                             return Err(ConnectionError::InvalidRequest);
                         }
@@ -85,7 +191,14 @@ where
                     }
                 };
                 // Parada não cancela a tentativa de resposta de um pedido aceito.
-                write_response(&mut stream, &mut output, response, &config).await?;
+                write_subscriber_response(
+                    &mut stream,
+                    &mut output,
+                    response,
+                    &config,
+                    &mut subscription,
+                )
+                .await?;
             }
             Err(error) => {
                 let _ = write_response(
@@ -127,6 +240,11 @@ where
                         }
                     } => return Err(ConnectionError::FrameTimeout),
                     result = stream.read(&mut scratch[..capacity]) => result?,
+                    message = subscription.message() => {
+                        let message = message.ok_or(PubSubError::Closed)?;
+                        write_subscriber_response(&mut stream, &mut output, message.into_frame(), &config, &mut subscription).await?;
+                        continue;
+                    }
                 };
                 if length == 0 {
                     return if input.is_empty() {
@@ -151,13 +269,7 @@ async fn write_response<S: AsyncWrite + Unpin>(
     config: &ServerConfig,
 ) -> Result<(), ConnectionError> {
     output.clear();
-    let limits = RespLimits {
-        max_frame_bytes: config.max_response_bytes,
-        max_bulk_bytes: config.max_response_bytes,
-        max_line_bytes: config.max_response_bytes,
-        ..config.resp_limits
-    };
-    encode(&response, output, limits)?;
+    encode(&response, output, response_limits(config))?;
     let deadline = Instant::now()
         .checked_add(config.write_timeout)
         .ok_or(ConnectionError::WriteTimeout)?;
@@ -165,6 +277,29 @@ async fn write_response<S: AsyncWrite + Unpin>(
         .await
         .map_err(|_| ConnectionError::WriteTimeout)??;
     Ok(())
+}
+
+fn response_limits(config: &ServerConfig) -> RespLimits {
+    RespLimits {
+        max_frame_bytes: config.max_response_bytes,
+        max_bulk_bytes: config.max_response_bytes,
+        max_line_bytes: config.max_response_bytes,
+        ..config.resp_limits
+    }
+}
+
+async fn write_subscriber_response<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    output: &mut BytesMut,
+    response: Frame,
+    config: &ServerConfig,
+    subscription: &mut Subscription,
+) -> Result<(), ConnectionError> {
+    tokio::select! {
+        biased;
+        _ = subscription.evicted() => Err(PubSubError::Closed.into()),
+        result = write_response(stream, output, response, config) => result,
+    }
 }
 
 #[cfg(test)]
