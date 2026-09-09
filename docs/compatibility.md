@@ -10,9 +10,10 @@ diferencial do binário Sider com Redis 8.10.1. O teste separado com `redis-cli`
 também passou contra o Sider. Isso comprova o subconjunto abaixo nos casos
 registrados, não compatibilidade com todos os comandos ou clientes Redis.
 
-O desenvolvimento de R02 acrescenta strings, opções de SET, TTL e quota. Essa
-extensão está descrita abaixo e no [guia de strings](strings.md); a versão Cargo
-continua `0.1.0` durante os marcos internos, sem representar uma nova publicação.
+R02 acrescentou strings, opções de SET, TTL e quota. Essa extensão está descrita
+abaixo e no [guia de strings](strings.md). Os marcos internos conservaram a
+versão Cargo `0.1.0`; o checkout atual prepara `1.0.0`, com validação própria
+do build candidato antes de qualquer publicação.
 
 ## Matriz da versão 0.1
 

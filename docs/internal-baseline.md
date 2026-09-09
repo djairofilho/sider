@@ -6,6 +6,12 @@ runner, em checkout limpo, antes de alterar a versão para `1.0.0`. Não cria ta
 release ou recibo de publicação. Prepare um conjunto por plataforma suportada:
 Windows MSVC x86_64 e Linux GNU x86_64.
 
+A origem selecionada é `0021d875dde9da6cbbe9b5b84cd640681128e6ea`. Execute o
+congelamento em uma worktree limpa desse SHA, que ainda identifica `0.1.0`.
+O checkout candidato identifica `1.0.0` e consome o conjunto congelado na etapa
+de migração. Os hashes são obtidos dos arquivos realmente produzidos e guardados
+com a evidência; não são inferidos a partir do SHA da origem.
+
 ## Preparar o pacote e registrar o build
 
 No SHA que será congelado, execute `cargo build --locked --release --bins` e

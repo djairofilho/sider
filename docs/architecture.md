@@ -1,8 +1,9 @@
 # Arquitetura do Sider
 
-O Sider começa como uma única crate Rust, com biblioteca testável e um binário
-pequeno. O [plano de implementação](../PLANO.md) define os contratos completos da
-versão 0.1; este documento resume as fronteiras e identifica o que já existe.
+O Sider usa uma crate Rust com biblioteca testável e quatro executáveis: servidor,
+migração AOF, backup e administração de réplica. Este documento resume as
+fronteiras atuais. O [plano inicial](../PLANO.md) preserva o desenho histórico
+da versão 0.1; a [matriz 1.0](compatibility-matrix.md) define o subconjunto atual.
 
 ## Implementado
 
@@ -17,11 +18,15 @@ versão 0.1; este documento resume as fronteiras e identifica o que já existe.
 | Configuração | Validar endereço, limites, prazos e arquivo opcional de prontidão |
 | Erros de configuração | Representar falhas de validação com tipos explícitos |
 | Binário | Processar ajuda/versão; abrir listener, registrar sinais e publicar prontidão |
+| Persistência | Resolver lotes, sincronizar AOF, recuperar dados e compactar snapshots globais |
+| Replicação e backup | Transportar snapshots e lotes com limites, instalar dados e preservar TTL absoluto |
+| Métricas | Expor estado observado por INFO e diagnóstico de configuração sem iniciar listeners |
 | Ferramentas de desenvolvimento | Fixar toolchain e dependências; verificar formatação, lint, testes e build |
 
 A execução normal atende TCP com Tokio. Parser e mapa continuam testáveis sem
-runtime. As dependências de produção são `thiserror`, `bytes`, `tokio`, `tracing`
-e `tracing-subscriber`, com funcionalidades selecionadas. O código próprio usa
+runtime. As dependências de produção são `thiserror`, `bytes`, `tokio`, `tracing`,
+`tracing-subscriber`, `getrandom`, `serde_json` e `sha2`, com funcionalidades selecionadas.
+O código próprio usa
 `#![forbid(unsafe_code)]`.
 
 `ServerConfig` agrupa endereço, limites e prazos. `from_env` lê o ambiente do
@@ -29,7 +34,7 @@ processo; `from_lookup` permite fornecer valores explícitos nos testes, sem alt
 o ambiente global. O binário trata argumentos desconhecidos e configuração
 inválida como falhas, com código de saída diferente de zero.
 
-## Fronteiras implementadas na versão 0.1
+## Fronteiras implementadas
 
 | Componente | Conhece | Não precisa conhecer |
 | --- | --- | --- |
@@ -56,7 +61,7 @@ cancelamento. O socket tem um único escritor para confirmações/notificações
 PING no modo assinante não usa o worker. Nenhuma inscrição pertence ao dataset.
 
 A fila define a ordem de execução entre conexões. Cada conexão aguarda sua
-resposta antes de despachar o próximo comando. Assim, a versão 0.1 mantém um
+resposta antes de despachar o próximo comando. A conexão mantém um
 pedido em voo por cliente e preserva a ordem dos comandos concatenados daquele
 cliente, sem prometer justiça estrita entre clientes.
 
@@ -122,7 +127,7 @@ prazo configurado. Depois solicita aborto cooperativo às tarefas restantes.
 Término inesperado do worker encerra o listener. `JoinSet` também aborta as
 tarefas pertencentes ao servidor se a future de supervisão for cancelada.
 
-## Evolução
+## Persistência e replicação
 
 A [replicação R09](replication.md) observa o escritor AOF global para numerar o
 histórico. Captura e assinatura usam a barreira de admissão no mesmo ponto; a rede

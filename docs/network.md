@@ -246,8 +246,10 @@ erro. Falhas de uma conexão são registradas e não derrubam as demais. Cancela
 future `serve` solicita aborto de suas tarefas, sem deixá-las destacadas do
 supervisor. Essa saída não oferece a garantia de drenagem da parada normal.
 
-Nenhum desses caminhos oferece durabilidade na 0.1. Ao encerrar o processo, o
-dataset em memória é perdido.
+Sem AOF configurada, o dataset em memória é perdido ao encerrar o processo.
+Com AOF, a parada normal drena os pedidos aceitos e sincroniza o escritor;
+cancelamento ou término forçado seguem os limites da política `always` ou
+`everysec` descritos no [contrato de persistência](persistence.md).
 
 ## Arquivo de prontidão
 
@@ -256,8 +258,8 @@ sem reservar uma porta, liberá-la e disputar um novo bind. O diretório pai dev
 existir e ser gravável. Para um processo de teste, use um caminho exclusivo e
 `SIDER_ADDR=127.0.0.1:0`.
 
-Depois de registrar os sinais e abrir o listener, o binário publica um JSON
-completo. Exemplo ilustrativo:
+Depois da recuperação AOF configurada, do registro dos sinais e do bind, o binário
+publica um JSON completo. Exemplo ilustrativo:
 
 ```json
 {"pid":12345,"host":"127.0.0.1","port":49152}
@@ -333,6 +335,6 @@ comprovam a ordem dos eventos.
 Registre resultados efetivamente obtidos, comandos, alvo e limitações no PR e no
 [guia de testes](testing.md). Comparação diferencial contra a referência, uso de
 `redis-cli` e pacotes extraídos têm seus próprios gates. Testes unitários de
-rede não substituem essas evidências nem autorizam publicar a 0.1 antecipadamente.
+rede não substituem essas evidências nem aprovam a publicação da candidata.
 CI permanece desativada até a 1.0 inclusive, conforme o
 [fluxo de releases](releases.md).

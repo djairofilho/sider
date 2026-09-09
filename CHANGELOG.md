@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [1.0.0] - Preparação da candidata
+
+O pacote identifica `1.0.0`; a candidata e a final usam o mesmo build e arquivos.
+As [notas da versão](releases/notes/v1.0.0.md) descrevem capacidades e limites.
+A aprovação depende dos gates do SHA exato e do conjunto de evidências produzido
+para ele; esta seção não declara publicação ou gates aprovados.
+
 - Transações de um shard com `MULTI`, `EXEC`, `DISCARD`, `WATCH` e `UNWATCH`;
   validação antes de aplicar, um lote AOF por EXEC e erros individuais sem rollback.
   Publicações em transações preservam a ordem após aplicar o lote confirmado
@@ -56,6 +63,9 @@
 - Manifesto de artefatos v2: o build já usa `1.0.0` na candidata, e a final promove
   o mesmo SHA e arquivos. Divergências de identidade ou hashes são rejeitadas.
 - Contrato de migração para 1.0 a partir de baseline interna R10, sem publicação intermediária.
+- Congelamento e migração por pacotes extraídos, com proveniência observacional,
+  inventário imutável, cinco tipos, EXEC, TTL durante a parada, backup/restauração
+  e recriação de réplica da mesma versão. A baseline R10 mantém o pacote `0.1.0`.
 
 ## [0.1.0] - Preparação anterior, não publicada
 
