@@ -117,7 +117,7 @@ e falhas AOF sem efeitos Pub/Sub. Os testes de persistência usam o lote real do
 worker, truncamento de cada prefixo do registro e nove pontos de crash de processo,
 incluindo publicação de gerações compactadas.
 
-Na execução local em Windows, passaram 15 testes de implementação, 91 comparações
+Na execução local em Windows, passaram 16 testes de implementação, 91 comparações
 binárias com Redis, o transcript Pub/Sub de 274 bytes, 71 prefixos do registro e
 nove crashes de processo. O replay após compactação preservou hash, lista, set e
 sorted set escritos no mesmo lote, inclusive com `WRONGTYPE` em outra posição.

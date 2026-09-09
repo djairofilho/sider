@@ -91,6 +91,59 @@ async fn transactions_cross_shard_batch_is_rejected_without_enqueuing_any_part()
     );
 }
 
+#[tokio::test]
+async fn transactions_pubsub_limits_are_individual_and_slow_subscriber_does_not_block_batch() {
+    let (stop, shutdown) = watch::channel(false);
+    let (db, owner) = channel(2, Duration::from_secs(5), shutdown).unwrap();
+    let running = tokio::spawn(owner.run());
+    let hub = Hub::default();
+    let mut slow = hub.connect(1, 1).unwrap();
+    let mut fast = hub.connect(1, 4).unwrap();
+    for subscriber in [&mut slow, &mut fast] {
+        subscriber
+            .subscribe(vec![Bytes::from_static(b"a")])
+            .unwrap();
+    }
+    let subscription = hub.connect(1, 4).unwrap();
+    let commands = vec![
+        Command::Subscribe {
+            channels: vec![Bytes::from_static(b"a")],
+        },
+        Command::Subscribe {
+            channels: vec![Bytes::from_static(b"b")],
+        },
+        Command::Publish {
+            channel: Bytes::from_static(b"a"),
+            message: Bytes::from_static(b"one"),
+        },
+        Command::Publish {
+            channel: Bytes::from_static(b"a"),
+            message: Bytes::from_static(b"two"),
+        },
+        Command::Ping(None),
+    ];
+    let result = db
+        .execute_transaction(commands, vec![], subscription, RespLimits::default())
+        .await
+        .unwrap();
+    assert_eq!(result.output.unwrap().as_ref(), b"*5\r\n*3\r\n$9\r\nsubscribe\r\n$1\r\na\r\n:1\r\n-ERR pubsub channel limit exceeded\r\n:3\r\n:2\r\n*2\r\n$4\r\npong\r\n$0\r\n\r\n*3\r\n$7\r\nmessage\r\n$1\r\na\r\n$3\r\none\r\n*3\r\n$7\r\nmessage\r\n$1\r\na\r\n$3\r\ntwo\r\n");
+    assert!(result.subscription.active());
+    assert!(slow.is_evicted());
+    assert_eq!(fast.try_message().unwrap().payload.as_ref(), b"one");
+    assert_eq!(fast.try_message().unwrap().payload.as_ref(), b"two");
+    assert!(fast.try_message().is_none());
+    assert_eq!(db.execute(Command::Ping(None)).await.unwrap(), Reply::Pong);
+    assert_eq!(
+        hub.publish(Message {
+            channel: Bytes::from_static(b"b"),
+            payload: Bytes::new()
+        }),
+        0
+    );
+    stop.send_replace(true);
+    running.await.unwrap();
+}
+
 #[tokio::test(start_paused = true)]
 async fn transactions_snapshot_waits_for_accepted_batch_even_after_client_cancellation() {
     use std::{
