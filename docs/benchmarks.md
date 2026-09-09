@@ -136,4 +136,3 @@ máquina livre.
 A [medição exploratória R04-05](sharding.md#medição-exploratória-r04-05)
 permanece como evidência histórica do SHA registrado. Ela usava outro volume,
 não tinha aquecimento/repetições e não satisfaz este gate.
-
