@@ -29,6 +29,13 @@ pub struct OwnedChild {
 
 impl OwnedChild {
     pub fn spawn(command: &mut Command) -> Result<Self, String> {
+        Self::spawn_with_stdout_limit(command, OUTPUT_LIMIT)
+    }
+
+    fn spawn_with_stdout_limit(command: &mut Command, stdout_limit: usize) -> Result<Self, String> {
+        if stdout_limit == 0 || stdout_limit > 128 * 1024 * 1024 {
+            return Err("limite de captura stdout inválido".into());
+        }
         let child = command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -46,10 +53,12 @@ impl OwnedChild {
         owned.stdout = Some(capture_thread(
             owned.child.stdout.take().expect("stdout pipe"),
             owned.exceeded.clone(),
+            stdout_limit,
         )?);
         owned.stderr = Some(capture_thread(
             owned.child.stderr.take().expect("stderr pipe"),
             owned.exceeded.clone(),
+            OUTPUT_LIMIT,
         )?);
         Ok(owned)
     }
@@ -153,13 +162,23 @@ impl Drop for OwnedChild {
             pause(deadline);
         }
         // Sem join ilimitado: um descendente pode ter herdado um pipe. Cada
-        // leitor retém no máximo OUTPUT_LIMIT e não impede o término do teste.
+        // leitor retém no máximo seu limite de captura e não impede o término do teste.
     }
 }
 
 /// Prazo inclui execução e EOF dos dois streams; status não zero é preservado.
 pub fn run(command: &mut Command, timeout: Duration) -> Result<Output, String> {
     let mut child = OwnedChild::spawn(command)?;
+    child.wait(timeout)
+}
+
+/// Captura de um membro de pacote com limite explícito; stderr mantém OUTPUT_LIMIT.
+pub fn run_with_stdout_limit(
+    command: &mut Command,
+    timeout: Duration,
+    limit: usize,
+) -> Result<Output, String> {
+    let mut child = OwnedChild::spawn_with_stdout_limit(command, limit)?;
     child.wait(timeout)
 }
 
@@ -170,18 +189,19 @@ fn pause(deadline: Instant) {
 fn capture_thread(
     stream: impl Read + Send + 'static,
     exceeded: Arc<AtomicBool>,
+    limit: usize,
 ) -> Result<Capture, String> {
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::Builder::new()
         .name("sider-test-output".into())
         .spawn(move || {
-            let _ = sender.send(capture(stream, &exceeded));
+            let _ = sender.send(capture(stream, &exceeded, limit));
         })
         .map_err(|e| format!("criar leitor de saída: {e}"))?;
     Ok(receiver)
 }
 
-fn capture(mut stream: impl Read, exceeded: &AtomicBool) -> io::Result<Vec<u8>> {
+fn capture(mut stream: impl Read, exceeded: &AtomicBool, limit: usize) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     let mut chunk = [0; 8192];
     loop {
@@ -189,7 +209,7 @@ fn capture(mut stream: impl Read, exceeded: &AtomicBool) -> io::Result<Vec<u8>> 
         if count == 0 {
             return Ok(bytes);
         }
-        let retained = count.min(OUTPUT_LIMIT.saturating_sub(bytes.len()));
+        let retained = count.min(limit.saturating_sub(bytes.len()));
         bytes.extend_from_slice(&chunk[..retained]);
         if retained != count {
             exceeded.store(true, Ordering::Relaxed);
@@ -213,7 +233,7 @@ mod tests {
         let input = vec![b'x'; OUTPUT_LIMIT + 1];
         let mut reader = input.as_slice();
         let exceeded = AtomicBool::new(false);
-        let result = capture(&mut reader, &exceeded).unwrap();
+        let result = capture(&mut reader, &exceeded, OUTPUT_LIMIT).unwrap();
         assert_eq!(result.len(), OUTPUT_LIMIT);
         assert!(exceeded.load(Ordering::Relaxed));
         assert!(reader.is_empty());
@@ -223,12 +243,26 @@ mod tests {
     fn capture_accepts_exact_limit() {
         let exceeded = AtomicBool::new(false);
         assert_eq!(
-            capture(vec![b'x'; OUTPUT_LIMIT].as_slice(), &exceeded)
+            capture(vec![b'x'; OUTPUT_LIMIT].as_slice(), &exceeded, OUTPUT_LIMIT)
                 .unwrap()
                 .len(),
             OUTPUT_LIMIT
         );
         assert!(!exceeded.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn release_input_capture_keeps_explicit_binary_limit() {
+        for limit in [1, OUTPUT_LIMIT + 8] {
+            let exceeded = AtomicBool::new(false);
+            assert_eq!(
+                capture(vec![7; limit + 1].as_slice(), &exceeded, limit)
+                    .unwrap()
+                    .len(),
+                limit
+            );
+            assert!(exceeded.load(Ordering::Relaxed));
+        }
     }
 
     #[test]

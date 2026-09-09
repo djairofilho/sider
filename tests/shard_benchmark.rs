@@ -1,8 +1,12 @@
 //! Medição exploratória TCP isolada; executar sem builds ou outra carga concorrente.
 #![forbid(unsafe_code)]
 
+#[path = "common/gate_receipt.rs"]
+mod gate_receipt;
 #[path = "common/process.rs"]
 mod process;
+#[path = "common/release_input.rs"]
+mod release_input;
 #[path = "common/sider_process.rs"]
 mod sider_process;
 #[path = "common/wire.rs"]
@@ -88,6 +92,8 @@ fn connection(address: std::net::SocketAddr) -> TcpStream {
 #[test]
 #[ignore = "benchmark exploratório: requer SIDER_SHARD_BENCH_OUTPUT e máquina sem carga concorrente"]
 fn exploratory_shard_benchmark() {
+    let context = gate_receipt::GateContext::from_env("benchmarks").unwrap();
+    let package = release_input::ReleaseInput::from_env(&context).unwrap();
     let path =
         std::env::var_os("SIDER_SHARD_BENCH_OUTPUT").expect("destino de resultados obrigatório");
     let path = Path::new(&path);
@@ -126,7 +132,7 @@ fn exploratory_shard_benchmark() {
                         overrides.push(("SIDER_AOF_COMPACT_AFTER_BYTES", "0".into()));
                     }
                     let server = SiderProcess::try_start_configured(
-                        Path::new(env!("CARGO_BIN_EXE_sider")),
+                        package.binary(),
                         env!("CARGO_PKG_VERSION"),
                         &overrides,
                     )
@@ -216,6 +222,7 @@ fn exploratory_shard_benchmark() {
         ),
         sha
     );
+    package.verify_again(&context).unwrap();
     assert!(
         output(Command::new("git").current_dir(root).args([
             "status",
