@@ -18,7 +18,7 @@ pub struct Cursor {
 /// Época independente a cada inicialização de primário ou promoção explícita.
 pub fn new_epoch() -> Result<[u8; 16], std::io::Error> {
     let mut epoch = [0; 16];
-    getrandom::fill(&mut epoch).map_err(std::io::Error::other)?;
+    getrandom::fill(&mut epoch).map_err(|error| std::io::Error::other(error.to_string()))?;
     if epoch == [0; 16] {
         return Err(std::io::Error::other("época aleatória inválida"));
     }
