@@ -1,8 +1,8 @@
 # Rede e ciclo de vida do Sider
 
 Este guia descreve a implementação de `R01-04`: servidor RESP2/TCP, worker
-proprietário, configuração, prazos e prontidão. O escopo da 0.1 continua limitado
-a `PING`, `ECHO`, `GET`, `SET` básico e `DEL`. Consulte a
+proprietário, configuração, prazos e prontidão. R02 acrescenta comandos de strings,
+expiração e quota lógica ao mesmo caminho de rede. Consulte a
 [matriz de compatibilidade](compatibility.md) para distinguir suporte implementado
 de equivalência já demonstrada contra Redis.
 
@@ -73,6 +73,7 @@ inteiros e prazos em milissegundos. `1 MiB` corresponde a `1048576` bytes.
 | `SIDER_MAX_DEPTH` | `16` | Níveis de arrays; array raiz conta como nível 1 |
 | `SIDER_MAX_INPUT_BUFFER_BYTES` | `4194304` | Bytes ainda não consumidos no buffer da conexão |
 | `SIDER_MAX_RESPONSE_BYTES` | `4194304` | Resposta completa, incluindo framing |
+| `SIDER_MAX_DATASET_BYTES` | `67108864` | Consumo lógico do dataset, incluindo 128 bytes por entrada |
 | `SIDER_FRAME_TIMEOUT_MS` | `10000` | Formação de um frame desde o primeiro byte lido |
 | `SIDER_REQUEST_TIMEOUT_MS` | `5000` | Prazo total de envio à fila e espera da resposta |
 | `SIDER_WRITE_TIMEOUT_MS` | `5000` | Escrita de uma resposta completa |
@@ -137,9 +138,10 @@ buffers de socket. O número de conexões e os tamanhos máximos precisam ser
 considerados juntos, como no orçamento do
 [plano da 0.1](../PLANO.md#limites-e-ciclo-de-vida).
 
-O dataset não tem quota, expiração ou eviction na 0.1. Uma sequência de `SET`
-válidos pode esgotar a memória, mesmo respeitando todos os limites de rede.
-Quota com rejeição de crescimento pertence à 0.2.
+O dataset de R02 tem quota lógica própria e expiração. `SET`, `MSET` e incrementos
+recusam crescimento acima do orçamento sem eviction. Cada entrada conta os bytes
+da chave, do valor e uma taxa fixa de 128 bytes; isso não limita o RSS. Consulte
+o [guia de strings](strings.md#quota-lógica) para a contabilidade e seus limites.
 
 ## Aceitação e resultado incerto
 
