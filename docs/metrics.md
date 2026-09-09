@@ -16,12 +16,13 @@ arquivo periódico de métricas nem rótulos derivados de chaves ou canais.
 redis-cli -h 127.0.0.1 -p 6379 INFO
 redis-cli -h 127.0.0.1 -p 6379 INFO clients stats
 redis-cli -h 127.0.0.1 -p 6379 INFO memory persistence
+redis-cli -h 127.0.0.1 -p 6379 INFO replication persistence
 redis-cli -h 127.0.0.1 -p 6379 INFO config
 ```
 
 A resposta é uma bulk string RESP2, com títulos `# Section` e linhas
 `nome:valor` terminadas em CRLF. As seções disponíveis são `server`, `clients`,
-`stats`, `memory`, `persistence` e `config`. Os nomes não distinguem caixa ASCII;
+`stats`, `memory`, `persistence`, `replication` e `config`. Os nomes não distinguem caixa ASCII;
 repetições não duplicam a saída. Sem argumentos, ou com `all`, `default` ou
 `everything`, todas as seções são selecionadas. Nomes desconhecidos são
 ignorados; uma seleção inteiramente desconhecida produz uma string vazia.
@@ -67,8 +68,12 @@ conectividade. Por isso, uma porta ocupada ou diretório sem permissão pode
 coexistir com um diagnóstico de configuração válido. O comando não atesta
 prontidão, integridade da AOF, espaço em disco ou saúde de uma réplica.
 
-`ready_file_enabled` e `aof_configured` indicam presença das opções, sem imprimir
-os caminhos. Em uma instância em execução, `tcp_port` informa a porta efetiva;
+`ready_file_enabled`, `aof_configured`, `replication_configured`,
+`replication_upstream_configured` e `replication_ready_file_enabled` indicam
+presença das opções, sem imprimir caminhos nem endpoints de replicação. Os
+limites numéricos da replicação também são impressos quando configurados. Isso
+não determina o papel persistido da instância: uma promoção durável prevalece
+sobre a configuração de upstream. Em uma instância em execução, `tcp_port` informa a porta efetiva;
 no diagnóstico offline, `bind_addr` informa o endereço solicitado, inclusive
 porta zero quando configurada.
 
@@ -180,7 +185,47 @@ pode representar a janela normal entre sincronizações. Leia ambos os campos
 junto de `aof_failed`, `aof_dirty`, política e logs; uma sequência isolada não
 prova confirmação ao cliente.
 
-### Configuração e replicação
+### Replicação
+
+`INFO replication` observa o runtime usado pelas sessões e pelo escritor AOF.
+Sem replicação configurada, a seção contém apenas `replication_enabled:0`.
+As demais linhas existem somente com o observador real anexado. A leitura não
+envia pedidos aos workers, não consulta o upstream e não mantém canais do banco
+ou do escritor abertos após shutdown.
+
+| Campo | Unidade e definição |
+| --- | --- |
+| `replication_enabled` | Presença do runtime de replicação, em `0`/`1` |
+| `replication_role` | Papel efetivo `primary` ou `replica`, incluindo promoção persistida |
+| `replication_connected` | Sessão de upstream estabelecida, em `0`/`1`; no primário é `0` e não conta conexões de réplicas |
+| `replication_epoch_known` | Cursor pertence a uma época inicializada, em `0`/`1` |
+| `replication_epoch` | Identificador fixo de 32 dígitos hexadecimais, presente quando a época é conhecida |
+| `replication_head_sequence` | Somente primário: último lote publicado no journal após append; pode preceder apply no Store |
+| `replication_applied_sequence` | Somente réplica: última posição confirmada após instalação de snapshot ou flush e apply do lote |
+| `replication_upstream_sequence` | Somente réplica: última sequência informada pelo upstream; pode estar desatualizada após desconexão |
+| `replication_lag_known` | Há sessão conectada, época conhecida e upstream observado maior ou igual ao aplicado, em `0`/`1` |
+| `replication_lag_batches` | Diferença upstream menos aplicado, em lotes; só existe quando `replication_lag_known:1` |
+| `replication_full_syncs_total` | Sincronizações completas que estabeleceram sessão nesta execução |
+| `replication_partial_syncs_total` | Continuações aceitas que estabeleceram sessão nesta execução |
+| `replication_reconnects_total` | Tentativas de sessão nesta execução, incluindo a primeira |
+| `replication_backlog_bytes`, `replication_backlog_batches` | Bytes e lotes retidos no journal ativo do primário |
+| `replication_oldest_sequence` | Primeira sequência retida; ausente quando o journal está vazio |
+
+Campos de sequência aplicada/head são omitidos até a época ser conhecida.
+Durante sincronização inicial, desconexão ou observação de upstream anterior
+ao cursor local, o atraso fica desconhecido. Sua ausência não representa zero.
+Mesmo um atraso conhecido igual a zero compara com a última observação do
+upstream; não promete igualdade instantânea com escritas concorrentes. A unidade
+é lote, não comando, byte ou segundo. Uma transação pode conter vários comandos
+em uma sequência. Compare sequências entre processos apenas na mesma época.
+
+Gauges de dataset são atualizados após os controles de instalação e aplicação
+da replicação. Os contadores de sessão reiniciam com o processo; papel, época
+e cursor podem vir do estado durável. Uma sessão antiga não pode sobrescrever
+o estado da sessão nova ou desfazer uma promoção. As observações do journal e
+do runtime são curtas e podem refletir instantes próximos, sem barreira global.
+
+### Configuração
 
 A seção `config` imprime limites numéricos do codec, buffers, conexões, filas,
 shards, dataset, Pub/Sub, transações, WATCH e prazos em milissegundos. Quando
@@ -188,15 +233,15 @@ AOF está configurado, também imprime capacidade de fila, limites de registros,
 mutações e delta, limiar de compactação e política de sincronização. Opções
 de arquivo são expostas somente por flags de presença.
 
+Com replicação configurada, aparecem `replication_backlog_limit_bytes`,
+`replication_backlog_limit_batches`, `replication_max_connections` e os prazos
+`replication_frame_timeout_ms`, `replication_sync_timeout_ms`,
+`replication_reconnect_min_ms` e `replication_reconnect_max_ms`. Esses campos
+descrevem limites configurados; os gauges da seção `replication` medem o uso.
+
 `worker_queue_capacity_per_shard` é a capacidade configurada de cada canal;
 `worker_queue_capacity`, na seção `stats`, é a soma observada de todos eles.
 Os nomes permanecem únicos mesmo quando todas as seções são selecionadas.
-
-Esta entrega instrumenta os consumidores já integrados. Não publica contadores
-de replicação sem uma sessão real: a integração de R09 deve fornecer papel,
-cursores, conexão e atraso observados, e R10-05 deve conferir a cobertura
-completa. Ausência de uma seção de replicação não significa atraso zero nem
-réplica saudável.
 
 ## Procedimentos de diagnóstico
 
@@ -209,7 +254,19 @@ réplica saudável.
 | Cliente lento | Veja `client_write_timeouts_total`, `pubsub_evictions_total` e logs de prazo de escrita/assinante encerrado. Faça o consumidor drenar respostas e notificações; reconecte e refaça inscrições após encerramento. Uma fila maior só amplia a tolerância temporária. |
 | Resposta acima do limite | `response_encoding_failures_total` aumenta. Reduza o tamanho solicitado, selecione menos seções de INFO ou ajuste limites coerentes. O comando pode já ter produzido efeitos antes da falha da resposta. |
 | Quota lógica | Compare consumo e quota em `INFO memory`; confira erros de quota. Remova dados ou aumente o orçamento de forma controlada, sem tratar quota lógica como memória do processo. |
-| Atraso de réplica | Sem observador R09 integrado, não deduza saúde a partir da ausência de campos. Quando integrado, compare cursores da mesma época, conexão e confirmação de aplicação; confira ambos os lados e os logs antes de qualquer recuperação ou promoção. AOF local sincronizada não comprova aplicação remota. |
+| Réplica conectada com atraso | Consulte `INFO replication persistence` nos dois lados. Compare épocas, head do primário, aplicado e último upstream da réplica em observações sucessivas. Verifique fila/disco da réplica e crescimento do backlog. Zero observado não comprova recebimento de uma escrita posterior. |
+| Réplica desconectada | `replication_connected:0` e `replication_lag_known:0` tornam o atraso desconhecido. Confira processos, prontidão interna, rede e logs estáticos; corrija a causa. A sessão tenta reconectar dentro dos prazos configurados. O aumento de `replication_reconnects_total` mostra tentativas, não sucesso. |
+| Repetição de sincronização completa | Observe crescimento de `replication_full_syncs_total`, retenção por bytes/lotes e capacidade de aplicar no destino. Se o cursor sair da retenção, a retomada exige FULL. Corrija a lentidão ou dimensione o backlog dentro do orçamento de memória; apenas aumentar timeout não preserva histórico descartado. |
+| Falha de AOF na réplica | Compare os indicadores AOF locais e preserve os logs. Não interprete append sem flush/apply como posição aplicada. Corrija o armazenamento antes da recuperação; `--diagnose` não inspeciona o arquivo e não o repara. |
+| Promoção deliberada | Confira a posição aplicada e a época antes da decisão operacional. Isole o antigo primário e redirecione os clientes em procedimento controlado. `sider-replica --addr IP:PORT --promote`, no listener interno de loopback, persiste novo papel/época e cancela a sessão antiga. Confirme `replication_role:primary` e a nova época. Não há failover automático nem reconciliação de escritas divergentes. |
+
+Para consultar o protocolo administrativo existente, use
+`sider-replica --addr IP:PORT --status` no endpoint interno. Esse endpoint é
+diferente da porta RESP usada por `redis-cli`. A prontidão interna publicada
+por `SIDER_REPLICATION_READY_FILE` identifica o listener da instância; sua
+presença não comprova que a réplica terminou de sincronizar. Não remova o papel
+persistido nem a AOF para forçar uma reconexão depois de promover: a recuperação
+de topologia exige decidir qual história será preservada.
 
 Os eventos existentes registram início/parada, recusa de conexões, falhas de
 atendimento, falhas de append/sync e conclusão/aborto de compactação automática.
@@ -222,10 +279,11 @@ logs. Não existe comando de redefinição dos contadores nesta entrega.
 cargo test --locked --lib metrics_ -- --nocapture
 cargo test --locked --test metrics -- --nocapture
 cargo test --locked --test cli metrics_ -- --nocapture
-cargo clippy --locked --lib --test metrics --test cli -- -D warnings
+cargo test --locked --test replication_network metrics_replication -- --nocapture
+cargo clippy --locked --lib --test metrics --test cli --test replication_network -- -D warnings
 ```
 
-Os nove testes nativos cobrem concorrência sem perda de incrementos, nomes
+Os testes nativos cobrem concorrência sem perda de incrementos, nomes
 fixos, seções desconhecidas/binárias, Pub/Sub lento/rápido, cancelamento,
 contagens de EXEC, fila saturada, timeout, quota, expiração e limites de saída.
 Um deles usa quatro shards: mantém um pedido aceito sem executar, consulta INFO
@@ -234,8 +292,14 @@ Quatro testes de integração conferem dois cenários TCP com quatro shards e o 
 append, compactação, falha fatal de disco e rejeição recuperável por tamanho.
 Dois testes CLI verificam código de saída, ocultação de valores inválidos e
 ausência de efeitos em listener, diretório AOF e arquivo de prontidão.
+O teste de replicação por TCP inicia processos reais com quatro shards, confere
+FULL e delta, consulta INFO dentro de EXEC, encerra o primário e verifica que
+o atraso vira desconhecido; depois promove a réplica e confere papel, época e
+head. O teste de estado cobre uma sessão antiga tentando atualizar a nova,
+retomada parcial, cursor ainda desconhecido e upstream temporariamente anterior
+ao aplicado. O teste offline usa também uma porta interna ocupada e confirma
+ausência de criação de AOF e prontidão.
 
 Esses resultados conferem o contrato funcional no Windows. Não constituem
-benchmark do custo da instrumentação, gate Docker/Linux nem validação de
-replicação futura. A validação integrada do milestone deve repetir apenas os
+benchmark do custo da instrumentação nem gate Docker/Linux. A validação integrada do milestone deve repetir apenas os
 caminhos exigidos pelas mudanças compostas e registrar o SHA efetivo.
