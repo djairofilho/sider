@@ -132,6 +132,7 @@ com execução manual e evidências nas plataformas previstas.
 | [docs/testing.md](docs/testing.md) | Testes locais e reprodução da referência Redis |
 | [docs/resp.md](docs/resp.md) | Contratos, limites e uso do codec RESP2 |
 | [docs/network.md](docs/network.md) | Configuração TCP, aceitação, timeouts e encerramento |
+| [docs/pubsub.md](docs/pubsub.md) | Canais binários, modo assinante, filas limitadas e diferencial Pub/Sub |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Fluxo de trabalho e critérios de revisão |
 
 ## Próximo passo
