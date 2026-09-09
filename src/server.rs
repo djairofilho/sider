@@ -28,6 +28,43 @@ pub enum ServerError {
     WorkerFailed(#[source] tokio::task::JoinError),
     #[error("prazo de encerramento excedido; tarefas restantes foram abortadas")]
     ShutdownTimeout,
+    #[error("persistência indisponível: {0}")]
+    Persistence(#[from] crate::persistence::AofError),
+}
+
+/// Estado recuperado antes de abrir o listener do binário.
+pub struct PreparedServer {
+    store: Option<Store>,
+    recovered: Option<crate::persistence::Recovered>,
+}
+
+pub async fn prepare(config: &ServerConfig) -> Result<PreparedServer, ServerError> {
+    config.validate()?;
+    if config.aof.is_some() && config.shards != 1 {
+        return Err(ConfigError::InvalidServerLimits {
+            reason: "AOF v1 requer um shard; migra??o dur?vel ? expl?cita",
+        }
+        .into());
+    }
+    let store_config = StoreConfig {
+        max_dataset_bytes: config.max_dataset_bytes,
+    };
+    if let Some(aof) = config.aof.clone() {
+        let recovered = tokio::task::spawn_blocking(move || {
+            crate::persistence::recover(aof, store_config, Arc::new(SystemClock))
+        })
+        .await
+        .map_err(ServerError::WorkerFailed)??;
+        Ok(PreparedServer {
+            store: None,
+            recovered: Some(recovered),
+        })
+    } else {
+        Ok(PreparedServer {
+            store: Some(Store::with_config(store_config, Arc::new(SystemClock))?),
+            recovered: None,
+        })
+    }
 }
 
 /// Atende o listener já aberto até o sinal de parada ou uma falha do worker.
@@ -39,21 +76,41 @@ pub async fn serve(
     config: ServerConfig,
     shutdown: impl Future<Output = ()> + Send,
 ) -> Result<(), ServerError> {
+    let prepared = prepare(&config).await?;
+    serve_prepared(listener, config, shutdown, prepared).await
+}
+
+/// Atende somente depois da recuperação. `prepare` pode executar antes do bind.
+pub async fn serve_prepared(
+    listener: TcpListener,
+    config: ServerConfig,
+    shutdown: impl Future<Output = ()> + Send,
+    prepared: PreparedServer,
+) -> Result<(), ServerError> {
     config.validate()?;
     let (stop, receiver) = watch::channel(false);
-    // Divisão fixa evita um contador de quota global no caminho de cada escrita.
-    // O resto é distribuído pelos primeiros shards sem exceder a quota total.
-    let stores = (0..config.shards)
-        .map(|index| {
-            Store::with_config(
-                StoreConfig {
-                    max_dataset_bytes: config.max_dataset_bytes / config.shards
-                        + usize::from(index < config.max_dataset_bytes % config.shards),
-                },
-                Arc::new(SystemClock),
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let (store, persistence) = match prepared.recovered {
+        Some(recovered) => {
+            let (store, handle, task) = recovered.start();
+            (store, Some((handle, task)))
+        }
+        None => (prepared.store.expect("estado preparado"), None),
+    };
+    let stores = if persistence.is_some() {
+        vec![store]
+    } else {
+        (0..config.shards)
+            .map(|index| {
+                Store::with_config(
+                    StoreConfig {
+                        max_dataset_bytes: config.max_dataset_bytes / config.shards
+                            + usize::from(index < config.max_dataset_bytes % config.shards),
+                    },
+                    Arc::new(SystemClock),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
     let (database, shard_workers) = worker::channel_with_stores(
         config.worker_queue_capacity,
         config.request_timeout,
@@ -62,9 +119,25 @@ pub async fn serve(
     )?;
     let mut workers = JoinSet::new();
     for worker in shard_workers {
+        let worker = match &persistence {
+            Some((handle, _)) => worker.with_aof(
+                handle.clone(),
+                config.aof.as_ref().map_or(0, |aof| aof.compact_after_bytes),
+            ),
+            None => worker,
+        };
         workers.spawn(worker.run());
     }
-    supervise_workers(listener, config, shutdown, database, workers, stop).await
+    let timeout = config.shutdown_timeout;
+    let result = supervise_workers(listener, config, shutdown, database, workers, stop).await;
+    if let Some((handle, writer)) = persistence {
+        drop(handle);
+        tokio::time::timeout(timeout, writer)
+            .await
+            .map_err(|_| ServerError::ShutdownTimeout)?
+            .map_err(ServerError::WorkerFailed)??;
+    }
+    result
 }
 
 #[cfg(test)]

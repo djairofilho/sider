@@ -43,8 +43,15 @@ pub enum FormatError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Record {
     Snapshot(Mutation),
-    Seal { sequence: u64 },
-    Batch { sequence: u64, batch: ResolvedBatch },
+    Seal {
+        sequence: u64,
+        entries: u64,
+        digest: u32,
+    },
+    Batch {
+        sequence: u64,
+        batch: ResolvedBatch,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -106,7 +113,7 @@ fn mutation_size(mutation: &Mutation) -> Result<usize, FormatError> {
 pub fn encode(record: &Record, limits: Limits) -> Result<Vec<u8>, FormatError> {
     let size = match record {
         Record::Snapshot(mutation) => 1usize.checked_add(mutation_size(mutation)?),
-        Record::Seal { .. } => Some(9),
+        Record::Seal { .. } => Some(21),
         Record::Batch { batch, .. } => {
             if batch.mutations.is_empty()
                 || batch.mutations.len() > limits.max_mutations
@@ -132,9 +139,15 @@ pub fn encode(record: &Record, limits: Limits) -> Result<Vec<u8>, FormatError> {
             output.push(1);
             encode_mutation(&mut output, mutation);
         }
-        Record::Seal { sequence } => {
+        Record::Seal {
+            sequence,
+            entries,
+            digest,
+        } => {
             output.push(2);
             output.extend_from_slice(&sequence.to_le_bytes());
+            output.extend_from_slice(&entries.to_le_bytes());
+            output.extend_from_slice(&digest.to_le_bytes());
         }
         Record::Batch { sequence, batch } => {
             output.push(3);
@@ -278,6 +291,8 @@ fn decode(bytes: Bytes, limits: Limits) -> Result<Record, FormatError> {
         1 => Record::Snapshot(cursor.mutation()?),
         2 => Record::Seal {
             sequence: cursor.u64()?,
+            entries: cursor.u64()?,
+            digest: cursor.u32()?,
         },
         3 => {
             let sequence = cursor.u64()?;
@@ -336,6 +351,11 @@ pub fn checksum(bytes: &[u8]) -> u32 {
         crc = TABLE[((crc ^ u32::from(*byte)) & 255) as usize] ^ (crc >> 8);
     }
     !crc
+}
+
+/// Encadeia checksums de registros completos, além da contagem do snapshot.
+pub fn snapshot_digest(previous: u32, encoded: &[u8]) -> u32 {
+    checksum(&[previous.to_le_bytes(), checksum(encoded).to_le_bytes()].concat())
 }
 
 #[cfg(test)]

@@ -43,6 +43,9 @@ pub struct DbHandle {
 /// Proprietário único do mapa e do lado receptor da fila.
 pub struct Worker {
     store: Store,
+    aof: Option<crate::persistence::AofHandle>,
+    compact_after_bytes: u64,
+    compaction: Option<oneshot::Receiver<Result<(), crate::persistence::AofError>>>,
     requests: mpsc::Receiver<Request>,
     shutdown: watch::Receiver<bool>,
 }
@@ -107,6 +110,9 @@ pub fn channel_with_stores(
         senders.push(sender);
         workers.push(Worker {
             store,
+            aof: None,
+            compact_after_bytes: 0,
+            compaction: None,
             requests: receiver,
             shutdown: shutdown.clone(),
         });
@@ -167,6 +173,15 @@ impl DbHandle {
 }
 
 impl Worker {
+    pub fn with_aof(
+        mut self,
+        aof: crate::persistence::AofHandle,
+        compact_after_bytes: u64,
+    ) -> Self {
+        self.aof = Some(aof);
+        self.compact_after_bytes = compact_after_bytes;
+        self
+    }
     /// Processa comandos em ordem de recepção, sem suspender uma mutação.
     ///
     /// Na parada, fecha a admissão e drena tudo que foi aceito. Também termina
@@ -182,24 +197,83 @@ impl Worker {
                     self.requests.close();
                     break;
                 }
-                _ = expiration.tick() => { self.store.expire_due(64); }
+                () = async { match &self.aof { Some(aof) => aof.failed().await, None => std::future::pending().await } } => return,
+                _ = expiration.tick() => {
+                    let prepared = self.store.prepare_expiration(64);
+                    if self.commit(prepared).await.is_err() { return; }
+                    self.compact_if_due().await;
+                }
                 request = self.requests.recv() => {
                     match request {
-                        Some(request) => self.apply(request),
-                        None => return,
+                        Some(request) => if !self.apply(request).await { return; },
+                        None => break,
                     }
                 }
             }
         }
 
         while let Some(request) = self.requests.recv().await {
-            self.apply(request);
+            if !self.apply(request).await {
+                return;
+            }
+        }
+        if let Some(compaction) = self.compaction.take() {
+            let _ = compaction.await;
+        }
+        if let Some(aof) = &self.aof
+            && let Err(error) = aof.flush().await
+        {
+            tracing::error!(%error, "falha ao sincronizar AOF na parada");
         }
     }
 
-    fn apply(&mut self, request: Request) {
-        let result = self.store.execute(request.command);
-        let _ = request.reply.send(Ok(result));
+    async fn apply(&mut self, request: Request) -> bool {
+        let prepared = self.store.prepare(request.command);
+        let result = self.commit(prepared).await;
+        let healthy = result.is_ok();
+        let _ = request.reply.send(result);
+        healthy
+    }
+
+    async fn commit(&mut self, prepared: super::Prepared) -> Result<Reply, DbError> {
+        if let Some(aof) = &self.aof
+            && !prepared.batch.mutations.is_empty()
+            && let Err(error) = aof.append(prepared.batch.clone()).await
+        {
+            tracing::error!(%error, "mutação não aplicada por falha do AOF");
+            self.requests.close();
+            return Err(DbError::Unavailable);
+        }
+        Ok(self.store.apply(prepared))
+    }
+
+    async fn compact_if_due(&mut self) {
+        if let Some(completion) = &mut self.compaction {
+            match completion.try_recv() {
+                Ok(Ok(())) => tracing::info!("compactação AOF concluída"),
+                Ok(Err(error)) => tracing::warn!(%error, "compactação AOF abortada"),
+                Err(oneshot::error::TryRecvError::Empty) => return,
+                Err(oneshot::error::TryRecvError::Closed) => {
+                    tracing::warn!("compactador AOF indisponível")
+                }
+            }
+            self.compaction = None;
+        }
+        if self.compact_after_bytes == 0 {
+            return;
+        }
+        if let Some(aof) = &self.aof
+            && let Ok((_, bytes, false)) = aof.status().await
+            && bytes >= self.compact_after_bytes
+        {
+            // Enfileira a barreira antes de aceitar outra mutação neste worker.
+            match aof.begin_compaction(self.store.snapshot()).await {
+                Ok(completion) => self.compaction = Some(completion),
+                Err(error) => {
+                    tracing::warn!(%error, "não foi possível iniciar compactação AOF")
+                }
+            }
+        }
     }
 }
 
@@ -407,13 +481,13 @@ mod tests {
 
         let request = worker.requests.try_recv().unwrap();
         assert_eq!(request.command, set(b"key", b"first"));
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(first.await, Ok(Reply::Ok));
         assert_pending(second.as_mut()).await;
         assert_eq!(worker.requests.len(), 1);
         let request = worker.requests.try_recv().unwrap();
         assert_eq!(request.command, set(b"key", b"second"));
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(second.await, Ok(Reply::Ok));
         assert_eq!(worker.store.execute(get(b"key")), bulk(b"second"));
         drop(handle);
@@ -429,7 +503,7 @@ mod tests {
         drop(cancelled);
 
         let request = worker.requests.try_recv().unwrap();
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(first.await.unwrap(), Ok(Reply::Ok));
         assert!(matches!(
             worker.requests.try_recv(),
@@ -491,7 +565,7 @@ mod tests {
         assert_eq!(waiting.await, Err(DbError::Timeout));
 
         let request = worker.requests.try_recv().unwrap();
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(ping.await.unwrap(), Ok(Reply::Pong));
         assert!(matches!(
             worker.requests.try_recv(),
@@ -510,7 +584,7 @@ mod tests {
         advance(Duration::from_secs(3)).await;
 
         let request = worker.requests.try_recv().unwrap();
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(first.await.unwrap(), Ok(Reply::Pong));
         assert_pending(waiting.as_mut()).await;
         assert_eq!(worker.requests.len(), 1);
@@ -520,7 +594,7 @@ mod tests {
 
         let request = worker.requests.try_recv().unwrap();
         assert!(request.reply.is_closed());
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(worker.store.execute(get(b"key")), bulk(b"accepted"));
     }
 
@@ -532,7 +606,7 @@ mod tests {
         assert_pending(waiting.as_mut()).await;
         advance(Duration::from_secs(5)).await;
         let request = worker.requests.try_recv().unwrap();
-        worker.apply(request);
+        worker.apply(request).await;
         assert_eq!(first.await.unwrap(), Ok(Reply::Pong));
 
         assert_eq!(waiting.await, Err(DbError::Timeout));

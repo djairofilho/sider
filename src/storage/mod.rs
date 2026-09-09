@@ -1,8 +1,8 @@
 //! Armazenamento síncrono de chaves e valores binários, sem acesso ao protocolo.
 
 mod clock;
-pub mod routing;
 mod mutation;
+pub mod routing;
 pub mod worker;
 pub use clock::{Clock, SystemClock};
 pub use mutation::{Mutation, MutationOrigin, Prepared, ReplayError, ResolvedBatch};

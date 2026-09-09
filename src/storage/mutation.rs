@@ -195,21 +195,10 @@ impl Store {
     /// Resolve condições, inteiros, TTL e quota sem copiar nem modificar o dataset.
     /// A cópia temporária contém somente metadados das chaves do comando; Bytes é compartilhado.
     pub fn prepare(&self, command: Command) -> Prepared {
-        let keys: BTreeSet<Bytes> = match &command {
-            Command::Ping(_) | Command::Echo(_) => BTreeSet::new(),
-            Command::Get { key }
-            | Command::Set { key, .. }
-            | Command::SetWithOptions { key, .. }
-            | Command::Incr { key }
-            | Command::Decr { key }
-            | Command::Expire { key, .. }
-            | Command::Ttl { key, .. }
-            | Command::Persist { key } => [key.clone()].into(),
-            Command::Del { keys } | Command::Exists { keys } | Command::MGet { keys } => {
-                keys.iter().cloned().collect()
-            }
-            Command::MSet { entries } => entries.iter().map(|(key, _)| key.clone()).collect(),
-        };
+        let mut keys = BTreeSet::new();
+        command.visit_keys(|key| {
+            keys.insert(key.clone());
+        });
         let mut shadow = Self::with_config(
             self.config,
             Arc::new(FrozenClock {

@@ -46,6 +46,8 @@ pub struct ServerConfig {
     pub shutdown_timeout: Duration,
     /// Caminho nativo opcional para o registro de prontidão do binário.
     pub ready_file: Option<PathBuf>,
+    /// Persistência opcional; ausência mantém o modo em memória.
+    pub aof: Option<crate::persistence::AofConfig>,
 }
 
 impl Default for ServerConfig {
@@ -66,6 +68,7 @@ impl Default for ServerConfig {
             write_timeout: Duration::from_secs(5),
             shutdown_timeout: Duration::from_secs(5),
             ready_file: None,
+            aof: None,
         }
     }
 }
@@ -129,6 +132,27 @@ impl ServerConfig {
             }
         }
         config.ready_file = lookup("SIDER_READY_FILE").map(PathBuf::from);
+        if let Some(directory) = lookup("SIDER_AOF_DIR") {
+            let mut aof = crate::persistence::AofConfig::new(PathBuf::from(directory));
+            if let Some(value) = lookup("SIDER_AOF_SYNC") {
+                aof.sync = match value.to_str() {
+                    Some("always") => crate::persistence::SyncPolicy::Always,
+                    Some("everysec") => {
+                        crate::persistence::SyncPolicy::Periodic(Duration::from_secs(1))
+                    }
+                    _ => {
+                        return Err(ConfigError::InvalidServerLimits {
+                            reason: "SIDER_AOF_SYNC aceita always ou everysec",
+                        });
+                    }
+                };
+            }
+            read_size!(aof.queue_capacity, "SIDER_AOF_QUEUE_CAPACITY");
+            read_size!(aof.limits.max_record_bytes, "SIDER_AOF_MAX_RECORD_BYTES");
+            read_size!(aof.max_delta_bytes, "SIDER_AOF_MAX_DELTA_BYTES");
+            read_size!(aof.compact_after_bytes, "SIDER_AOF_COMPACT_AFTER_BYTES");
+            config.aof = Some(aof);
+        }
         config.validate()?;
         Ok(config)
     }
@@ -139,6 +163,9 @@ impl ServerConfig {
     /// bulk configurado com seu framing. Limites de linha de entrada não limitam
     /// mensagens internas de saída. A porta zero continua válida para bind efêmero.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if let Some(aof) = &self.aof {
+            aof.validate()?;
+        }
         self.resp_limits.validate()?;
         crate::storage::routing::ShardRouter::new(self.shards)?;
         crate::storage::StoreConfig {
