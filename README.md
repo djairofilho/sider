@@ -4,6 +4,10 @@ Sider é um projeto de servidor de banco de dados em memória, escrito em Rust.
 O objetivo é oferecer um subconjunto explícito de compatibilidade
 com Redis pelo protocolo RESP2. O nome é Redis ao contrário.
 
+Este checkout prepara o pacote `1.0.0`. A publicação depende da validação do
+build candidato e de seus arquivos; as [notas da versão](releases/notes/v1.0.0.md)
+descrevem o escopo sem substituir os recibos dos gates.
+
 O binário atende strings, operações multichave, opções de `SET` e TTL por RESP2/TCP.
 Hashes, listas, sets e sorted sets compartilham TTL, quota e persistência tipada.
 Pub/Sub oferece canais binários, assinaturas por conexão e filas limitadas.
@@ -181,7 +185,7 @@ a auditoria de compatibilidade, o [soak](docs/soak.md) e os
 [benchmarks](docs/benchmarks.md). Resultados de desenvolvimento permanecem
 vinculados aos seus SHAs; os runners presentes não significam gates aprovados.
 
-Depois de concluir esses critérios, o PR de preparação fixará a versão `1.0.0`.
+O PR de preparação fixa a versão do pacote em `1.0.0`.
 O SHA exato do merge será compilado, empacotado e validado nas duas plataformas
 para publicar a candidata. A final promoverá os mesmos arquivos aprovados.
 O [plano da 0.1](PLANO.md) preserva o desenho histórico; o

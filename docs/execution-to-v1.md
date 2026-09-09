@@ -9,6 +9,12 @@ Os IDs, dependências e critérios estão em [releases/plan.json](../releases/pl
 O [ROADMAP](../ROADMAP.md) é gerado; as issues registram o estado operacional.
 O [guia de releases](releases.md) define os contratos de evidência e publicação.
 
+O PR de preparação identifica o pacote como `1.0.0`. A origem selecionada para
+a baseline interna R10 é o SHA `0021d875dde9da6cbbe9b5b84cd640681128e6ea`, ainda
+com pacote `0.1.0`. Seus arquivos, hashes e ensaios são registrados separadamente;
+a migração e os demais gates da candidata precisam executar no SHA do merge de
+preparação. O bump de versão não encerra esses critérios.
+
 ## Checkpoints internos
 
 - Preservar IDs, issues e milestones existentes. O campo `publication` distingue

@@ -1,8 +1,9 @@
 # Matriz do subconjunto 1.0
 
-Esta é a consolidação técnica para R11-01 e R11-02. O congelamento da 1.0,
-os ensaios finais e a publicação continuam pendentes. A versão Cargo permanece
-`0.1.0` nos marcos internos; isso não amplia a release histórica 0.1.
+Esta é a consolidação técnica para R11-01 e R11-02. O checkout prepara o pacote
+`1.0.0`; os ensaios do build candidato e a publicação dependem dos gates e dos
+arquivos exatos. Os marcos internos e a baseline R10 conservaram `0.1.0`, sem
+ampliar a release histórica 0.1 ou aprovar a candidata atual.
 
 O contrato Redis usa servidor e `redis-cli` **8.10.1**, imagem Linux amd64
 fixada por tag e digest em [releases/plan.json](../releases/plan.json).
