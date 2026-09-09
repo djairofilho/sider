@@ -34,6 +34,12 @@ pub(super) fn parse(
     name: Bytes,
     mut args: std::vec::IntoIter<Bytes>,
 ) -> Result<Command, RequestError> {
+    if name
+        .first()
+        .is_some_and(|byte| byte.eq_ignore_ascii_case(&b'Z'))
+    {
+        return super::sorted_set::parse(name, args);
+    }
     let name = name.to_ascii_uppercase();
     let (canonical, valid) = match name.as_slice() {
         b"HSET" => ("hset", args.len() >= 3 && args.len() % 2 == 1),

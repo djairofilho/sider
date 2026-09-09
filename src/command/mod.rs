@@ -1,9 +1,14 @@
 //! Comandos tipados e parsing sem acesso ao armazenamento.
 
 mod collections;
+mod fpconv;
 mod parser;
 mod reply;
+mod score;
+mod sorted_set;
 pub use collections::{HashCommand, ListCommand, SetCommand};
+pub use score::Score;
+pub use sorted_set::SortedSetCommand;
 
 use bytes::Bytes;
 use std::time::Duration;
@@ -59,6 +64,10 @@ pub(crate) fn parse_decimal(value: &[u8]) -> Option<i64> {
 /// Comando validado, sem canais ou conhecimento do protocolo de transporte.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    SortedSet {
+        key: Bytes,
+        operation: SortedSetCommand,
+    },
     SetCollection {
         key: Bytes,
         operation: SetCommand,
@@ -147,6 +156,7 @@ impl Command {
             | Self::Hash { key, .. }
             | Self::List { key, .. }
             | Self::SetCollection { key, .. }
+            | Self::SortedSet { key, .. }
             | Self::Set { key, .. }
             | Self::SetWithOptions { key, .. }
             | Self::Incr { key }

@@ -5,7 +5,9 @@ mod collections;
 mod mutation;
 pub mod routing;
 pub mod snapshot;
+mod sorted_set;
 mod value;
+pub use sorted_set::SortedSet;
 pub mod worker;
 pub use clock::{Clock, SystemClock};
 pub use mutation::{Mutation, MutationOrigin, Prepared, ReplayError, ResolvedBatch};
@@ -153,6 +155,7 @@ impl Store {
             Command::Hash { key, operation } => self.hash(key, operation, now),
             Command::List { key, operation } => self.list(key, operation, now),
             Command::SetCollection { key, operation } => self.set_collection(key, operation, now),
+            Command::SortedSet { key, operation } => self.sorted_set(key, operation, now),
             Command::Ping(None) => Reply::Pong,
             Command::Ping(Some(message)) | Command::Echo(message) => Reply::Bulk(Some(message)),
             Command::Get { key } => {

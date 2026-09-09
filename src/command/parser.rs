@@ -22,6 +22,8 @@ pub enum RequestError {
     Syntax,
     #[error("inteiro inválido ou fora do intervalo")]
     InvalidInteger,
+    #[error("score inválido")]
+    InvalidFloat,
     #[error("prazo de SET inválido")]
     InvalidSetExpiry,
     #[error("prazo de expiração inválido")]
@@ -46,6 +48,7 @@ impl RequestError {
             Self::InvalidInteger => {
                 Bytes::from_static(b"ERR value is not an integer or out of range")
             }
+            Self::InvalidFloat => Bytes::from_static(b"ERR value is not a valid float"),
             Self::InvalidSetExpiry => {
                 Bytes::from_static(b"ERR invalid expire time in 'set' command")
             }

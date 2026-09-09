@@ -180,6 +180,16 @@ fn blob_size(value: &Bytes) -> Result<usize, FormatError> {
 fn value_size(value: &Value) -> Result<usize, FormatError> {
     match value {
         Value::String(value) => blob_size(value),
+        Value::SortedSet(members) => {
+            if members.is_empty() || members.len() > u32::MAX as usize {
+                return Err(FormatError::Corrupt("quantidade de membros ordenados"));
+            }
+            members.iter().try_fold(4usize, |size, (_, member)| {
+                size.checked_add(blob_size(member)?)
+                    .and_then(|size| size.checked_add(8))
+                    .ok_or(FormatError::Limit)
+            })
+        }
         Value::Set(members) => {
             if members.is_empty() || members.len() > u32::MAX as usize {
                 return Err(FormatError::Corrupt("quantidade de membros"));
@@ -287,6 +297,10 @@ fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
             value: Value::Set(_),
             ..
         } => 5,
+        Mutation::Put {
+            value: Value::SortedSet(_),
+            ..
+        } => 6,
     });
     output.extend_from_slice(&(mutation.key().len() as u32).to_le_bytes());
     output.extend_from_slice(mutation.key());
@@ -298,6 +312,13 @@ fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
     {
         match value {
             Value::String(value) => encode_blob(output, value),
+            Value::SortedSet(members) => {
+                output.extend_from_slice(&(members.len() as u32).to_le_bytes());
+                for (score, member) in members.iter() {
+                    encode_blob(output, member);
+                    output.extend_from_slice(&score.get().to_bits().to_le_bytes());
+                }
+            }
             Value::Set(members) => {
                 output.extend_from_slice(&(members.len() as u32).to_le_bytes());
                 for member in members.iter() {
@@ -404,9 +425,24 @@ impl Cursor {
         let tag = self.byte()?;
         let key = self.blob()?;
         match tag {
-            1 | 3 | 4 | 5 => {
+            1 | 3..=6 => {
                 let value = if tag == 1 {
                     Value::String(self.blob()?)
+                } else if tag == 6 {
+                    let count = self.u32()? as usize;
+                    if count == 0 || count > (self.bytes.len() - self.offset) / 12 {
+                        return Err(FormatError::Corrupt("quantidade de membros ordenados"));
+                    }
+                    let mut members = crate::storage::SortedSet::default();
+                    for _ in 0..count {
+                        let member = self.blob()?;
+                        let score = crate::command::Score::new(f64::from_bits(self.u64()?))
+                            .ok_or(FormatError::Corrupt("score NaN"))?;
+                        if !members.insert(member, score).0 {
+                            return Err(FormatError::Corrupt("membro ordenado duplicado"));
+                        }
+                    }
+                    Value::SortedSet(std::sync::Arc::new(members))
                 } else if tag == 5 {
                     let count = self.u32()? as usize;
                     if count == 0 || count > (self.bytes.len() - self.offset) / 4 {

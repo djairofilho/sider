@@ -11,6 +11,7 @@ pub enum Value {
     Hash(Arc<BTreeMap<Bytes, Bytes>>),
     List(Arc<VecDeque<Bytes>>),
     Set(Arc<BTreeSet<Bytes>>),
+    SortedSet(Arc<super::SortedSet>),
 }
 
 impl From<Bytes> for Value {
@@ -23,7 +24,7 @@ impl Value {
     pub fn as_string(&self) -> Option<&Bytes> {
         match self {
             Self::String(value) => Some(value),
-            Self::Hash(_) | Self::List(_) | Self::Set(_) => None,
+            Self::Hash(_) | Self::List(_) | Self::Set(_) | Self::SortedSet(_) => None,
         }
     }
 
@@ -52,6 +53,12 @@ impl Value {
                 })
             }
             Self::Set(_) => None,
+            Self::SortedSet(members) if !members.is_empty() => {
+                members.iter().try_fold(0usize, |total, (_, member)| {
+                    total.checked_add(member.len())?.checked_add(96)
+                })
+            }
+            Self::SortedSet(_) => None,
         }
     }
 }
