@@ -30,6 +30,7 @@ struct Options {
     binary_sha: String,
     migrator_sha: String,
     version: String,
+    runner_id: Option<String>,
 }
 
 fn hex(value: String, count: usize) -> Result<String, String> {
@@ -47,6 +48,15 @@ fn hex(value: String, count: usize) -> Result<String, String> {
 
 impl Options {
     fn read(mut lookup: impl FnMut(&str) -> Option<OsString>) -> Result<Self, String> {
+        let runner_id = lookup("SIDER_DOCKER_RUNNER_ID")
+            .map(|value| {
+                value
+                    .into_string()
+                    .map_err(|_| "ID do runner precisa ser UTF-8".to_owned())
+            })
+            .transpose()?
+            .map(|value| hex(value, 64))
+            .transpose()?;
         let mut required = |name| lookup(name).ok_or_else(|| format!("{name} ausente"));
         let package = PathBuf::from(required("SIDER_DOCKER_PACKAGE_DIR")?);
         let output = PathBuf::from(required("SIDER_DOCKER_OUTPUT_DIR")?);
@@ -65,6 +75,7 @@ impl Options {
             binary_sha: hex(text("SIDER_DOCKER_BINARY_SHA256")?, 64)?,
             migrator_sha: hex(text("SIDER_DOCKER_MIGRATOR_SHA256")?, 64)?,
             version: env!("CARGO_PKG_VERSION").into(),
+            runner_id,
         })
     }
 }
@@ -105,6 +116,7 @@ struct Runner {
     image_owned: bool,
     volume: Option<String>,
     containers: Vec<String>,
+    shared_runner: Option<String>,
 }
 
 impl Runner {
@@ -166,7 +178,7 @@ impl Runner {
     fn start(&mut self, name: &str, volume: &str) -> Result<SocketAddr, String> {
         self.containers.push(name.to_owned());
         let image = self.image.clone();
-        self.docker(&[
+        let mut arguments: Vec<String> = [
             "run",
             "--detach",
             "--name",
@@ -176,23 +188,69 @@ impl Runner {
             "ALL",
             "--security-opt",
             "no-new-privileges",
-            "--publish",
-            "127.0.0.1::6379",
             "--mount",
             &format!("type=volume,source={volume},destination=/var/lib/sider"),
             "--env",
             "SIDER_SHARDS=4",
-            &image,
-        ])?;
-        let address: SocketAddr = self
-            .docker(&["port", name, "6379/tcp"])?
-            .trim()
-            .parse()
-            .map_err(|error| format!("porta Docker inválida: {error}"))?;
+            "--env",
+            "SIDER_READY_FILE=/var/lib/sider/docker-ready.json",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        if let Some(id) = &self.shared_runner {
+            arguments.extend([
+                "--network".into(),
+                format!("container:{id}"),
+                "--env".into(),
+                "SIDER_ADDR=127.0.0.1:0".into(),
+            ]);
+        } else {
+            arguments.extend(["--publish".into(), "127.0.0.1::6379".into()]);
+        }
+        arguments.push(image);
+        self.checked(Command::new("docker").args(&arguments), TIMEOUT)?;
+        let deadline = Instant::now() + TIMEOUT;
+        let address: SocketAddr = if self.shared_runner.is_some() {
+            loop {
+                let ready = self.run(
+                    Command::new("docker").args([
+                        "exec",
+                        name,
+                        "cat",
+                        "/var/lib/sider/docker-ready.json",
+                    ]),
+                    TIMEOUT,
+                )?;
+                if ready.status.success() {
+                    let ready: Value =
+                        serde_json::from_slice(&ready.stdout).map_err(|error| error.to_string())?;
+                    if ready["pid"] != 1 || ready["host"] != "127.0.0.1" {
+                        return Err("prontidão não pertence ao PID 1 em loopback".into());
+                    }
+                    let port = ready["port"]
+                        .as_u64()
+                        .and_then(|value| u16::try_from(value).ok())
+                        .filter(|value| *value > 0)
+                        .ok_or("porta de prontidão inválida")?;
+                    break SocketAddr::from(([127, 0, 0, 1], port));
+                }
+                if Instant::now() >= deadline
+                    || self.inspect("container", name)?["State"]["Running"] != true
+                {
+                    return Err("prontidão da imagem ausente".into());
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+        } else {
+            self.docker(&["port", name, "6379/tcp"])?
+                .trim()
+                .parse()
+                .map_err(|error| format!("porta Docker inválida: {error}"))?
+        };
         if !address.ip().is_loopback() || address.port() == 0 {
             return Err("Docker precisa publicar somente porta efêmera em loopback".into());
         }
-        let deadline = Instant::now() + TIMEOUT;
         loop {
             if matches!(exchange(address, &[b"PING"]), Ok(wire::Response::Simple(value)) if value == b"PONG")
             {
@@ -200,9 +258,10 @@ impl Runner {
             }
             let state = self.inspect("container", name)?;
             if state["State"]["Running"] != true || Instant::now() >= deadline {
+                let logs = self.run(Command::new("docker").args(["logs", name]), TIMEOUT)?;
                 return Err(format!(
-                    "contêiner sem prontidão: {}",
-                    self.docker(&["logs", name])?
+                    "contêiner sem prontidão TCP: {}",
+                    String::from_utf8_lossy(&logs.stderr)
                 ));
             }
             std::thread::sleep(Duration::from_millis(25));
@@ -246,6 +305,35 @@ impl Runner {
         self.containers.retain(|item| item != name);
         Ok(())
     }
+}
+
+fn private_runner(observed: &Value, id: &str) -> Result<(), String> {
+    let network = observed["HostConfig"]["NetworkMode"]
+        .as_str()
+        .ok_or("rede do runner ausente")?;
+    let no_ports = |value: &Value| {
+        value.is_null()
+            || value.as_object().is_some_and(|ports| {
+                ports.values().all(|bindings| {
+                    bindings.is_null() || bindings.as_array().is_some_and(Vec::is_empty)
+                })
+            })
+    };
+    if observed["Id"] != id
+        || observed["State"]["Running"] != true
+        || observed["Platform"] != "linux"
+        || network.is_empty()
+        || matches!(network, "host" | "none")
+        || network.starts_with("container:")
+        || !no_ports(&observed["HostConfig"]["PortBindings"])
+        || !no_ports(&observed["NetworkSettings"]["Ports"])
+    {
+        return Err(
+            "runner deve ser Linux ativo com ID completo e rede privada sem portas publicadas"
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 impl Drop for Runner {
@@ -337,7 +425,11 @@ fn exercise(options: Options) -> Result<Value, String> {
         image_owned: false,
         volume: None,
         containers: Vec::new(),
+        shared_runner: options.runner_id.clone(),
     };
+    if let Some(id) = &options.runner_id {
+        private_runner(&runner.inspect("container", id)?, id)?;
+    }
     for (file, expected) in [
         ("sider", &options.binary_sha),
         ("sider-aof-migrate", &options.migrator_sha),
@@ -569,6 +661,7 @@ fn exercise(options: Options) -> Result<Value, String> {
         "schema_version": 1, "task": "R10-04", "artifact_version": options.version,
         "source_sha": options.source_sha, "target": "x86_64-unknown-linux-gnu", "base": BASE,
         "image_id": loaded["Id"], "image_tag": image,
+        "network": if options.runner_id.is_some() { "private_runner_namespace" } else { "host_loopback_published_port" },
         "artifact": {"name": archive_name, "size": size, "sha256": archive_sha},
         "binaries": {"sider": options.binary_sha, "sider-aof-migrate": options.migrator_sha},
         "cases": 8, "scenarios": ["save_gzip_remove_load_identity", "exact_binary_hashes", "version_and_migrator", "uid_and_pid1", "binary_tcp", "aof_volume_restart_ttl", "sigterm_drain", "invalid_configuration"],
@@ -616,4 +709,17 @@ fn options_reject_missing_relative_or_invalid_identity_without_docker() {
     assert!(hex("A".repeat(40), 40).is_err());
     assert!(hex("a".repeat(39), 40).is_err());
     assert!(hex("a".repeat(40), 40).is_ok());
+}
+
+#[test]
+fn shared_network_rejects_host_published_or_mismatched_runner() {
+    let id = "a".repeat(64);
+    let mut observed = json!({"Id":id,"Platform":"linux","State":{"Running":true},"HostConfig":{"NetworkMode":"bridge","PortBindings":{}},"NetworkSettings":{"Ports":{}}});
+    private_runner(&observed, &id).unwrap();
+    assert!(private_runner(&observed, &"b".repeat(64)).is_err());
+    observed["HostConfig"]["NetworkMode"] = json!("host");
+    assert!(private_runner(&observed, &id).is_err());
+    observed["HostConfig"]["NetworkMode"] = json!("bridge");
+    observed["NetworkSettings"]["Ports"]["80/tcp"] = json!([{"HostPort":"12345"}]);
+    assert!(private_runner(&observed, &id).is_err());
 }
