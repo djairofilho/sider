@@ -21,6 +21,15 @@ pub enum ListCommand {
     Range { start: i64, stop: i64 },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SetCommand {
+    Add { members: Vec<Bytes> },
+    Remove { members: Vec<Bytes> },
+    IsMember { member: Bytes },
+    Card,
+    Members,
+}
+
 pub(super) fn parse(
     name: Bytes,
     mut args: std::vec::IntoIter<Bytes>,
@@ -39,12 +48,34 @@ pub(super) fn parse(
         b"RPOP" => ("rpop", args.len() == 1),
         b"LLEN" => ("llen", args.len() == 1),
         b"LRANGE" => ("lrange", args.len() == 3),
+        b"SADD" => ("sadd", args.len() >= 2),
+        b"SREM" => ("srem", args.len() >= 2),
+        b"SISMEMBER" => ("sismember", args.len() == 2),
+        b"SCARD" => ("scard", args.len() == 1),
+        b"SMEMBERS" => ("smembers", args.len() == 1),
         _ => return Err(RequestError::UnknownCommand),
     };
     if !valid {
         return Err(RequestError::WrongArity(canonical));
     }
     let key = args.next().ok_or(RequestError::WrongArity(canonical))?;
+    if name[0] == b'S' {
+        let operation = match name.as_slice() {
+            b"SADD" => SetCommand::Add {
+                members: args.collect(),
+            },
+            b"SREM" => SetCommand::Remove {
+                members: args.collect(),
+            },
+            b"SISMEMBER" => SetCommand::IsMember {
+                member: args.next().ok_or(RequestError::WrongArity(canonical))?,
+            },
+            b"SCARD" => SetCommand::Card,
+            b"SMEMBERS" => SetCommand::Members,
+            _ => unreachable!("nome validado"),
+        };
+        return Ok(Command::SetCollection { key, operation });
+    }
     if name[0] == b'L' || name[0] == b'R' {
         let operation = match name.as_slice() {
             b"LPUSH" | b"RPUSH" => ListCommand::Push {

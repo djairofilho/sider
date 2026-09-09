@@ -328,3 +328,106 @@ fn lists_validate_type_and_arguments_and_roundtrip_resolved_aof() {
         Reply::Array(vec![bulk(b"b"), bulk(b"\0\xff"), bulk(b"a")])
     );
 }
+
+#[test]
+fn sets_deduplicate_binary_members_and_delete_the_last_entry() {
+    let mut store = Store::new();
+    assert_eq!(
+        run(&mut store, &[b"SADD", b"s", b"", b"\0\xff", b"", b"a"]),
+        Reply::Integer(3)
+    );
+    assert_eq!(run(&mut store, &[b"SADD", b"s", b"a"]), Reply::Integer(0));
+    assert_eq!(run(&mut store, &[b"SCARD", b"s"]), Reply::Integer(3));
+    assert_eq!(
+        run(&mut store, &[b"SISMEMBER", b"s", b"\0\xff"]),
+        Reply::Integer(1)
+    );
+    assert_eq!(
+        run(&mut store, &[b"SMEMBERS", b"s"]),
+        Reply::Array(vec![bulk(b""), bulk(b"\0\xff"), bulk(b"a")])
+    );
+    assert_eq!(
+        run(&mut store, &[b"SREM", b"s", b"a", b"a", b"missing"]),
+        Reply::Integer(1)
+    );
+    assert_eq!(
+        run(&mut store, &[b"SREM", b"s", b"", b"\0\xff"]),
+        Reply::Integer(2)
+    );
+    assert!(store.is_empty());
+    assert_eq!(store.used_bytes(), 0);
+    assert_eq!(run(&mut store, &[b"SMEMBERS", b"s"]), Reply::Array(vec![]));
+    assert_eq!(
+        run(&mut store, &[b"SISMEMBER", b"s", b""]),
+        Reply::Integer(0)
+    );
+    assert_eq!(run(&mut store, &[b"SREM", b"s", b""]), Reply::Integer(0));
+    assert!(store.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn set_quota_checks_deduplicated_result_and_keeps_ttl() {
+    let mut store = Store::with_config(
+        StoreConfig {
+            max_dataset_bytes: 259,
+        },
+        Arc::new(SystemClock),
+    )
+    .unwrap();
+    run(&mut store, &[b"SADD", b"s", b"a"]);
+    run(&mut store, &[b"PEXPIRE", b"s", b"100"]);
+    assert_eq!(
+        run(&mut store, &[b"SADD", b"s", b"b", b"b"]),
+        Reply::Integer(1)
+    );
+    assert_eq!(store.used_bytes(), 259);
+    assert_eq!(
+        run(&mut store, &[b"SADD", b"s", b"c", b"d"]),
+        Reply::Error(ExecutionError::OutOfMemory)
+    );
+    assert_eq!(run(&mut store, &[b"SCARD", b"s"]), Reply::Integer(2));
+    assert_eq!(run(&mut store, &[b"SREM", b"s", b"a"]), Reply::Integer(1));
+    assert_eq!(run(&mut store, &[b"PTTL", b"s"]), Reply::Integer(100));
+    tokio::time::advance(Duration::from_millis(100)).await;
+    assert_eq!(store.expire_due(1), 1);
+    assert_eq!(store.used_bytes(), 0);
+}
+
+#[test]
+fn sets_preserve_type_through_aof_and_reject_wrongtype_and_arity() {
+    let mut store = Store::new();
+    run(&mut store, &[b"SADD", b"s", b"\xff", b"b"]);
+    let snapshot = store.snapshot();
+    let encoded =
+        format::encode(&Record::Snapshot(snapshot[0].clone()), Limits::default()).unwrap();
+    let Next::Record(Record::Snapshot(mutation)) =
+        format::read_record(encoded.as_slice(), Limits::default()).unwrap()
+    else {
+        panic!("snapshot esperado");
+    };
+    let mut recovered = Store::new();
+    recovered.replay(&[mutation]).unwrap();
+    assert_eq!(recovered.snapshot(), snapshot);
+    run(&mut store, &[b"SET", b"s", b"string"]);
+    for args in [
+        &[b"SADD".as_slice(), b"s", b"v"][..],
+        &[b"SREM", b"s", b"v"],
+        &[b"SISMEMBER", b"s", b"v"],
+        &[b"SCARD", b"s"],
+        &[b"SMEMBERS", b"s"],
+    ] {
+        assert_eq!(
+            run(&mut store, args),
+            Reply::Error(ExecutionError::WrongType)
+        );
+    }
+    for (name, canonical) in [
+        (b"SADD".as_slice(), "sadd"),
+        (b"SREM", "srem"),
+        (b"SISMEMBER", "sismember"),
+        (b"SCARD", "scard"),
+        (b"SMEMBERS", "smembers"),
+    ] {
+        assert_eq!(command(&[name]), Err(RequestError::WrongArity(canonical)));
+    }
+}

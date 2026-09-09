@@ -1,10 +1,64 @@
 //! Execução tipada no proprietário do mapa, com substituição após pré-validar quota.
 
 use super::*;
-use crate::command::{HashCommand, ListCommand};
-use std::collections::{BTreeMap, VecDeque};
+use crate::command::{HashCommand, ListCommand, SetCommand};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 impl Store {
+    pub(super) fn set_collection(
+        &mut self,
+        key: Bytes,
+        operation: SetCommand,
+        now: Instant,
+    ) -> Reply {
+        self.expire_key(&key, now);
+        let entry = self.values.get(&key);
+        let mut members = match entry.map(|entry| &entry.value) {
+            None => Arc::new(BTreeSet::new()),
+            Some(Value::Set(members)) => members.clone(),
+            Some(_) => return Reply::Error(ExecutionError::WrongType),
+        };
+        let expiry = entry.and_then(Self::entry_expiry);
+        match operation {
+            SetCommand::Card => Reply::Integer(members.len() as i64),
+            SetCommand::IsMember { member } => Reply::Integer(i64::from(members.contains(&member))),
+            SetCommand::Members => Reply::Array(
+                members
+                    .iter()
+                    .map(|member| Reply::Bulk(Some(member.clone())))
+                    .collect(),
+            ),
+            SetCommand::Add { members: incoming } => {
+                let mut added = 0;
+                for member in incoming {
+                    added += i64::from(Arc::make_mut(&mut members).insert(member));
+                }
+                if added > 0 {
+                    let value = Value::Set(members);
+                    if !self.can_replace(&key, &value) {
+                        return Reply::Error(ExecutionError::OutOfMemory);
+                    }
+                    self.insert(key, value, expiry);
+                }
+                Reply::Integer(added)
+            }
+            SetCommand::Remove { members: incoming } => {
+                let mut removed = 0;
+                for member in incoming {
+                    removed += i64::from(Arc::make_mut(&mut members).remove(&member));
+                }
+                if removed > 0 {
+                    if members.is_empty() {
+                        self.remove(&key);
+                    } else {
+                        self.insert(key, Value::Set(members), expiry);
+                    }
+                }
+                Reply::Integer(removed)
+            }
+        }
+    }
+
     pub(super) fn list(&mut self, key: Bytes, operation: ListCommand, now: Instant) -> Reply {
         self.expire_key(&key, now);
         let entry = self.values.get(&key);

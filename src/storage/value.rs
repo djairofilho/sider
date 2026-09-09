@@ -1,7 +1,7 @@
 //! Valores tipados com snapshots compartilhados e consumo lógico por tipo.
 
 use bytes::Bytes;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 /// Payload persistível; a entrada contém TTL e geração comuns a todos os tipos.
@@ -10,6 +10,7 @@ pub enum Value {
     String(Bytes),
     Hash(Arc<BTreeMap<Bytes, Bytes>>),
     List(Arc<VecDeque<Bytes>>),
+    Set(Arc<BTreeSet<Bytes>>),
 }
 
 impl From<Bytes> for Value {
@@ -22,7 +23,7 @@ impl Value {
     pub fn as_string(&self) -> Option<&Bytes> {
         match self {
             Self::String(value) => Some(value),
-            Self::Hash(_) | Self::List(_) => None,
+            Self::Hash(_) | Self::List(_) | Self::Set(_) => None,
         }
     }
 
@@ -45,6 +46,12 @@ impl Value {
                 })
             }
             Self::List(_) => None,
+            Self::Set(members) if !members.is_empty() => {
+                members.iter().try_fold(0usize, |total, member| {
+                    total.checked_add(member.len())?.checked_add(64)
+                })
+            }
+            Self::Set(_) => None,
         }
     }
 }

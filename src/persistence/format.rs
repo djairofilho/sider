@@ -180,6 +180,15 @@ fn blob_size(value: &Bytes) -> Result<usize, FormatError> {
 fn value_size(value: &Value) -> Result<usize, FormatError> {
     match value {
         Value::String(value) => blob_size(value),
+        Value::Set(members) => {
+            if members.is_empty() || members.len() > u32::MAX as usize {
+                return Err(FormatError::Corrupt("quantidade de membros"));
+            }
+            members.iter().try_fold(4usize, |size, member| {
+                size.checked_add(blob_size(member)?)
+                    .ok_or(FormatError::Limit)
+            })
+        }
         Value::List(values) => {
             if values.is_empty() || values.len() > u32::MAX as usize {
                 return Err(FormatError::Corrupt("quantidade de elementos"));
@@ -274,6 +283,10 @@ fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
             value: Value::List(_),
             ..
         } => 4,
+        Mutation::Put {
+            value: Value::Set(_),
+            ..
+        } => 5,
     });
     output.extend_from_slice(&(mutation.key().len() as u32).to_le_bytes());
     output.extend_from_slice(mutation.key());
@@ -285,6 +298,12 @@ fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
     {
         match value {
             Value::String(value) => encode_blob(output, value),
+            Value::Set(members) => {
+                output.extend_from_slice(&(members.len() as u32).to_le_bytes());
+                for member in members.iter() {
+                    encode_blob(output, member);
+                }
+            }
             Value::List(values) => {
                 output.extend_from_slice(&(values.len() as u32).to_le_bytes());
                 for value in values.iter() {
@@ -385,9 +404,21 @@ impl Cursor {
         let tag = self.byte()?;
         let key = self.blob()?;
         match tag {
-            1 | 3 | 4 => {
+            1 | 3 | 4 | 5 => {
                 let value = if tag == 1 {
                     Value::String(self.blob()?)
+                } else if tag == 5 {
+                    let count = self.u32()? as usize;
+                    if count == 0 || count > (self.bytes.len() - self.offset) / 4 {
+                        return Err(FormatError::Corrupt("quantidade de membros"));
+                    }
+                    let mut members = std::collections::BTreeSet::new();
+                    for _ in 0..count {
+                        if !members.insert(self.blob()?) {
+                            return Err(FormatError::Corrupt("membro duplicado"));
+                        }
+                    }
+                    Value::Set(std::sync::Arc::new(members))
                 } else if tag == 4 {
                     let count = self.u32()? as usize;
                     if count == 0 || count > (self.bytes.len() - self.offset) / 4 {
