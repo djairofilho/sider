@@ -6,6 +6,14 @@ e os avisos de terceiros no diretório `licenses/`, com seu inventário de hashe
 Confira a versão com `sider --version`. A release também fornece `SHA256SUMS`,
 `release-manifest.json`, notas e evidências de validação.
 
+O pacote Windows 11 x64 requer `VCRUNTIME140.dll`, Universal CRT e o
+[Visual C++ v14 Redistributable x64](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
+compatível com o build; as DLLs da Microsoft não acompanham o ZIP. O pacote
+Linux GNU é dinâmico, testado em Ubuntu 24.04, e depende das bibliotecas do sistema.
+Consulte o asset `runtime-requirements.md` e a evidência dos quatro executáveis
+da publicação. Os testes Windows usam runtime instalado, sem alegar ensaio em
+uma instalação limpa.
+
 ## Iniciar
 
 Linux x86_64 GNU, compilado e testado em Ubuntu 24.04:

@@ -46,6 +46,8 @@ limites e procedimentos para filas cheias, clientes lentos e falhas de AOF.
 Os [pacotes](docs/packages.md) incluem `sider`, `sider-aof-migrate`, `sider-backup`
 e `sider-replica`. A [imagem Docker privada](docs/docker.md) copia esses mesmos
 executáveis Linux, sem recompilar o servidor.
+Confira os [requisitos de runtime](docs/runtime-requirements.md) para executar
+os pacotes em Windows 11 x64 ou Ubuntu 24.04 GNU sem instalar Rust ou Cargo.
 
 ## Executar o servidor
 

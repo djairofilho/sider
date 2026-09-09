@@ -5,6 +5,11 @@ preparação no sistema nativo. Use diretórios novos para staging, arquivo comp
 e extração. RC e final usam os mesmos pacotes, já identificados como `1.0.0`.
 A promoção confere os mesmos bytes; não recompila nem reempacota.
 
+Os [requisitos de runtime](runtime-requirements.md) descrevem Windows 11 x64,
+Ubuntu 24.04 GNU e as dependências externas. O texto é a fonte versionada do
+asset `runtime-requirements.md`; a evidência da candidata deve conferir os quatro
+executáveis extraídos no ambiente de cada plataforma.
+
 ## Conteúdo
 
 Cada arquivo contém um diretório `sider-vVERSAO-TARGET/` com:
