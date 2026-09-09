@@ -17,14 +17,26 @@ Distribua este diretório completo junto do `LICENSE` próprio do Sider.
   sem afirmar que esse módulo condicionado a `no_std` esteja no binário.
 - [Inventário da biblioteca padrão Rust 1.97.1](rust-1.97.1/COPYRIGHT-library.html)
   e os textos MIT, Apache-2.0, BSD-2-Clause, Unicode-3.0 e LLVM-exception.
+- [Licença Boost 1.0 do fpconv](fpconv-redis-8.10.1/LICENSE.txt), adaptado para
+  Rust seguro em `src/command/fpconv.rs`. A origem é `deps/fpconv` da tag Redis
+  8.10.1; os dois arquivos de origem e seus hashes estão no inventário.
 
-Dependências exclusivas de testes, Redis e o inventário
+Dependências exclusivas de testes, o servidor Redis e o inventário
 geral do compilador não fazem parte da coleção. O inventário Rust inclui avisos
 de outras plataformas; sua presença não afirma uso desses componentes pelo Sider.
 
+O componente fpconv tem licença Boost 1.0 própria. Seus avisos são:
+
+```text
+Copyright (c) 2021, Redis Labs
+Copyright (c) 2013-2019, night-shift <as.smljk at gmail dot com>
+Copyright (c) 2009, Florian Loitsch <florian.loitsch at inria dot fr>
+All rights reserved.
+```
+
 ## Integridade e atualização
 
-Os 53 arquivos somam 513.058 bytes. Em 52 deles, origem e cópia são idênticas.
+Os 54 arquivos somam 514.396 bytes. Em 53 deles, origem e cópia são idênticas.
 Somente `COPYRIGHT-library.html` recebeu um LF final: a cópia equivale exatamente
 à origem mais esse byte. `source_sha256`/`source_bytes` registram a origem;
 `sha256`/`bytes` registram a cópia. Os seis arquivos Rust tiveram hashes de origem

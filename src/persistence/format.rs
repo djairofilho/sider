@@ -6,7 +6,7 @@ use bytes::Bytes;
 use thiserror::Error;
 
 use super::DurableLayout;
-use crate::storage::{Mutation, MutationOrigin, ResolvedBatch};
+use crate::storage::{Mutation, MutationOrigin, ResolvedBatch, Value};
 
 pub const MAGIC: &[u8; 8] = b"SIDERAOF";
 pub const VERSION: u32 = 1;
@@ -156,13 +156,10 @@ pub fn read_header_with_layout(mut input: impl Read) -> Result<Header, FormatErr
 
 fn mutation_size(mutation: &Mutation) -> Result<usize, FormatError> {
     let extra = match mutation {
-        Mutation::Put { value, .. } => value.len().checked_add(13),
+        Mutation::Put { value, .. } => value_size(value)?.checked_add(9),
         Mutation::Delete { .. } => Some(0),
     };
     if mutation.key().len() > u32::MAX as usize {
-        return Err(FormatError::Limit);
-    }
-    if matches!(mutation, Mutation::Put { value, .. } if value.len() > u32::MAX as usize) {
         return Err(FormatError::Limit);
     }
     mutation
@@ -171,6 +168,57 @@ fn mutation_size(mutation: &Mutation) -> Result<usize, FormatError> {
         .checked_add(5)
         .and_then(|size| size.checked_add(extra?))
         .ok_or(FormatError::Limit)
+}
+
+fn blob_size(value: &Bytes) -> Result<usize, FormatError> {
+    if value.len() > u32::MAX as usize {
+        return Err(FormatError::Limit);
+    }
+    value.len().checked_add(4).ok_or(FormatError::Limit)
+}
+
+fn value_size(value: &Value) -> Result<usize, FormatError> {
+    match value {
+        Value::String(value) => blob_size(value),
+        Value::SortedSet(members) => {
+            if members.is_empty() || members.len() > u32::MAX as usize {
+                return Err(FormatError::Corrupt("quantidade de membros ordenados"));
+            }
+            members.iter().try_fold(4usize, |size, (_, member)| {
+                size.checked_add(blob_size(member)?)
+                    .and_then(|size| size.checked_add(8))
+                    .ok_or(FormatError::Limit)
+            })
+        }
+        Value::Set(members) => {
+            if members.is_empty() || members.len() > u32::MAX as usize {
+                return Err(FormatError::Corrupt("quantidade de membros"));
+            }
+            members.iter().try_fold(4usize, |size, member| {
+                size.checked_add(blob_size(member)?)
+                    .ok_or(FormatError::Limit)
+            })
+        }
+        Value::List(values) => {
+            if values.is_empty() || values.len() > u32::MAX as usize {
+                return Err(FormatError::Corrupt("quantidade de elementos"));
+            }
+            values.iter().try_fold(4usize, |size, value| {
+                size.checked_add(blob_size(value)?)
+                    .ok_or(FormatError::Limit)
+            })
+        }
+        Value::Hash(fields) => {
+            if fields.is_empty() || fields.len() > u32::MAX as usize {
+                return Err(FormatError::Corrupt("quantidade de campos"));
+            }
+            fields.iter().try_fold(4usize, |size, (field, value)| {
+                size.checked_add(blob_size(field)?)
+                    .and_then(|size| size.checked_add(blob_size(value).ok()?))
+                    .ok_or(FormatError::Limit)
+            })
+        }
+    }
 }
 
 pub fn encode(record: &Record, limits: Limits) -> Result<Vec<u8>, FormatError> {
@@ -231,10 +279,28 @@ pub fn encode(record: &Record, limits: Limits) -> Result<Vec<u8>, FormatError> {
 }
 
 fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
-    output.push(if matches!(mutation, Mutation::Put { .. }) {
-        1
-    } else {
-        2
+    output.push(match mutation {
+        Mutation::Put {
+            value: Value::String(_),
+            ..
+        } => 1,
+        Mutation::Delete { .. } => 2,
+        Mutation::Put {
+            value: Value::Hash(_),
+            ..
+        } => 3,
+        Mutation::Put {
+            value: Value::List(_),
+            ..
+        } => 4,
+        Mutation::Put {
+            value: Value::Set(_),
+            ..
+        } => 5,
+        Mutation::Put {
+            value: Value::SortedSet(_),
+            ..
+        } => 6,
     });
     output.extend_from_slice(&(mutation.key().len() as u32).to_le_bytes());
     output.extend_from_slice(mutation.key());
@@ -244,11 +310,43 @@ fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
         ..
     } = mutation
     {
-        output.extend_from_slice(&(value.len() as u32).to_le_bytes());
-        output.extend_from_slice(value);
+        match value {
+            Value::String(value) => encode_blob(output, value),
+            Value::SortedSet(members) => {
+                output.extend_from_slice(&(members.len() as u32).to_le_bytes());
+                for (score, member) in members.iter() {
+                    encode_blob(output, member);
+                    output.extend_from_slice(&score.get().to_bits().to_le_bytes());
+                }
+            }
+            Value::Set(members) => {
+                output.extend_from_slice(&(members.len() as u32).to_le_bytes());
+                for member in members.iter() {
+                    encode_blob(output, member);
+                }
+            }
+            Value::List(values) => {
+                output.extend_from_slice(&(values.len() as u32).to_le_bytes());
+                for value in values.iter() {
+                    encode_blob(output, value);
+                }
+            }
+            Value::Hash(fields) => {
+                output.extend_from_slice(&(fields.len() as u32).to_le_bytes());
+                for (field, value) in fields.iter() {
+                    encode_blob(output, field);
+                    encode_blob(output, value);
+                }
+            }
+        }
         output.push(u8::from(expires_at_unix_ms.is_some()));
         output.extend_from_slice(&expires_at_unix_ms.unwrap_or(0).to_le_bytes());
     }
+}
+
+fn encode_blob(output: &mut Vec<u8>, value: &Bytes) {
+    output.extend_from_slice(&(value.len() as u32).to_le_bytes());
+    output.extend_from_slice(value);
 }
 
 /// Comprimento e seu complemento são validados antes da alocação; checksum antes do decode.
@@ -327,8 +425,61 @@ impl Cursor {
         let tag = self.byte()?;
         let key = self.blob()?;
         match tag {
-            1 => {
-                let value = self.blob()?;
+            1 | 3..=6 => {
+                let value = if tag == 1 {
+                    Value::String(self.blob()?)
+                } else if tag == 6 {
+                    let count = self.u32()? as usize;
+                    if count == 0 || count > (self.bytes.len() - self.offset) / 12 {
+                        return Err(FormatError::Corrupt("quantidade de membros ordenados"));
+                    }
+                    let mut members = crate::storage::SortedSet::default();
+                    for _ in 0..count {
+                        let member = self.blob()?;
+                        let score = crate::command::Score::new(f64::from_bits(self.u64()?))
+                            .ok_or(FormatError::Corrupt("score NaN"))?;
+                        if !members.insert(member, score).0 {
+                            return Err(FormatError::Corrupt("membro ordenado duplicado"));
+                        }
+                    }
+                    Value::SortedSet(std::sync::Arc::new(members))
+                } else if tag == 5 {
+                    let count = self.u32()? as usize;
+                    if count == 0 || count > (self.bytes.len() - self.offset) / 4 {
+                        return Err(FormatError::Corrupt("quantidade de membros"));
+                    }
+                    let mut members = std::collections::BTreeSet::new();
+                    for _ in 0..count {
+                        if !members.insert(self.blob()?) {
+                            return Err(FormatError::Corrupt("membro duplicado"));
+                        }
+                    }
+                    Value::Set(std::sync::Arc::new(members))
+                } else if tag == 4 {
+                    let count = self.u32()? as usize;
+                    if count == 0 || count > (self.bytes.len() - self.offset) / 4 {
+                        return Err(FormatError::Corrupt("quantidade de elementos"));
+                    }
+                    let mut values = std::collections::VecDeque::new();
+                    for _ in 0..count {
+                        values.push_back(self.blob()?);
+                    }
+                    Value::List(std::sync::Arc::new(values))
+                } else {
+                    let count = self.u32()? as usize;
+                    if count == 0 || count > (self.bytes.len() - self.offset) / 8 {
+                        return Err(FormatError::Corrupt("quantidade de campos"));
+                    }
+                    let mut fields = std::collections::BTreeMap::new();
+                    for _ in 0..count {
+                        let field = self.blob()?;
+                        let value = self.blob()?;
+                        if fields.insert(field, value).is_some() {
+                            return Err(FormatError::Corrupt("campo duplicado"));
+                        }
+                    }
+                    Value::Hash(std::sync::Arc::new(fields))
+                };
                 let expires = self.byte()?;
                 let deadline = i64::from_le_bytes(self.take(8)?.as_ref().try_into().unwrap());
                 let expires_at_unix_ms = match expires {
@@ -432,7 +583,7 @@ mod tests {
                 mutations: vec![
                     Mutation::Put {
                         key: Bytes::from_static(b"\xff\0"),
-                        value: Bytes::from_static(b"v\r\n"),
+                        value: Bytes::from_static(b"v\r\n").into(),
                         expires_at_unix_ms: Some(-1),
                     },
                     Mutation::Delete { key: Bytes::new() },

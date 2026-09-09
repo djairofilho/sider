@@ -1,7 +1,14 @@
 //! Comandos tipados e parsing sem acesso ao armazenamento.
 
+mod collections;
+mod fpconv;
 mod parser;
 mod reply;
+mod score;
+mod sorted_set;
+pub use collections::{HashCommand, ListCommand, SetCommand};
+pub use score::Score;
+pub use sorted_set::SortedSetCommand;
 
 use bytes::Bytes;
 use std::time::Duration;
@@ -57,14 +64,37 @@ pub(crate) fn parse_decimal(value: &[u8]) -> Option<i64> {
 /// Comando validado, sem canais ou conhecimento do protocolo de transporte.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    SortedSet {
+        key: Bytes,
+        operation: SortedSetCommand,
+    },
+    SetCollection {
+        key: Bytes,
+        operation: SetCommand,
+    },
+    /// Operação sobre campos e valores binários de um hash.
+    Hash {
+        key: Bytes,
+        operation: HashCommand,
+    },
+    /// Operação de lista, incluindo pops individuais e ranges por índice.
+    List {
+        key: Bytes,
+        operation: ListCommand,
+    },
     /// Responde PONG ou devolve a mensagem binária.
     Ping(Option<Bytes>),
     /// Devolve exatamente o payload.
     Echo(Bytes),
     /// Lê o valor de uma chave.
-    Get { key: Bytes },
+    Get {
+        key: Bytes,
+    },
     /// Cria ou substitui um valor persistente.
-    Set { key: Bytes, value: Bytes },
+    Set {
+        key: Bytes,
+        value: Bytes,
+    },
     /// Aplica condições, prazo e retorno do valor anterior.
     SetWithOptions {
         key: Bytes,
@@ -72,17 +102,29 @@ pub enum Command {
         options: SetOptions,
     },
     /// Remove chaves; duplicatas são preservadas para contar apenas efeitos reais.
-    Del { keys: Vec<Bytes> },
+    Del {
+        keys: Vec<Bytes>,
+    },
     /// Conta cada ocorrência de uma chave existente.
-    Exists { keys: Vec<Bytes> },
+    Exists {
+        keys: Vec<Bytes>,
+    },
     /// Incrementa um inteiro decimal i64, criando zero antes da operação se ausente.
-    Incr { key: Bytes },
+    Incr {
+        key: Bytes,
+    },
     /// Decrementa um inteiro decimal i64.
-    Decr { key: Bytes },
+    Decr {
+        key: Bytes,
+    },
     /// Lê valores na ordem das chaves, preservando duplicatas.
-    MGet { keys: Vec<Bytes> },
+    MGet {
+        keys: Vec<Bytes>,
+    },
     /// Aplica um lote indivisível; o último par de uma chave prevalece.
-    MSet { entries: Vec<(Bytes, Bytes)> },
+    MSet {
+        entries: Vec<(Bytes, Bytes)>,
+    },
     /// Define expiração relativa em milissegundos; prazo não positivo remove a chave.
     Expire {
         key: Bytes,
@@ -90,15 +132,27 @@ pub enum Command {
         unit: ExpiryUnit,
     },
     /// Retorna o prazo restante ou os sentinelas -1 (persistente) e -2 (ausente).
-    Ttl { key: Bytes, milliseconds: bool },
+    Ttl {
+        key: Bytes,
+        milliseconds: bool,
+    },
     /// Remove a expiração de uma chave existente.
-    Persist { key: Bytes },
+    Persist {
+        key: Bytes,
+    },
     /// Inscreve esta conexão em canais efêmeros, fora do armazenamento.
-    Subscribe { channels: Vec<Bytes> },
+    Subscribe {
+        channels: Vec<Bytes>,
+    },
     /// Remove inscrições; lista vazia remove todas as inscrições da conexão.
-    Unsubscribe { channels: Vec<Bytes> },
+    Unsubscribe {
+        channels: Vec<Bytes>,
+    },
     /// Publica uma mensagem binária sem alterar o dataset.
-    Publish { channel: Bytes, message: Bytes },
+    Publish {
+        channel: Bytes,
+        message: Bytes,
+    },
 }
 
 impl Command {
@@ -111,6 +165,10 @@ impl Command {
             | Self::Unsubscribe { .. }
             | Self::Publish { .. } => {}
             Self::Get { key }
+            | Self::Hash { key, .. }
+            | Self::List { key, .. }
+            | Self::SetCollection { key, .. }
+            | Self::SortedSet { key, .. }
             | Self::Set { key, .. }
             | Self::SetWithOptions { key, .. }
             | Self::Incr { key }
@@ -119,11 +177,9 @@ impl Command {
             | Self::Ttl { key, .. }
             | Self::Persist { key } => visit(key),
             Self::Del { keys } | Self::Exists { keys } | Self::MGet { keys } => {
-                keys.iter().for_each(visit);
+                keys.iter().for_each(visit)
             }
-            Self::MSet { entries } => {
-                entries.iter().for_each(|(key, _)| visit(key));
-            }
+            Self::MSet { entries } => entries.iter().for_each(|(key, _)| visit(key)),
         }
     }
 }

@@ -69,7 +69,7 @@ fn layout(count: u32) -> DurableLayout {
 fn put(key: &'static [u8], value: &'static [u8], ttl: Option<i64>) -> Mutation {
     Mutation::Put {
         key: Bytes::from_static(key),
-        value: Bytes::from_static(value),
+        value: Bytes::from_static(value).into(),
         expires_at_unix_ms: ttl,
     }
 }

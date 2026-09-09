@@ -11,7 +11,7 @@ versão 0.1; este documento resume as fronteiras e identifica o que já existe.
 | Biblioteca | Expor a configuração reutilizável pelo binário e pelos testes |
 | Codec RESP2 | Representar, validar, codificar e decodificar frames com limites |
 | Parser de comandos | Validar formato/aridade e mover argumentos para comandos tipados |
-| Armazenamento síncrono | Executar strings e TTL sobre `HashMap<Bytes, Entry>` privado, com quota lógica |
+| Armazenamento síncrono | Executar strings e coleções tipadas sobre `HashMap<Bytes, Entry>` privado, com TTL e quota lógica |
 | Worker | Possuir o mapa, receber comandos na fila limitada e responder por oneshot |
 | Conexão e servidor | Coordenar RESP2/TCP, limites, timeouts, ordenação e supervisão |
 | Configuração | Validar endereço, limites, prazos e arquivo opcional de prontidão |
@@ -84,6 +84,12 @@ preserva a ordem e compartilha os mesmos payloads imutáveis. `MSET` pré-valida
 o saldo do lote inteiro antes de alterar o mapa, com último valor por chave.
 
 ### Expiração e quota
+
+R05/R06 acrescentam `Value` com strings, hashes, listas, sets e sorted sets.
+Coleções compartilham snapshots imutáveis por `Arc`; metadados continuam na
+`Entry`. O armazenamento prepara pós-imagens completas antes de aplicar o lote.
+Os [contratos de coleções](collections.md) e de [sorted sets](sorted-sets.md)
+detalham contabilidade, índices e representação AOF.
 
 `Entry` guarda valor, geração, deadline monotônico e deadline Unix em milissegundos.
 O relógio é injetável. A execução usa o monotônico; o absoluto fica disponível

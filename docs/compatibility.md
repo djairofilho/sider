@@ -60,6 +60,16 @@ para `TTL`; a expiração real é observada com deadline de cinco segundos. Esse
 caminho passou com Sider Windows e Redis Linux em Docker; não comprova build
 nativo Linux nem aprovação de pacotes. Veja a [reprodução](strings.md#validação-reproduzível).
 
+## Coleções implementadas em R05 e R06
+
+Hashes, listas e sets estão descritos no [guia de coleções](collections.md), com
+2.383 comparações diferenciais. Sorted sets estão no [guia de scores e ordem](sorted-sets.md),
+com 8.561 respostas exatas. As famílias preservam TTL e quota; `WRONGTYPE` rejeita
+operações entre tipos, `MGET` retorna nulo para coleções e `SET` sem `GET` pode
+substituir qualquer tipo. A [validação do writer AOF completo](types-persistence.md)
+permanece separada da comparação de comandos e distingue evolução do formato de
+migração entre executáveis congelados.
+
 ## Subconjunto alvo
 
 O Sider aceitará requisições RESP2 formadas por arrays não vazios de bulk strings
@@ -84,7 +94,7 @@ Cada conexão processa os comandos em sequência, com um único pedido em voo.
 | Protocolo | RESP2; sem RESP3 e sem comandos inline |
 | Banco lógico | Somente o banco padrão; sem `SELECT` |
 | Handshake e autenticação | Sem `AUTH`, `HELLO`, `COMMAND` ou `CLIENT`; clientes que exigem esses comandos não estarão cobertos |
-| Tipos de dados | Somente chaves e valores binários; sem listas, hashes, sets ou sorted sets |
+| Tipos de dados | Strings, hashes, listas, sets e sorted sets no subconjunto documentado; todos usam payloads binários |
 | Expiração | EXPIRE e PEXPIRE básicos; sem NX, XX, GT ou LT; monotônico durante execução |
 | Persistência e replicação | AOF binário próprio e snapshots globais; sem replicação ou Redis Cluster nesta etapa |
 | Memória do dataset | Quota lógica própria com rejeição atômica, sem eviction; não reproduz o maxmemory/RSS do Redis |
@@ -133,8 +143,9 @@ e divergências. Transações e sua interação com Pub/Sub permanecem em R07.
 
 O [ROADMAP](../ROADMAP.md) é a sequência oficial. Strings, opções de `SET`, TTL e
 quota de R02 estão implementadas, assim como AOF e shards fixos duráveis (R03/R04).
-O formato AOF é próprio, sem compatibilidade de arquivo com Redis. Hashes, listas e sets ficam na 0.5;
-sorted sets na 0.6; transações de um shard na 0.7; replicação
+O formato AOF é próprio, sem compatibilidade de arquivo com Redis. Hashes, listas,
+sets e sorted sets estão implementados com TTL/quota e persistência tipada.
+Transações de um shard ficam na 0.7; replicação
 Sider→Sider na 0.9; operação e imagem Docker na 0.10. A 1.0 estabiliza esse subconjunto.
 
 Com `SIDER_SHARDS` maior que um, operações multichave precisam do mesmo shard,

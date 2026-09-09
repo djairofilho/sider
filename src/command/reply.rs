@@ -10,6 +10,8 @@ use crate::resp::Frame;
 pub enum ExecutionError {
     #[error("CROSSSLOT Keys in request don't hash to the same slot")]
     CrossShard,
+    #[error("WRONGTYPE Operation against a key holding the wrong kind of value")]
+    WrongType,
     #[error("ERR value is not an integer or out of range")]
     InvalidInteger,
     #[error("ERR increment or decrement would overflow")]

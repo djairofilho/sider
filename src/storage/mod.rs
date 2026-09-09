@@ -1,12 +1,17 @@
 //! Armazenamento síncrono de chaves e valores binários, sem acesso ao protocolo.
 
 mod clock;
+mod collections;
 mod mutation;
 pub mod routing;
 pub mod snapshot;
+mod sorted_set;
+mod value;
+pub use sorted_set::SortedSet;
 pub mod worker;
 pub use clock::{Clock, SystemClock};
 pub use mutation::{Mutation, MutationOrigin, Prepared, ReplayError, ResolvedBatch};
+pub use value::Value;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -51,7 +56,7 @@ impl StoreConfig {
 /// Valor e metadados comuns. O prazo absoluto registra o instante resolvido da escrita.
 #[derive(Clone, Debug)]
 pub struct Entry {
-    pub value: Bytes,
+    pub value: Value,
     pub expires_at: Option<Instant>,
     pub expires_at_unix_ms: Option<i64>,
     pub generation: u64,
@@ -147,11 +152,21 @@ impl Store {
     fn execute_inner(&mut self, command: Command) -> Reply {
         let now = self.clock.now();
         match command {
+            Command::Hash { key, operation } => self.hash(key, operation, now),
+            Command::List { key, operation } => self.list(key, operation, now),
+            Command::SetCollection { key, operation } => self.set_collection(key, operation, now),
+            Command::SortedSet { key, operation } => self.sorted_set(key, operation, now),
             Command::Ping(None) => Reply::Pong,
             Command::Ping(Some(message)) | Command::Echo(message) => Reply::Bulk(Some(message)),
             Command::Get { key } => {
                 self.expire_key(&key, now);
-                Reply::Bulk(self.values.get(&key).map(|entry| entry.value.clone()))
+                match self.values.get(&key) {
+                    None => Reply::Bulk(None),
+                    Some(entry) => match entry.value.as_string() {
+                        Some(value) => Reply::Bulk(Some(value.clone())),
+                        None => Reply::Error(ExecutionError::WrongType),
+                    },
+                }
             }
             Command::Set { key, value } => self.set(key, value, SetOptions::default(), now),
             Command::SetWithOptions {
@@ -183,7 +198,12 @@ impl Store {
                 keys.iter()
                     .map(|key| {
                         self.expire_key(key, now);
-                        Reply::Bulk(self.values.get(key).map(|entry| entry.value.clone()))
+                        Reply::Bulk(
+                            self.values
+                                .get(key)
+                                .and_then(|entry| entry.value.as_string())
+                                .cloned(),
+                        )
                     })
                     .collect(),
             ),
@@ -234,9 +254,12 @@ impl Store {
     fn increment(&mut self, key: Bytes, delta: i64, now: Instant) -> Reply {
         self.expire_key(&key, now);
         let previous = match self.values.get(&key) {
-            Some(entry) => match parse_decimal(&entry.value) {
-                Some(value) => value,
-                None => return Reply::Error(ExecutionError::InvalidInteger),
+            Some(entry) => match entry.value.as_string() {
+                None => return Reply::Error(ExecutionError::WrongType),
+                Some(value) => match parse_decimal(value) {
+                    Some(value) => value,
+                    None => return Reply::Error(ExecutionError::InvalidInteger),
+                },
             },
             None => 0,
         };
@@ -244,7 +267,7 @@ impl Store {
             return Reply::Error(ExecutionError::IntegerOverflow);
         };
         let expiry = self.values.get(&key).and_then(Self::entry_expiry);
-        let encoded = Bytes::from(value.to_string());
+        let encoded = Value::String(Bytes::from(value.to_string()));
         if !self.can_replace(&key, &encoded) {
             return Reply::Error(ExecutionError::OutOfMemory);
         }
@@ -280,7 +303,10 @@ impl Store {
         self.expire_key(&key, now);
         let previous = self.values.get(&key);
         let reply = if options.return_previous {
-            Reply::Bulk(previous.map(|entry| entry.value.clone()))
+            if previous.is_some_and(|entry| entry.value.as_string().is_none()) {
+                return Reply::Error(ExecutionError::WrongType);
+            }
+            Reply::Bulk(previous.and_then(|entry| entry.value.as_string()).cloned())
         } else {
             Reply::Ok
         };
@@ -298,6 +324,7 @@ impl Store {
         } else {
             deadline
         };
+        let value = Value::String(value);
         if !self.can_replace(&key, &value) {
             return Reply::Error(ExecutionError::OutOfMemory);
         }
@@ -359,7 +386,8 @@ impl Store {
         Some(entry)
     }
 
-    fn insert(&mut self, key: Bytes, value: Bytes, expiry: Option<(Instant, i64)>) {
+    fn insert(&mut self, key: Bytes, value: impl Into<Value>, expiry: Option<(Instant, i64)>) {
+        let value = value.into();
         self.remove(&key);
         self.used_bytes += Self::entry_bytes(&key, &value).expect("mutação pré-validada");
         // Há no máximo um evento por chave; o anterior foi removido antes da geração avançar.
@@ -377,13 +405,13 @@ impl Store {
         self.values.insert(key, entry);
     }
 
-    fn entry_bytes(key: &Bytes, value: &Bytes) -> Option<usize> {
+    fn entry_bytes(key: &Bytes, value: &Value) -> Option<usize> {
         key.len()
-            .checked_add(value.len())?
+            .checked_add(value.logical_bytes()?)?
             .checked_add(ENTRY_OVERHEAD_BYTES)
     }
 
-    fn can_replace(&self, key: &Bytes, value: &Bytes) -> bool {
+    fn can_replace(&self, key: &Bytes, value: &Value) -> bool {
         let old = self
             .values
             .get(key)
@@ -408,7 +436,7 @@ impl Store {
             }
         }
         let proposed = entries.iter().try_fold(base, |usage, (key, value)| {
-            usage.checked_add(Self::entry_bytes(key, value)?)
+            usage.checked_add(Self::entry_bytes(key, &Value::String(value.clone()))?)
         });
         if !proposed
             .is_some_and(|usage| usage <= self.config.max_dataset_bytes || usage <= self.used_bytes)
