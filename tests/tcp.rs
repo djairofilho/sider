@@ -234,13 +234,13 @@ async fn recoverable_errors_keep_pipeline_alive_without_mutation() {
         b"*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$4\r\nsafe\r\n\
           *1\r\n$3\r\nGET\r\n\
           *2\r\n$7\r\nPRIVATE\r\n$6\r\nsecret\r\n\
-          *4\r\n$3\r\nSET\r\n$1\r\nk\r\n$6\r\nunsafe\r\n$2\r\nNX\r\n\
+          *4\r\n$3\r\nSET\r\n$1\r\nk\r\n$6\r\nunsafe\r\n$3\r\nBAD\r\n\
           *2\r\n$3\r\nGET\r\n$1\r\nk\r\n\
           *1\r\n$4\r\nPING\r\n",
         b"+OK\r\n\
           -ERR wrong number of arguments for 'get' command\r\n\
           -ERR unknown command\r\n\
-          -ERR unsupported SET options\r\n\
+          -ERR syntax error\r\n\
           $4\r\nsafe\r\n\
           +PONG\r\n",
     )

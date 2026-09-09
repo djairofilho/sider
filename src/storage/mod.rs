@@ -1,20 +1,43 @@
 //! Armazenamento síncrono de chaves e valores binários, sem acesso ao protocolo.
 
+mod clock;
 pub mod worker;
+pub use clock::{Clock, SystemClock};
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
+use tokio::time::Instant;
 
-use crate::command::{Command, ExecutionError, Reply};
+use crate::command::{
+    Command, ExecutionError, ExpiryUnit, Reply, SetCondition, SetExpiry, SetOptions, parse_decimal,
+};
+
+/// Valor e metadados comuns. O prazo absoluto registra o instante resolvido da escrita.
+#[derive(Clone, Debug)]
+pub struct Entry {
+    pub value: Bytes,
+    pub expires_at: Option<Instant>,
+    pub expires_at_unix_ms: Option<i64>,
+    pub generation: u64,
+}
 
 /// Mapa em memória com proprietário único e execução sequencial dos comandos.
 ///
-/// Não oferece persistência, expiração ou quota de memória na versão 0.1.
-/// Compartilhamento entre clientes será responsabilidade do worker proprietário.
-#[derive(Default)]
+/// O relógio é injetável; eventos antigos são retirados em toda substituição.
 pub struct Store {
-    values: HashMap<Bytes, Bytes>,
+    values: HashMap<Bytes, Entry>,
+    expirations: BTreeSet<(Instant, u64, Bytes)>,
+    generation: u64,
+    clock: Arc<dyn Clock>,
+}
+
+impl Default for Store {
+    fn default() -> Self {
+        Self::with_clock(Arc::new(SystemClock))
+    }
 }
 
 impl Store {
@@ -23,25 +46,75 @@ impl Store {
         Self::default()
     }
 
+    pub fn with_clock(clock: Arc<dyn Clock>) -> Self {
+        Self {
+            values: HashMap::new(),
+            expirations: BTreeSet::new(),
+            generation: 0,
+            clock,
+        }
+    }
+
+    /// Quantidade física de entradas, incluindo expiradas ainda não visitadas.
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    /// Processa no máximo `budget` eventos sem percorrer o mapa inteiro.
+    pub fn expire_due(&mut self, budget: usize) -> usize {
+        let now = self.clock.now();
+        let mut removed = 0;
+        for _ in 0..budget {
+            if !self
+                .expirations
+                .first()
+                .is_some_and(|(deadline, _, _)| *deadline <= now)
+            {
+                break;
+            }
+            let Some((deadline, generation, key)) = self.expirations.pop_first() else {
+                break;
+            };
+            if self.values.get(&key).is_some_and(|entry| {
+                entry.generation == generation && entry.expires_at == Some(deadline)
+            }) {
+                self.values.remove(&key);
+                removed += 1;
+            }
+        }
+        removed
+    }
+
     /// Aplica um comando validado sem suspender a execução.
     ///
     /// `GET` compartilha o conteúdo imutável de `Bytes` com a resposta. Alterar ou
     /// remover a chave depois não altera uma resposta já devolvida.
     pub fn execute(&mut self, command: Command) -> Reply {
+        let now = self.clock.now();
         match command {
             Command::Ping(None) => Reply::Pong,
             Command::Ping(Some(message)) | Command::Echo(message) => Reply::Bulk(Some(message)),
-            Command::Get { key } => Reply::Bulk(self.values.get(&key).cloned()),
-            Command::Set { key, value } => {
-                self.values.insert(key, value);
-                Reply::Ok
+            Command::Get { key } => {
+                self.expire_key(&key, now);
+                Reply::Bulk(self.values.get(&key).map(|entry| entry.value.clone()))
             }
+            Command::Set { key, value } => self.set(key, value, SetOptions::default(), now),
+            Command::SetWithOptions {
+                key,
+                value,
+                options,
+            } => self.set(key, value, options, now),
             Command::Del { keys } => {
                 // Nos alvos de 32/64 bits, uma Vec<Bytes> válida possui menos de
                 // i64::MAX elementos. Cada elemento causa no máximo um incremento.
                 let mut removed = 0_i64;
                 for key in keys {
-                    if self.values.remove(&key).is_some() {
+                    self.expire_key(&key, now);
+                    if self.remove(&key).is_some() {
                         removed += 1;
                     }
                 }
@@ -49,28 +122,70 @@ impl Store {
             }
             Command::Exists { keys } => Reply::Integer(
                 keys.iter()
-                    .filter(|key| self.values.contains_key(*key))
+                    .filter(|key| {
+                        self.expire_key(key, now);
+                        self.values.contains_key(*key)
+                    })
                     .count() as i64,
             ),
             Command::MGet { keys } => Reply::Array(
                 keys.iter()
-                    .map(|key| Reply::Bulk(self.values.get(key).cloned()))
+                    .map(|key| {
+                        self.expire_key(key, now);
+                        Reply::Bulk(self.values.get(key).map(|entry| entry.value.clone()))
+                    })
                     .collect(),
             ),
             Command::MSet { entries } => {
                 for (key, value) in entries {
-                    self.values.insert(key, value);
+                    self.insert(key, value, None);
                 }
                 Reply::Ok
             }
-            Command::Incr { key } => self.increment(key, 1),
-            Command::Decr { key } => self.increment(key, -1),
+            Command::Incr { key } => self.increment(key, 1, now),
+            Command::Decr { key } => self.increment(key, -1, now),
+            Command::Expire { key, value, unit } => self.expire(key, value, unit, now),
+            Command::Ttl { key, milliseconds } => {
+                self.expire_key(&key, now);
+                let value = match self.values.get(&key) {
+                    None => -2,
+                    Some(Entry {
+                        expires_at: None, ..
+                    }) => -1,
+                    Some(entry) => {
+                        let ttl = entry
+                            .expires_at
+                            .unwrap()
+                            .saturating_duration_since(now)
+                            .as_millis();
+                        let result = if milliseconds {
+                            ttl
+                        } else {
+                            (ttl + 500) / 1000
+                        };
+                        i64::try_from(result).unwrap_or(i64::MAX)
+                    }
+                };
+                Reply::Integer(value)
+            }
+            Command::Persist { key } => {
+                self.expire_key(&key, now);
+                let Some(entry) = self.values.get(&key) else {
+                    return Reply::Integer(0);
+                };
+                if entry.expires_at.is_none() {
+                    return Reply::Integer(0);
+                }
+                self.insert(key, entry.value.clone(), None);
+                Reply::Integer(1)
+            }
         }
     }
 
-    fn increment(&mut self, key: Bytes, delta: i64) -> Reply {
+    fn increment(&mut self, key: Bytes, delta: i64, now: Instant) -> Reply {
+        self.expire_key(&key, now);
         let previous = match self.values.get(&key) {
-            Some(value) => match parse_decimal(value) {
+            Some(entry) => match parse_decimal(&entry.value) {
                 Some(value) => value,
                 None => return Reply::Error(ExecutionError::InvalidInteger),
             },
@@ -79,26 +194,171 @@ impl Store {
         let Some(value) = previous.checked_add(delta) else {
             return Reply::Error(ExecutionError::IntegerOverflow);
         };
-        self.values.insert(key, Bytes::from(value.to_string()));
+        let expiry = self.values.get(&key).and_then(Self::entry_expiry);
+        self.insert(key, Bytes::from(value.to_string()), expiry);
         Reply::Integer(value)
     }
-}
 
-/// Decimal canônico compatível com o parser de inteiros Redis.
-pub(crate) fn parse_decimal(value: &[u8]) -> Option<i64> {
-    if value == b"0" {
-        return Some(0);
+    fn entry_expiry(entry: &Entry) -> Option<(Instant, i64)> {
+        entry.expires_at.zip(entry.expires_at_unix_ms)
     }
-    let digits = value.strip_prefix(b"-").unwrap_or(value);
-    if !matches!(digits.first(), Some(b'1'..=b'9')) || !digits.iter().all(u8::is_ascii_digit) {
-        return None;
+
+    fn deadline(&self, milliseconds: i64, now: Instant) -> Option<(Instant, i64)> {
+        let absolute = self.clock.unix_millis().checked_add(milliseconds)?;
+        let monotonic =
+            now.checked_add(Duration::from_millis(u64::try_from(milliseconds).ok()?))?;
+        Some((monotonic, absolute))
     }
-    std::str::from_utf8(value).ok()?.parse().ok()
+
+    fn set(&mut self, key: Bytes, value: Bytes, options: SetOptions, now: Instant) -> Reply {
+        let deadline = match options.expiry {
+            SetExpiry::After(duration) => {
+                let Some(deadline) = i64::try_from(duration.as_millis())
+                    .ok()
+                    .filter(|millis| *millis > 0)
+                    .and_then(|millis| self.deadline(millis, now))
+                else {
+                    return Reply::Error(ExecutionError::InvalidSetExpiry);
+                };
+                Some(deadline)
+            }
+            _ => None,
+        };
+        self.expire_key(&key, now);
+        let previous = self.values.get(&key);
+        let reply = if options.return_previous {
+            Reply::Bulk(previous.map(|entry| entry.value.clone()))
+        } else {
+            Reply::Ok
+        };
+        if (options.condition == SetCondition::Missing && previous.is_some())
+            || (options.condition == SetCondition::Present && previous.is_none())
+        {
+            return if options.return_previous {
+                reply
+            } else {
+                Reply::Bulk(None)
+            };
+        }
+        let expiry = if options.expiry == SetExpiry::Keep {
+            previous.and_then(Self::entry_expiry)
+        } else {
+            deadline
+        };
+        self.insert(key, value, expiry);
+        reply
+    }
+
+    fn expire(&mut self, key: Bytes, value: i64, unit: ExpiryUnit, now: Instant) -> Reply {
+        let name = if unit == ExpiryUnit::Seconds {
+            "expire"
+        } else {
+            "pexpire"
+        };
+        let Some(millis) = (if unit == ExpiryUnit::Seconds {
+            value.checked_mul(1000)
+        } else {
+            Some(value)
+        }) else {
+            return Reply::Error(ExecutionError::InvalidExpiry(name));
+        };
+        let deadline = if millis > 0 {
+            let Some(deadline) = self.deadline(millis, now) else {
+                return Reply::Error(ExecutionError::InvalidExpiry(name));
+            };
+            Some(deadline)
+        } else {
+            None
+        };
+        self.expire_key(&key, now);
+        let Some(entry) = self.values.get(&key) else {
+            return Reply::Integer(0);
+        };
+        if millis <= 0 {
+            self.remove(&key);
+        } else {
+            self.insert(key, entry.value.clone(), deadline);
+        }
+        Reply::Integer(1)
+    }
+
+    fn expire_key(&mut self, key: &Bytes, now: Instant) {
+        if self
+            .values
+            .get(key)
+            .is_some_and(|entry| entry.expires_at.is_some_and(|deadline| deadline <= now))
+        {
+            self.remove(key);
+        }
+    }
+
+    fn remove(&mut self, key: &Bytes) -> Option<Entry> {
+        let entry = self.values.remove(key)?;
+        if let Some(deadline) = entry.expires_at {
+            self.expirations
+                .remove(&(deadline, entry.generation, key.clone()));
+        }
+        Some(entry)
+    }
+
+    fn insert(&mut self, key: Bytes, value: Bytes, expiry: Option<(Instant, i64)>) {
+        self.remove(&key);
+        // Há no máximo um evento por chave; o anterior foi removido antes da geração avançar.
+        self.generation = self.generation.wrapping_add(1);
+        let entry = Entry {
+            value,
+            expires_at: expiry.map(|value| value.0),
+            expires_at_unix_ms: expiry.map(|value| value.1),
+            generation: self.generation,
+        };
+        if let Some(deadline) = entry.expires_at {
+            self.expirations
+                .insert((deadline, entry.generation, key.clone()));
+        }
+        self.values.insert(key, entry);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expiration_index_stays_bounded_during_repeated_rewrites() {
+        let mut store = Store::new();
+        for _ in 0..1000 {
+            let reply = store.execute(Command::SetWithOptions {
+                key: Bytes::from_static(b"key"),
+                value: Bytes::from_static(b"value"),
+                options: SetOptions {
+                    expiry: SetExpiry::After(Duration::from_secs(60)),
+                    ..SetOptions::default()
+                },
+            });
+            assert_eq!(reply, Reply::Ok);
+            assert_eq!(store.expirations.len(), 1);
+        }
+        store.execute(Command::Persist {
+            key: Bytes::from_static(b"key"),
+        });
+        assert!(store.expirations.is_empty());
+    }
+
+    #[test]
+    fn outdated_expiration_generation_cannot_remove_replacement() {
+        let mut store = Store::new();
+        let key = Bytes::from_static(b"key");
+        let now = store.clock.now();
+        store.insert(key.clone(), Bytes::from_static(b"old"), Some((now, 0)));
+        let old = store.expirations.first().unwrap().clone();
+        store.insert(key.clone(), Bytes::from_static(b"new"), None);
+        store.expirations.insert(old);
+        assert_eq!(store.expire_due(1), 0);
+        assert_eq!(
+            store.execute(Command::Get { key }),
+            Reply::Bulk(Some(Bytes::from_static(b"new")))
+        );
+    }
 
     fn set(store: &mut Store, key: &'static [u8], value: &'static [u8]) {
         assert_eq!(

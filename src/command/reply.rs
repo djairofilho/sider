@@ -12,6 +12,10 @@ pub enum ExecutionError {
     InvalidInteger,
     #[error("ERR increment or decrement would overflow")]
     IntegerOverflow,
+    #[error("ERR invalid expire time in 'set' command")]
+    InvalidSetExpiry,
+    #[error("ERR invalid expire time in '{0}' command")]
+    InvalidExpiry(&'static str),
 }
 
 /// Resultado da execução síncrona no armazenamento.

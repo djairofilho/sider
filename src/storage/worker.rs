@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 use tokio::sync::{Semaphore, mpsc, oneshot, watch};
-use tokio::time::{Instant, sleep_until};
+use tokio::time::{Instant, MissedTickBehavior, interval, sleep_until};
 
 use crate::command::{Command, Reply};
 use crate::error::ConfigError;
@@ -138,6 +138,8 @@ impl Worker {
     /// naturalmente quando todos os handles são descartados e a fila esvazia.
     /// Uma resposta sem destinatário não impede a execução nem encerra o worker.
     pub async fn run(mut self) {
+        let mut expiration = interval(Duration::from_millis(100));
+        expiration.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 biased;
@@ -145,6 +147,7 @@ impl Worker {
                     self.requests.close();
                     break;
                 }
+                _ = expiration.tick() => { self.store.expire_due(64); }
                 request = self.requests.recv() => {
                     match request {
                         Some(request) => self.apply(request),
