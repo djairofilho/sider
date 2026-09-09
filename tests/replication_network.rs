@@ -706,6 +706,12 @@ async fn replication_slow_peer_does_not_block_healthy_replica_and_lost_history_f
     assert!(matches!(read(&mut slow).await, Message::Hello(_)));
     assert_eq!(read(&mut slow).await, Message::Continue(baseline));
     send(&mut slow, Message::Ack(baseline)).await;
+    ok(primary.command(&[b"SET", b"{s}:bounded", b"first"]));
+    // Confirma que o peer já recebeu um lote antes de ultrapassar o histórico.
+    assert!(matches!(read(&mut slow).await, Message::Heartbeat(_)));
+    let Message::Batch { sequence, .. } = read(&mut slow).await else {
+        panic!("primeiro lote");
+    };
     for index in 0..200 {
         let value = format!("{index:04}{}", "x".repeat(1024));
         ok(primary.command(&[b"SET", b"{s}:bounded", value.as_bytes()]));
@@ -719,10 +725,6 @@ async fn replication_slow_peer_does_not_block_healthy_replica_and_lost_history_f
         matches!(primary.status().await, Message::Status { backlog_bytes, .. } if backlog_bytes <= 32768)
     );
     // O peer reteve no máximo um lote fora do journal e ficou esperando ACK.
-    assert!(matches!(read(&mut slow).await, Message::Heartbeat(_)));
-    let Message::Batch { sequence, .. } = read(&mut slow).await else {
-        panic!("primeiro lote");
-    };
     send(&mut slow, Message::Ack(baseline)).await;
     send(
         &mut slow,
@@ -944,4 +946,89 @@ fn release_replication_gate() {
         "snapshot_modes": ["full", "export"], "resume_modes": ["continue", "full_after_history_loss", "full_after_epoch_change"],
         "replica_sync_policy": "everysec_with_ack_flush", "observed": observed
     })).unwrap();
+}
+
+async fn library_node(
+    path: &Path,
+    upstream: Option<SocketAddr>,
+) -> (
+    tokio::sync::oneshot::Sender<()>,
+    tokio::task::JoinHandle<Result<(), sider::server::ServerError>>,
+    SocketAddr,
+) {
+    fs::create_dir_all(path).unwrap();
+    let aof_path = path.join("aof");
+    let ready = path.join("ready.json");
+    let internal = path.join("internal.json");
+    let config = sider::ServerConfig::from_lookup(|name| match name {
+        "SIDER_AOF_DIR" => Some(aof_path.clone().into()),
+        "SIDER_READY_FILE" => Some(ready.clone().into()),
+        "SIDER_REPLICATION_READY_FILE" => Some(internal.clone().into()),
+        "SIDER_REPLICATION_ADDR" => Some("127.0.0.1:0".into()),
+        "SIDER_REPLICA_OF" => upstream.map(|address| address.to_string().into()),
+        "SIDER_SHARDS" => Some("4".into()),
+        "SIDER_SHUTDOWN_TIMEOUT_MS" => Some("2000".into()),
+        _ => None,
+    })
+    .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(sider::server::serve(listener, config, async {
+        let _ = stopped.await;
+    }));
+    let deadline = Instant::now() + DEADLINE;
+    while !ready.is_file() {
+        assert!(!task.is_finished(), "servidor terminou antes da prontidão");
+        assert!(Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let value: serde_json::Value = serde_json::from_slice(&fs::read(internal).unwrap()).unwrap();
+    let address = format!("{}:{}", value["host"].as_str().unwrap(), value["port"])
+        .parse()
+        .unwrap();
+    (stop, task, address)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn replication_shutdown_drains_tasks_with_connected_replica_and_partial_internal_frame() {
+    let directory = Directory::new();
+    let (stop_primary, primary, upstream) = library_node(&directory.0.join("primary"), None).await;
+    let (stop_replica, replica, internal) =
+        library_node(&directory.0.join("replica"), Some(upstream)).await;
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        let mut status = TcpStream::connect(internal).await.unwrap();
+        send(&mut status, Message::StatusRequest).await;
+        if matches!(
+            read(&mut status).await,
+            Message::Status {
+                connected: true,
+                ..
+            }
+        ) {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let mut partial = TcpStream::connect(upstream).await.unwrap();
+    tokio::io::AsyncWriteExt::write_all(&mut partial, b"SIDER")
+        .await
+        .unwrap();
+    stop_replica.send(()).unwrap();
+    stop_primary.send(()).unwrap();
+    tokio::time::timeout(DEADLINE, replica)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(DEADLINE, primary)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    for node in ["primary", "replica"] {
+        assert!(!directory.0.join(node).join("ready.json").exists());
+        assert!(!directory.0.join(node).join("internal.json").exists());
+    }
 }
