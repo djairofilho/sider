@@ -63,6 +63,14 @@ impl Pair {
             );
             self.normalized += 1;
         } else {
+            if let (Response::Array(Some(actual)), Response::Array(Some(expected))) =
+                (&actual.value, &expected.value)
+            {
+                assert_eq!(actual.len(), expected.len(), "tamanho: {args:?}");
+                for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+                    assert_eq!(actual, expected, "elemento {index}: {args:?}");
+                }
+            }
             assert_eq!(actual, expected, "{args:?}");
             self.exact += 1;
         }
@@ -252,6 +260,210 @@ fn collections_match_redis() {
         pair.exact,
         pair.normalized,
         pair.exact + pair.normalized
+    );
+    drop(pair);
+    sider.assert_alive();
+    sider.finish();
+    redis.finish();
+}
+
+fn sorted_fixtures(pair: &mut Pair) {
+    for args in [
+        vec![b"ZCARD".as_slice(), b"{r06}z"],
+        vec![b"ZSCORE", b"{r06}z", b"missing"],
+        vec![b"ZRANGE", b"{r06}z", b"0", b"-1", b"WITHSCORES"],
+        vec![b"ZREM", b"{r06}z", b"missing"],
+        vec![
+            b"ZADD", b"{r06}z", b"-inf", b"lo", b"inf", b"hi", b"1", b"\xff", b"1", b"", b"1",
+            b"\0",
+        ],
+        vec![b"ZRANGE", b"{r06}z", b"0", b"-1", b"WITHSCORES"],
+        vec![
+            b"ZADD", b"{r06}z", b"2", b"\xff", b"1", b"\xff", b"3", b"new", b"4", b"new",
+        ],
+        vec![b"ZRANGE", b"{r06}z", b"-3", b"-2"],
+        vec![
+            b"ZRANGE",
+            b"{r06}z",
+            b"-9223372036854775808",
+            b"9223372036854775807",
+        ],
+        vec![b"ZRANGE", b"{r06}z", b"0", b"-100"],
+        vec![b"ZRANGE", b"{r06}z", b"100", b"200"],
+        vec![b"ZRANGE", b"{r06}z", b"3", b"1"],
+        vec![b"ZRANGE", b"{r06}z", b"+1", b"2"],
+        vec![b"ZRANGE", b"{r06}z", b"0", b"9223372036854775808"],
+        vec![b"ZRANGE", b"{r06}z", b"0", b"2", b"invalid"],
+        vec![b"ZADD", b"{r06}z", b"0", b"lo", b"NaN", b"bad"],
+        vec![b"ZRANGE", b"{r06}z", b"0", b"-1", b"WITHSCORES"],
+        vec![
+            b"ZREM", b"{r06}z", b"lo", b"lo", b"hi", b"new", b"\xff", b"", b"\0",
+        ],
+        vec![b"EXISTS", b"{r06}z"],
+    ] {
+        pair.run(&args);
+    }
+    for name in [b"ZADD".as_slice(), b"ZREM", b"ZCARD", b"ZSCORE", b"ZRANGE"] {
+        pair.run(&[name]);
+    }
+    for score in [
+        "-0",
+        "-0.0",
+        "+0",
+        "0e-9999",
+        "1e-9999",
+        "inf",
+        "+Infinity",
+        "-INF",
+        "NaN",
+        "nan(1)",
+        "1e309",
+        "-1e309",
+        "1e-7",
+        "1e-6",
+        "1e-5",
+        "1e19",
+        "1e20",
+        "1e23",
+        "4.9406564584124654e-324",
+        "2.2250738585072014e-308",
+        "1.7976931348623157e308",
+        "9007199254740991",
+        "9007199254740992",
+        "9007199254740993",
+        "4611686018427387904",
+        "4611686018427387905",
+        "0.00012345678901234567",
+        "123456789012345.67",
+        "01.5",
+        ".5",
+        "1.",
+        "",
+        " 1",
+        "1 ",
+        "1_000",
+        "0x1p0",
+        "-0x1.8p1",
+        "0x.8",
+        "0x1p-1074",
+        "0x1p-1075",
+        "0x1.fffffffffffffp1023",
+        "0x1.00000000000008p0",
+        "0x1.0000000000000800001p0",
+        "0x1.fffffffffffff8p0",
+        "0x0.fffffffffffff8p-1022",
+        "0x1p99999999999999999999999999999999",
+        "0x0p99999999999999999999999999999999",
+        "0x1p",
+        "0xp0",
+        "0x1.2.3",
+        "0x1p1p1",
+    ] {
+        pair.run(&[b"DEL", b"{r06}score"]);
+        pair.run(&[b"ZADD", b"{r06}score", score.as_bytes(), b"m"]);
+        pair.run(&[b"ZSCORE", b"{r06}score", b"m"]);
+        pair.run(&[b"ZRANGE", b"{r06}score", b"0", b"-1", b"WITHSCORES"]);
+    }
+    for creator in [
+        vec![b"SET".as_slice(), b"{r06}type", b"v"],
+        vec![b"HSET", b"{r06}type", b"f", b"v"],
+        vec![b"LPUSH", b"{r06}type", b"v"],
+        vec![b"SADD", b"{r06}type", b"v"],
+    ] {
+        pair.run(&[b"DEL", b"{r06}type"]);
+        pair.run(&creator);
+        for args in [
+            vec![b"ZADD".as_slice(), b"{r06}type", b"1", b"m"],
+            vec![b"ZREM", b"{r06}type", b"m"],
+            vec![b"ZCARD", b"{r06}type"],
+            vec![b"ZSCORE", b"{r06}type", b"m"],
+            vec![b"ZRANGE", b"{r06}type", b"0", b"-1"],
+        ] {
+            pair.run(&args);
+        }
+    }
+    pair.run(&[b"DEL", b"{r06}type"]);
+    pair.run(&[b"ZADD", b"{r06}type", b"1", b"m"]);
+    for args in [
+        vec![b"GET".as_slice(), b"{r06}type"],
+        vec![b"HGET", b"{r06}type", b"m"],
+        vec![b"LLEN", b"{r06}type"],
+        vec![b"SCARD", b"{r06}type"],
+        vec![b"MGET", b"{r06}type"],
+        vec![b"SET", b"{r06}type", b"v", b"GET", b"NX"],
+    ] {
+        pair.run(&args);
+    }
+    pair.run(&[b"PEXPIRE", b"{r06}type", b"60000"]);
+    pair.run(&[b"ZADD", b"{r06}type", b"2", b"m"]);
+    pair.run(&[b"PERSIST", b"{r06}type"]);
+    pair.run(&[b"PEXPIRE", b"{r06}type", b"0"]);
+    pair.run(&[b"ZCARD", b"{r06}type"]);
+}
+
+fn sorted_generated(pair: &mut Pair) {
+    for seed in [1u64, 42, 0x51de_0600, u64::MAX] {
+        let mut state = seed;
+        for step in 0..512 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let member = [(state >> 32) as u8 % 32, 0, 255];
+            let number = f64::from_bits(state);
+            let score = if step % 3 == 0 {
+                ((state % 17) as i64 - 8).to_string()
+            } else {
+                number.to_string()
+            };
+            if step % 5 == 0 {
+                pair.run(&[b"ZREM", b"{r06}z", &member, &member]);
+            } else {
+                pair.run(&[
+                    b"ZADD",
+                    b"{r06}z",
+                    score.as_bytes(),
+                    &member,
+                    score.as_bytes(),
+                    &member,
+                ]);
+            }
+            pair.run(&[b"ZSCORE", b"{r06}z", &member]);
+            pair.run(&[b"ZCARD", b"{r06}z"]);
+            pair.run(&[b"ZRANGE", b"{r06}z", b"0", b"-1", b"WITHSCORES"]);
+        }
+        pair.run(&[b"DEL", b"{r06}z"]);
+    }
+}
+
+#[test]
+#[ignore = "exige Docker e Redis fixado; execute explicitamente"]
+fn sorted_sets_match_redis() {
+    let redis = redis_reference::RedisReference::start();
+    let mut sider = sider_process::SiderProcess::start(
+        Path::new(env!("CARGO_BIN_EXE_sider")),
+        env!("CARGO_PKG_VERSION"),
+    );
+    let mut pair = Pair::new(sider.address(), redis.address());
+    sorted_fixtures(&mut pair);
+    sorted_generated(&mut pair);
+    let mut seed = 0x51de_0602u64;
+    for _ in 0..32 {
+        pair.run(&[b"DEL", b"{r06}scores"]);
+        let mut args = vec![b"ZADD".to_vec(), b"{r06}scores".to_vec()];
+        for member in 0..400u32 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let score = f64::from_bits(seed);
+            if !score.is_finite() {
+                continue;
+            }
+            args.push(score.to_string().into_bytes());
+            args.push(member.to_le_bytes().to_vec());
+        }
+        pair.run(&args.iter().map(Vec::as_slice).collect::<Vec<_>>());
+        pair.run(&[b"ZRANGE", b"{r06}scores", b"0", b"-1", b"WITHSCORES"]);
+    }
+    assert_eq!(pair.normalized, 0, "sorted sets não permitem normalização");
+    eprintln!(
+        "R06: {} respostas exatas, incluindo scores e ordem",
+        pair.exact
     );
     drop(pair);
     sider.assert_alive();

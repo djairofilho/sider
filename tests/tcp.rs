@@ -242,6 +242,68 @@ fn arguments(args: &[&[u8]]) -> Vec<u8> {
 }
 
 #[tokio::test]
+async fn r06_sorted_response_limit_preserves_state_and_invalid_scores_are_recoverable() {
+    let server = TestServer::start(ServerConfig {
+        resp_limits: sider::resp::RespLimits {
+            max_frame_bytes: 256,
+            max_bulk_bytes: 64,
+            max_line_bytes: 64,
+            max_nodes: 8,
+            max_depth: 2,
+        },
+        max_input_buffer_bytes: 256,
+        max_response_bytes: 128,
+        ..ServerConfig::default()
+    })
+    .await;
+    let mut client = server.connect().await;
+    exchange(
+        &mut client,
+        &arguments(&[b"ZADD", b"{r06}z", b"0", &[b'x'; 48], b"NaN", &[b'y'; 48]]),
+        b"-ERR value is not a valid float\r\n",
+    )
+    .await;
+    exchange(&mut client, PING, PONG).await;
+    exchange(&mut client, &arguments(&[b"ZCARD", b"{r06}z"]), b":0\r\n").await;
+    exchange(
+        &mut client,
+        &arguments(&[b"ZADD", b"{r06}z", b"0", &[b'x'; 48], b"1", &[b'y'; 48]]),
+        b":2\r\n",
+    )
+    .await;
+    let mut expected = b"*4\r\n".to_vec();
+    for (member, score) in [(b'x', b'0'), (b'y', b'1')] {
+        expected.extend_from_slice(b"$48\r\n");
+        expected.extend_from_slice(&[member; 48]);
+        expected.extend_from_slice(b"\r\n$1\r\n");
+        expected.push(score);
+        expected.extend_from_slice(b"\r\n");
+    }
+    assert_eq!(expected.len(), 128);
+    exchange(
+        &mut client,
+        &arguments(&[b"ZRANGE", b"{r06}z", b"0", b"-1", b"WITHSCORES"]),
+        &expected,
+    )
+    .await;
+    exchange(
+        &mut client,
+        &arguments(&[b"ZADD", b"{r06}z", b"2", b"a"]),
+        b":1\r\n",
+    )
+    .await;
+    write(
+        &mut client,
+        &arguments(&[b"ZRANGE", b"{r06}z", b"0", b"-1", b"WITHSCORES"]),
+    )
+    .await;
+    assert!(read_until_closed(&mut client).await.is_empty());
+    let mut other = server.connect().await;
+    exchange(&mut other, &arguments(&[b"ZCARD", b"{r06}z"]), b":3\r\n").await;
+    server.stop().await;
+}
+
+#[tokio::test]
 async fn r05_list_response_limit_closes_without_partial_array_or_mutation() {
     let server = TestServer::start(ServerConfig {
         resp_limits: sider::resp::RespLimits {
