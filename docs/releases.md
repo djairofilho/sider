@@ -89,6 +89,11 @@ arquivos e o procedimento de backup/restauração. O gate de migração da 1.0 p
 dessa baseline, sem exigir uma release 0.10 final publicada. Também valide fixtures
 de formato inicial, corrupção e versões desconhecidas conforme os contratos AOF.
 
+O [runbook da baseline R10](internal-baseline.md) fixa o sidecar observacional de
+build, as entradas do congelamento e a migração por pacotes extraídos. Preserve
+o hash externo de `baseline.json` e nunca inicie um servidor sobre os diretórios
+de dados congelados. O ensaio da mesma versão não substitui o gate da candidata.
+
 ## Preparar o build candidato 1.0
 
 Conclua escopo, documentação e notas antes de construir a candidata. Atualize
