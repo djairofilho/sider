@@ -207,6 +207,30 @@ impl Store {
                 | Command::MGet { .. }
                 | Command::Exists { .. }
                 | Command::Ttl { .. }
+                | Command::Hash {
+                    operation: crate::command::HashCommand::Get { .. }
+                        | crate::command::HashCommand::Exists { .. }
+                        | crate::command::HashCommand::Len
+                        | crate::command::HashCommand::GetAll,
+                    ..
+                }
+                | Command::List {
+                    operation: crate::command::ListCommand::Len
+                        | crate::command::ListCommand::Range { .. },
+                    ..
+                }
+                | Command::SetCollection {
+                    operation: crate::command::SetCommand::IsMember { .. }
+                        | crate::command::SetCommand::Card
+                        | crate::command::SetCommand::Members,
+                    ..
+                }
+                | Command::SortedSet {
+                    operation: crate::command::SortedSetCommand::Score { .. }
+                        | crate::command::SortedSetCommand::Card
+                        | crate::command::SortedSetCommand::Range { .. },
+                    ..
+                }
         ) {
             MutationOrigin::Expiration
         } else {

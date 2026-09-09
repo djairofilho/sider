@@ -996,3 +996,407 @@ fn release_migration_gate() {
         )
         .unwrap();
 }
+
+fn typed_command(args: &[&[u8]]) -> DbCommand {
+    sider::command::parse(sider::resp::Frame::Array(Some(
+        args.iter()
+            .map(|arg| sider::resp::Frame::Bulk(Some(Bytes::copy_from_slice(arg))))
+            .collect(),
+    )))
+    .unwrap()
+}
+
+fn typed_create(family: usize) -> DbCommand {
+    typed_command(match family {
+        0 => &[b"HSET", b"{typed}key", b"\0f", b"old", b"\xff", b""],
+        1 => &[b"RPUSH", b"{typed}key", b"old", b"\0\xff"],
+        2 => &[b"SADD", b"{typed}key", b"old", b"\0\xff"],
+        3 => &[
+            b"ZADD",
+            b"{typed}key",
+            b"1e23",
+            b"old",
+            b"5e-324",
+            b"\0\xff",
+        ],
+        _ => unreachable!(),
+    })
+}
+
+fn typed_update(family: usize, value: &[u8]) -> DbCommand {
+    match family {
+        0 => typed_command(&[b"HSET", b"{typed}key", b"\0f", value, b"new", value]),
+        1 => typed_command(&[b"LPUSH", b"{typed}key", value, value]),
+        2 => typed_command(&[b"SADD", b"{typed}key", value, value]),
+        3 => typed_command(&[b"ZADD", b"{typed}key", b"-inf", b"old", b"2", value]),
+        _ => unreachable!(),
+    }
+}
+
+fn typed_read(family: usize) -> DbCommand {
+    typed_command(match family {
+        0 => &[b"HGETALL", b"{typed}key"],
+        1 => &[b"LRANGE", b"{typed}key", b"0", b"-1"],
+        2 => &[b"SMEMBERS", b"{typed}key"],
+        3 => &[b"ZRANGE", b"{typed}key", b"0", b"-1", b"WITHSCORES"],
+        _ => unreachable!(),
+    })
+}
+
+async fn persist_command(
+    store: &mut Store,
+    aof: &persistence::AofHandle,
+    command: DbCommand,
+) -> Reply {
+    let prepared = store.prepare(command);
+    if !prepared.batch.mutations.is_empty() {
+        aof.append(prepared.batch.clone()).await.unwrap();
+    }
+    store.apply(prepared)
+}
+
+struct TypedClock {
+    now: tokio::time::Instant,
+    unix: i64,
+    elapsed: AtomicU64,
+}
+impl TypedClock {
+    fn at(unix: i64) -> Arc<Self> {
+        Arc::new(Self {
+            now: tokio::time::Instant::now(),
+            unix,
+            elapsed: AtomicU64::new(0),
+        })
+    }
+}
+impl Clock for TypedClock {
+    fn now(&self) -> tokio::time::Instant {
+        self.now + Duration::from_millis(self.elapsed.load(Ordering::SeqCst))
+    }
+    fn unix_millis(&self) -> i64 {
+        self.unix + self.elapsed.load(Ordering::SeqCst) as i64
+    }
+}
+
+#[test]
+fn typed_roundtrip_compaction_restores_exact_data_ttl_and_quota() {
+    for family in 0..4 {
+        let directory = Directory::new();
+        let (expected, used) = runtime().block_on(async {
+            let recovered = persistence::recover(
+                directory.config(),
+                StoreConfig::default(),
+                TypedClock::at(1000),
+            )
+            .unwrap();
+            let (mut store, aof, task) = recovered.start();
+            persist_command(&mut store, &aof, typed_create(family)).await;
+            persist_command(
+                &mut store,
+                &aof,
+                typed_command(&[b"PEXPIRE", b"{typed}key", b"500"]),
+            )
+            .await;
+            persist_command(&mut store, &aof, typed_update(family, b"new\0\xff")).await;
+            let expected = store.snapshot();
+            let used = store.used_bytes();
+            aof.compact(store.snapshot()).await.unwrap();
+            drop(aof);
+            task.await.unwrap().unwrap();
+            (expected, used)
+        });
+        let mut recovered = persistence::recover(
+            directory.config(),
+            StoreConfig::default(),
+            TypedClock::at(1250),
+        )
+        .unwrap();
+        assert_eq!(recovered.store.snapshot(), expected, "family {family}");
+        assert_eq!(recovered.store.used_bytes(), used);
+        assert_eq!(
+            recovered
+                .store
+                .execute(typed_command(&[b"PTTL", b"{typed}key"])),
+            Reply::Integer(250)
+        );
+        drop(recovered);
+        let expired = persistence::recover(
+            directory.config(),
+            StoreConfig::default(),
+            TypedClock::at(1500),
+        )
+        .unwrap();
+        assert!(expired.store.is_empty());
+        assert_eq!(expired.store.used_bytes(), 0);
+    }
+}
+
+#[test]
+fn typed_migration_preserves_legacy_string_fixture_and_new_values() {
+    for family in 0..4 {
+        let directory = Directory::new();
+        let fixture: Vec<u8> = include_str!("fixtures/aof-v1.hex")
+            .trim()
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+            .collect();
+        fs::write(
+            directory.0.join("generation-00000000000000000000.aof"),
+            fixture,
+        )
+        .unwrap();
+        let expected = runtime().block_on(async {
+            let (mut store, aof, writer) = recover(&directory).start();
+            assert_eq!(
+                get(&mut store, b"k"),
+                Reply::Bulk(Some(Bytes::from_static(b"v1")))
+            );
+            persist_command(&mut store, &aof, typed_create(family)).await;
+            persist_command(&mut store, &aof, typed_update(family, b"new")).await;
+            let expected = store.snapshot();
+            aof.compact(expected.clone()).await.unwrap();
+            drop(aof);
+            writer.await.unwrap().unwrap();
+            expected
+        });
+        let mut recovered = recover(&directory);
+        assert_eq!(recovered.store.snapshot(), expected);
+        assert_eq!(
+            get(&mut recovered.store, b"k"),
+            Reply::Bulk(Some(Bytes::from_static(b"v1")))
+        );
+    }
+}
+
+#[test]
+fn typed_quota_type_and_record_rejections_preserve_writer_and_dataset() {
+    for family in 0..4 {
+        let directory = Directory::new();
+        let mut config = directory.config();
+        config.limits.max_record_bytes = 128;
+        runtime().block_on(async {
+            let recovered = persistence::recover(
+                config,
+                StoreConfig {
+                    max_dataset_bytes: 1024,
+                },
+                Arc::new(SystemClock),
+            )
+            .unwrap();
+            let (store, aof, writer) = recovered.start();
+            let (stop, shutdown) = tokio::sync::watch::channel(false);
+            let (db, worker) =
+                sider::storage::worker::channel_with_store(2, TIMEOUT, shutdown, store).unwrap();
+            let running = tokio::spawn(worker.with_aof(aof.clone(), 0).run());
+            assert!(matches!(
+                db.execute(typed_create(family)).await.unwrap(),
+                Reply::Integer(_)
+            ));
+            let before = db.execute(typed_read(family)).await.unwrap();
+            assert_eq!(
+                db.execute(typed_update(family, &[b'x'; 1000]))
+                    .await
+                    .unwrap(),
+                Reply::Error(sider::command::ExecutionError::OutOfMemory)
+            );
+            assert_eq!(
+                db.execute(typed_update(family, &[b'x'; 200]))
+                    .await
+                    .unwrap(),
+                Reply::Error(sider::command::ExecutionError::AofRecordLimit)
+            );
+            assert_eq!(
+                db.execute(typed_command(&[b"GET", b"{typed}key"]))
+                    .await
+                    .unwrap(),
+                Reply::Error(sider::command::ExecutionError::WrongType)
+            );
+            assert_eq!(db.execute(typed_read(family)).await.unwrap(), before);
+            assert_eq!(
+                db.execute(DbCommand::Ping(None)).await.unwrap(),
+                Reply::Pong
+            );
+            assert_eq!(
+                aof.status().await.unwrap().0,
+                1,
+                "rejeições não geram sequência"
+            );
+            stop.send(true).unwrap();
+            running.await.unwrap();
+            drop((db, aof));
+            writer.await.unwrap().unwrap();
+            let mut recovered = recover(&directory);
+            assert_eq!(recovered.store.execute(typed_read(family)), before);
+        });
+    }
+}
+
+#[test]
+fn typed_compaction_captures_concurrent_postimages_and_passive_tombstones() {
+    for family in 0..4 {
+        let directory = Directory::new();
+        let (reached, signal) = std::sync::mpsc::channel();
+        let hook = Arc::new(BlockSnapshot {
+            reached,
+            released: (std::sync::Mutex::new(false), std::sync::Condvar::new()),
+        });
+        runtime().block_on(async {
+            let recovered = persistence::recover_with_faults(
+                directory.config(),
+                StoreConfig::default(),
+                TypedClock::at(1000),
+                hook.clone(),
+            )
+            .unwrap();
+            let (mut store, aof, writer) = recovered.start();
+            persist_command(&mut store, &aof, typed_create(family)).await;
+            let complete = aof.begin_compaction(store.snapshot()).await.unwrap();
+            signal.recv_timeout(TIMEOUT).unwrap();
+            persist_command(&mut store, &aof, typed_update(family, b"new")).await;
+            let expected = store.snapshot();
+            hook.release();
+            complete.await.unwrap().unwrap();
+            drop(aof);
+            writer.await.unwrap().unwrap();
+            let recovered = persistence::recover(
+                directory.config(),
+                StoreConfig::default(),
+                TypedClock::at(1000),
+            )
+            .unwrap();
+            assert_eq!(recovered.store.snapshot(), expected);
+        });
+        // Uma leitura persiste o tombstone passivo, inclusive antes de relógio voltar.
+        runtime().block_on(async {
+            let clock = TypedClock::at(1000);
+            let recovered =
+                persistence::recover(directory.config(), StoreConfig::default(), clock.clone())
+                    .unwrap();
+            let (mut store, aof, writer) = recovered.start();
+            persist_command(
+                &mut store,
+                &aof,
+                typed_command(&[b"PEXPIRE", b"{typed}key", b"1"]),
+            )
+            .await;
+            aof.compact(store.snapshot()).await.unwrap();
+            clock.elapsed.store(1, Ordering::SeqCst);
+            let expired = store.prepare(typed_read(family));
+            assert_eq!(expired.batch.origin, MutationOrigin::Expiration);
+            assert_eq!(
+                expired.batch.mutations,
+                vec![Mutation::Delete {
+                    key: Bytes::from_static(b"{typed}key")
+                }]
+            );
+            aof.append(expired.batch.clone()).await.unwrap();
+            store.apply(expired);
+            assert_eq!(store.used_bytes(), 0);
+            drop(aof);
+            writer.await.unwrap().unwrap();
+            let expired = persistence::recover(
+                directory.config(),
+                StoreConfig::default(),
+                TypedClock::at(999),
+            )
+            .unwrap();
+            assert!(expired.store.is_empty());
+        });
+    }
+}
+
+#[test]
+#[ignore = "helper exclusivo de crashes tipados em processo filho"]
+fn typed_aof_process_child() {
+    let directory = PathBuf::from(std::env::var_os("SIDER_TEST_AOF_DIR").unwrap());
+    let point = std::env::var("SIDER_TEST_AOF_POINT").unwrap();
+    let family = std::env::var("SIDER_TEST_TYPED_FAMILY")
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    let compact = point.starts_with("compact_");
+    let recovered = persistence::recover_with_faults(
+        AofConfig::new(directory.clone()),
+        StoreConfig::default(),
+        Arc::new(SystemClock),
+        Arc::new(Pause {
+            point,
+            directory: directory.clone(),
+        }),
+    )
+    .unwrap();
+    runtime().block_on(async {
+        let (mut store, aof, writer) = recovered.start();
+        if compact {
+            let complete = aof.begin_compaction(store.snapshot()).await.unwrap();
+            persist_command(&mut store, &aof, typed_update(family, b"new")).await;
+            fs::write(directory.join("acknowledged"), b"new").unwrap();
+            complete.await.unwrap().unwrap();
+        } else {
+            persist_command(&mut store, &aof, typed_update(family, b"new")).await;
+        }
+        drop(aof);
+        writer.await.unwrap().unwrap();
+    });
+}
+
+#[test]
+fn typed_process_crashes_preserve_complete_values_and_compaction_deltas() {
+    for family in 0..4 {
+        let mut model = Store::new();
+        model.execute(typed_create(family));
+        let before = model.execute(typed_read(family));
+        model.execute(typed_update(family, b"new"));
+        let after = model.execute(typed_read(family));
+        for point in [
+            "before_append",
+            "after_append",
+            "before_sync",
+            "after_sync",
+            "before_reply",
+            "compact_before_snapshot",
+            "compact_after_snapshot",
+            "compact_before_publish",
+            "compact_after_publish",
+        ] {
+            let directory = Directory::new();
+            runtime().block_on(async {
+                let (mut store, aof, writer) = recover(&directory).start();
+                persist_command(&mut store, &aof, typed_create(family)).await;
+                drop(aof);
+                writer.await.unwrap().unwrap();
+            });
+            let mut command = Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "typed_aof_process_child",
+                    "--nocapture",
+                ])
+                .env("SIDER_TEST_AOF_DIR", &directory.0)
+                .env("SIDER_TEST_AOF_POINT", point)
+                .env("SIDER_TEST_TYPED_FAMILY", family.to_string());
+            let mut child = process::OwnedChild::spawn(&mut command).unwrap();
+            wait_file(&directory.0.join("paused"), &mut child);
+            let acknowledged = directory.0.join("acknowledged").exists();
+            child.terminate(TIMEOUT).unwrap();
+            let mut recovered = recover(&directory);
+            let actual = recovered.store.execute(typed_read(family));
+            assert!(
+                actual == before || actual == after,
+                "valor parcial: family={family}, point={point}"
+            );
+            if point == "before_append" {
+                assert_eq!(actual, before);
+            }
+            if acknowledged || point == "after_sync" || point == "before_reply" {
+                assert_eq!(
+                    actual, after,
+                    "confirmação perdida: family={family}, point={point}"
+                );
+            }
+        }
+    }
+}
