@@ -10,6 +10,7 @@ mod metrics;
 pub mod persistence;
 mod pubsub;
 pub mod readiness;
+pub mod replication;
 pub mod resp;
 pub mod server;
 pub mod storage;
