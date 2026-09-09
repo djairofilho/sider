@@ -22,6 +22,10 @@ bind e da criação do arquivo de prontidão. Na API que recebe um listener já
 aberto, `serve` recupera antes de aceitar conexões. `server::prepare` permite
 recuperar explicitamente antes de abrir o listener.
 
+O cabeçalho registra a quantidade de shards e a versão do roteamento. Divergência
+impede a recuperação antes de qualquer reparo da cauda. O AOF legado v1 significa
+um shard. Alterar o particionamento exige a [migração offline](aof-migration.md).
+
 | Variável | Padrão | Contrato |
 | --- | --- | --- |
 | `SIDER_AOF_DIR` | Ausente | Diretório nativo; ativa a persistência |
@@ -67,19 +71,27 @@ Expiração ativa usa o mesmo caminho durável, com origem `Expiration`. Leitura
 encontram uma entrada vencida também produzem tombstones com essa origem. Essa distinção
 permite distinguir manutenção de TTL de futuras escritas recebidas por réplicas.
 
-## Formato v1
+## Formatos v1 e v2
 
 Todos os inteiros usam little endian. Chaves e valores são bytes, sem exigência de
 UTF-8. CRC-32/ISO-HDLC detecta corrupção acidental; não autentica os arquivos.
 
-O cabeçalho ocupa 24 bytes:
+Novos arquivos e compactações usam o cabeçalho v2, com 32 bytes:
 
 | Offset | Tamanho | Campo |
 | --- | --- | --- |
 | 0 | 8 | Magic ASCII `SIDERAOF` |
-| 8 | 4 | Versão do formato, `1` |
+| 8 | 4 | Versão do formato, `2` |
 | 12 | 8 | Sequência representada pelo snapshot inicial |
-| 20 | 4 | CRC dos primeiros 20 bytes |
+| 20 | 4 | Quantidade de shards, entre 1 e 256 |
+| 24 | 4 | Versão do roteamento, `1` |
+| 28 | 4 | CRC dos primeiros 28 bytes |
+
+O leitor também aceita o cabeçalho v1, com 24 bytes: mesmo magic, versão `1`,
+sequência e CRC dos primeiros 20 bytes no offset 20. Sua configuração implícita é
+um shard com roteamento v1. A versão de roteamento 1 identifica FNV-1a64 sobre as
+hash tags de `storage::routing`; versões desconhecidas são recusadas. Registros e
+mutações preservam a mesma codificação nas duas versões do cabeçalho.
 
 Cada registro tem comprimento de payload `u32`, seu complemento binário `u32`,
 CRC do payload `u32` e o payload. Comprimento e complemento são conferidos antes
@@ -107,6 +119,12 @@ O parser e o armazenamento pré-validam o lote inteiro. Chaves duplicadas no mes
 lote, quota excedida ou deadline não representável impedem sua aplicação. Na
 recuperação, um `Put` já vencido remove o valor anterior e não volta a ser persistente.
 A quota lógica e o índice de expiração são reconstruídos.
+
+Cada lote precisa pertencer a um único shard na configuração gravada. A quota
+total é dividida pelo número de shards, distribuindo o resto pelos primeiros
+índices. A recuperação acompanha o uso de cada shard e recusa excesso local mesmo
+quando o total global ainda cabe. Metadados recuperados ficam disponíveis antes
+de iniciar o escritor.
 
 ## Recuperação e compactação
 
@@ -147,6 +165,10 @@ O lock usa `File::try_lock`, aberto para leitura e escrita, compatível com os
 requisitos de locking do Windows. `sync_all` solicita a persistência do conteúdo e
 dos metadados do arquivo. São os contratos da
 [biblioteca padrão de Rust](https://doc.rust-lang.org/std/fs/struct.File.html).
+O guard libera o lock explicitamente antes de fechar o arquivo. Em Linux, isso
+evita que descritores duplicados por `fork`/`dup` prolonguem a propriedade depois
+da parada do escritor, conforme a semântica de
+[`flock`](https://man7.org/linux/man-pages/man2/flock.2.html).
 
 No Linux, a publicação também sincroniza o diretório depois do rename. No Windows,
 Rust não oferece essa sincronização de diretório de forma portátil. A implementação
@@ -161,6 +183,7 @@ energia. `rename` tem comportamento dependente do sistema, conforme sua
 cargo test --locked --lib persistence
 cargo test --locked --lib storage::mutation
 cargo test --locked --test persistence
+cargo test --locked --test aof_migration
 ```
 
 A suíte interna independe de contexto de release e executa arquivos reais em
