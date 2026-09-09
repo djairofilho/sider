@@ -296,10 +296,7 @@ cargo test --locked --lib server::
 cargo test --locked --lib readiness::
 cargo test --locked --test tcp
 cargo test --locked --test cli
-cargo fmt --check
-cargo check --locked --all-targets
-cargo test --locked
-cargo clippy --locked --all-targets -- -D warnings
+cargo xtask check
 cargo doc --locked --no-deps
 cargo build --locked --release
 ```
@@ -312,7 +309,7 @@ comprovam a ordem dos eventos.
 
 Registre resultados efetivamente obtidos, comandos, alvo e limitações no PR e no
 [guia de testes](testing.md). Comparação diferencial contra a referência, uso de
-`redis-cli`, fuzz e pacotes extraídos têm seus próprios gates. Testes unitários de
+`redis-cli` e pacotes extraídos têm seus próprios gates. Testes unitários de
 rede não substituem essas evidências nem autorizam publicar a 0.1 antecipadamente.
 CI permanece desativada até a 1.0 inclusive, conforme o
 [fluxo de releases](releases.md).

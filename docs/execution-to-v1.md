@@ -10,23 +10,26 @@ as tarefas; as issues do GitHub registram seu estado operacional.
 - Fundação Rust, licença MIT e backlog versionado estão implementados.
 - R01-01 a R01-04 foram integradas: fixtures Redis, codec, parser, armazenamento,
   worker e TCP, com limites, prazos e prontidão.
-- R01-05 integrou os diferenciais, CLI e fuzz pelo PR #68.
-  A validação local passou nos dois sistemas; o fuzz inicial executou 452.886 casos
-  em mais de 15 minutos sem falhas. R01-GATE publicou a candidata
+- R01-05 integrou os diferenciais e CLI pelo PR #68.
+  A validação local passou nos dois sistemas. R01-GATE publicou a candidata
   [v0.1.0-rc.1](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1).
-  A final continua pendente, sem reaproveitar o fuzz inicial como gate de release.
-- Ainda não há persistência ou quota. A publicação da final foi pausada para
-  simplificar as ferramentas de desenvolvimento em Rust.
+  As notas e evidências dessa RC preservam o fuzz executado sob a política anterior.
+- Ainda não há persistência ou quota. A final continua pendente. A migração para
+  ferramentas Rust e a remoção do fuzz alteraram ferramentas e gates, exigindo
+  uma nova candidata antes de publicar essas mudanças.
 - CI e publicação automática ficam desligadas até a 1.0 inclusive. Reativá-las
   depois disso será uma entrega própria, não um efeito automático da versão.
 
 ## Próxima entrega: fechar a 0.1
 
-1. Concluir a migração de ferramentas para `cargo xtask`, sem restaurar CI.
-2. Retomar R01-GATE no SHA exato já integrado para a final. Preservar e conferir
-   evidências e pacotes, sem atribuir os resultados ao SHA novo das ferramentas.
-3. Publicar a final apenas após todas as conferências do [guia de releases](releases.md).
-4. Fechar o gate e o milestone; então iniciar `R02-01`, os comandos adicionais de strings.
+1. Integrar e validar a remoção do fuzz e os ajustes de ferramentas e documentação.
+2. Preparar uma nova candidata da 0.1 com esses ajustes e validar seus gates no
+   SHA exato. Preservar as evidências anteriores como histórico, sem transferi-las
+   para outro SHA nem aplicar a política nova à final anteriormente preparada.
+3. Preparar e revalidar a final a partir da nova candidata, seguindo as conferências
+   do [guia de releases](releases.md).
+4. Publicar e conferir a final; então fechar o gate e o milestone e iniciar
+   `R02-01`, os comandos adicionais de strings.
 
 O [plano técnico da 0.1](../PLANO.md) detalha os contratos de rede e ciclo de vida.
 
@@ -37,7 +40,7 @@ candidata, validação cumulativa e publicação final.
 
 | Versão | Ordem de implementação | Critério central |
 | --- | --- | --- |
-| `0.1.0` | Candidata publicada; conferir e publicar a final | Cinco comandos via TCP e CLI, com limites e ordenação testados |
+| `0.1.0` | Nova candidata com os ajustes de ferramentas e gates; validar e publicar a final | Cinco comandos via TCP e CLI, com limites e ordenação testados |
 | `0.2.0` | Strings adicionais; opções de `SET`; TTL passivo/ativo; quota | Overflow e expiração corretos; rejeições preservam estado; sem eviction |
 | `0.3.0` | AOF versionado/checksum; append/fsync; recuperação; compactação; crashes | Nenhum registro parcial aplicado; durabilidade e substituição de arquivos testadas nos dois sistemas |
 | `0.4.0` | Hash estável/hash tags; workers; multichave; AOF; medições | Rejeitar operações entre shards antes de qualquer alteração |
@@ -72,9 +75,9 @@ Separar tarefas independentes em paralelo e conservar os caches Cargo.
 - Banco, testes e ferramentas próprias usam Rust/Cargo. Os helpers Python e os
   workflows arquivados foram removidos. Não há um publicador automático para manter.
 - Desde a 0.1: validação nativa em Linux GNU x86_64 (Ubuntu 24.04) e Windows MSVC
-  x86_64; teste TCP dos pacotes extraídos, diferenciais e fuzz.
-- Cada candidata exige pelo menos 15 minutos de fuzz sem falhas novas. A final
-  também é recompilada e revalidada, incluindo fuzz.
+  x86_64; teste TCP dos pacotes extraídos e diferenciais.
+- Cada candidata exige aprovação dos gates no próprio SHA. A final também é
+  recompilada e revalidada no SHA exato do seu merge de release.
 - Desde a 0.3: crashes, recuperação e migração nos dois sistemas. Cada capacidade
   posterior acrescenta seus testes aos gates anteriores.
 - Na 1.0: carga contínua por uma hora e benchmarks com throughput, p50/p95/p99,

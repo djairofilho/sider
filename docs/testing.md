@@ -9,7 +9,7 @@ para os comandos deste documento. A CI permanece desligada até a 1.0 inclusive.
 - [Codec isolado](#codec-isolado)
 - [Comandos sem rede](#comandos-sem-rede)
 - [Worker, TCP e binário](#worker-tcp-e-binário)
-- [Diferenciais, robustez e fuzz](#diferenciais-robustez-e-fuzz)
+- [Diferenciais e robustez](#diferenciais-e-robustez)
 - [Referência Redis descartável](#referência-redis-descartável)
 - [O que as fixtures cobrem](#o-que-as-fixtures-cobrem)
 - [Execução registrada](#execução-registrada)
@@ -20,11 +20,13 @@ para os comandos deste documento. A CI permanece desligada até a 1.0 inclusive.
 Na raiz do repositório:
 
 ```sh
-cargo fmt --check
-cargo check --locked --all-targets
-cargo test --locked
-cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked <filtro>
+cargo xtask check
 ```
+
+Use testes focados durante a implementação. Antes de integrar, o check executa
+formatação, Clippy, build do binário e testes nativos uma vez. Clippy já verifica
+os targets; não repita `cargo check` na mesma sequência.
 
 O teste externo aparece explicitamente como `ignored` no ciclo normal. Isso não
 significa aprovação da referência. Para concluir R01-01, execute o teste externo
@@ -82,15 +84,15 @@ A espera pelo arquivo de prontidão consulta um processo filho vivo com deadline
 não usa uma pausa arbitrária para decidir a ordem de comandos.
 O [guia de rede](network.md) detalha os contratos verificados.
 
-## Diferenciais, robustez e fuzz
+## Diferenciais e robustez
 
 ```sh
 cargo test --locked --test compatibility --test harness --test gate_contract
-cargo test --locked --test robustness --test fuzz_gate
+cargo test --locked --test robustness
 ```
 
 Esses comandos cobrem o leitor independente de respostas, geração de sequências,
-processos descartáveis, recibos de gates, seeds do fuzz e reocupação de todas as
+processos descartáveis, recibos de gates e reocupação de todas as
 vagas após ondas de desconexões ou frames lentos. Não medem quota do dataset nem
 provam ausência geral de leaks.
 
@@ -99,9 +101,6 @@ comparam tipos e respostas completas e observam o estado final das chaves. O cam
 Linux compartilhado também executa `redis-cli` contra o Sider. Docker ou imagem
 ausentes causam falha; esses entrypoints não rodam implicitamente na suíte comum.
 
-O [workspace de fuzz](../fuzz/README.md) usa nightly isolada e AddressSanitizer.
-Seus 27 seeds também rodam como regressões nativas com Rust estável. Preparar o
-corpus ou executar uma amostra curta não satisfaz os 900 segundos obrigatórios.
 Os gates escrevem recibos apenas após sucesso e validação do checkout limpo.
 
 ## Referência Redis descartável
@@ -199,6 +198,14 @@ testes TCP incluem cancelamento, backpressure, prazos e encerramento. A referên
 Redis continua opt-in e não foi contabilizada como aprovação pelo teste ignorado.
 Esses resultados não são gates de uma release nem testes de pacotes extraídos.
 
+### Histórico de R01-05 antes da remoção do fuzz
+
+Os resultados abaixo descrevem a implementação original e seu ambiente da época.
+A estrutura e o gate de fuzz foram removidos; seus caminhos e ferramentas citados
+aqui são registros históricos, sem instruções de execução para o checkout atual.
+As notas da [candidata publicada](../releases/notes/v0.1.0-rc.1.md) também preservam
+os critérios e as evidências exigidos naquela revisão.
+
 R01-05 passou em Windows x86_64 MSVC e Linux x86_64 GNU (Ubuntu 24.04), com Rust
 1.97.1: 230 testes comuns e 231, respectivamente, mais um doctest em cada sistema.
 Formatação, check de todos os alvos, Clippy sem warnings, documentação e build de
@@ -229,13 +236,13 @@ O alvo compilado corresponde a `fuzz/fuzz_targets/resp_decoder.rs` com SHA-256
 o lockfile isolado tem SHA-256
 `f6433cd44db1590a09afa270cba31822ff8a59b314204b1cec3ad3efeed56ee2`.
 Esta foi a execução inicial de R01-05, com documentação ainda em edição.
-Não criou recibo de release e não substitui o fuzz no SHA exato de cada RC/final.
+Não criou recibo de release e não aprovou os gates de nenhuma RC ou final.
 
 ## Limites desta evidência
 
 R01-01 comprova a referência e suas fixtures. R01-03 reproduz essas fixtures no
 núcleo síncrono Sider e R01-04 pelo TCP. R01-05 acrescenta comparação simultânea
-dos servidores, CLI e o alvo de fuzz. Cada forma de comando é verificada somente
+dos servidores e CLI. Cada forma de comando é verificada somente
 nos cenários descritos; não há promessa de compatibilidade com clientes que exigem
 outros comandos ou handshake automático.
 

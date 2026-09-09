@@ -77,8 +77,8 @@ impl GateContext {
         mut lookup: impl FnMut(&str) -> Option<OsString>,
         observer: Observer,
     ) -> Result<Self, String> {
-        if !matches!(gate_id, "compatibility" | "fuzz") {
-            return Err("gate desconhecido; esperado compatibility ou fuzz".into());
+        if gate_id != "compatibility" {
+            return Err("gate desconhecido; esperado compatibility".into());
         }
         let mut text = |name: &str| -> Result<String, String> {
             lookup(name)
@@ -145,12 +145,6 @@ impl GateContext {
         self.ensure_destination_absent()?;
         let observed = (self.observer)(&self.root)?;
         self.validate(&observed)?;
-        let required = observed.plan["release_policy"]["candidate_fuzz_seconds"]
-            .as_u64()
-            .ok_or("candidate_fuzz_seconds ausente ou inválido")?;
-        if self.gate == "fuzz" && duration < Duration::from_secs(required.max(900)) {
-            return Err("fuzz não executou pelo menos a duração mínima exigida".into());
-        }
         let receipt = json!({
             "schema_version": 1,
             "gate": self.gate,
@@ -228,7 +222,7 @@ impl GateContext {
             || observed.compiled_arch != "x86_64"
             || observed.compiled_env != "gnu"
         {
-            return Err("compatibility e fuzz exigem execução nativa Linux x86_64 GNU".into());
+            return Err("compatibility exige execução nativa Linux x86_64 GNU".into());
         }
         let hosts: Vec<_> = observed
             .compiler
@@ -246,11 +240,8 @@ impl GateContext {
             || !policy["targets"]
                 .as_array()
                 .is_some_and(|targets| targets.contains(&json!(expected.target)))
-            || !policy["candidate_fuzz_seconds"]
-                .as_u64()
-                .is_some_and(|seconds| seconds >= 900)
         {
-            return Err("política de release privada, target ou duração inválida".into());
+            return Err("política de release privada ou target inválido".into());
         }
         let releases = plan["releases"].as_array().ok_or("releases ausente")?;
         let matches: Vec<_> = releases

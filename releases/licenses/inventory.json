@@ -12,8 +12,6 @@
       "dev-dependencies",
       "build-dependency edges",
       "Redis",
-      "libFuzzer",
-      "cargo-fuzz",
       "Rust compiler-only copyright inventory"
     ],
     "crate_packages": 27,

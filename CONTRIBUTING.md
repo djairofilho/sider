@@ -14,7 +14,7 @@ preserve `Cargo.lock`, pois o projeto distribui um binário. Atualize dependênc
 de forma deliberada e revise as mudanças no lockfile.
 
 Os testes nativos não exigem Redis, Docker ou um serviço externo em execução.
-Os diferenciais e o fuzz têm instruções próprias e execução explícita.
+Os diferenciais têm instruções próprias e execução explícita.
 
 O desenvolvimento, os testes e as ferramentas próprias usam Rust. O utilitário
 `xtask/` tem seu próprio manifesto e lockfile, sem dependências no servidor.
@@ -61,7 +61,7 @@ cargo xtask check
 
 `check` executa fmt, Clippy, build do binário real e testes nativos, interrompendo
 na primeira falha. Clippy já verifica os targets, sem outro `cargo check` redundante.
-Não inicia Docker, fuzz ou publicação. Preserve caches Cargo; não limpe `target/`
+Não inicia Docker ou publicação. Preserve caches Cargo; não limpe `target/`
 como parte normal de cada tarefa. Amplie a validação conforme a responsabilidade:
 
 ```sh

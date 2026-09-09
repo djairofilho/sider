@@ -55,8 +55,8 @@ impl Fixture {
                 "schema_version": 1,
                 "repository": "djairofilho/sider",
                 "reference": {"image": IMAGE, "platform": "linux/amd64", "redis_version": "8.10.1", "redis_cli_version": "8.10.1"},
-                "release_policy": {"private": true, "publish_crate": false, "targets": [TARGET], "candidate_fuzz_seconds": 900},
-                "releases": [{"version": "0.1.0", "required_gates": ["compatibility", "fuzz"]}]
+                "release_policy": {"private": true, "publish_crate": false, "targets": [TARGET]},
+                "releases": [{"version": "0.1.0", "required_gates": ["compatibility"]}]
             }),
             compiler: format!("rustc 1.97.1\nhost: {TARGET}\nrelease: 1.97.1\n"),
             compiled_version: "0.1.0".into(),
@@ -167,7 +167,13 @@ fn missing_environment_values_fail_without_fallback() {
 #[test]
 fn unknown_gate_rejects_path_traversal_before_observing() {
     let fixture = Fixture::new();
-    for gate in ["", "../fuzz", "native", "compatibility/../../other", "FUZZ"] {
+    for gate in [
+        "",
+        "../other",
+        "native",
+        "compatibility/../../other",
+        "COMPATIBILITY",
+    ] {
         assert!(
             GateContext::from_observer(
                 gate,
@@ -301,8 +307,7 @@ fn requires_private_policy_registered_gate_and_exact_reference() {
         ("/release_policy/private", json!(false)),
         ("/release_policy/publish_crate", json!(true)),
         ("/release_policy/targets", json!([])),
-        ("/release_policy/candidate_fuzz_seconds", json!(899)),
-        ("/releases/0/required_gates", json!(["fuzz"])),
+        ("/releases/0/required_gates", json!([])),
         ("/releases/0/version", json!("0.2.0")),
         ("/reference/platform", json!("linux/arm64")),
         ("/reference/redis_cli_version", json!("8.10.10")),
@@ -346,7 +351,7 @@ fn cargo_metadata_must_identify_the_real_root_and_private_package() {
 }
 
 #[test]
-fn zero_cases_short_fuzz_and_oversized_receipts_never_publish() {
+fn zero_cases_and_oversized_receipts_never_publish() {
     let fixture = Fixture::new();
     let compatibility = fixture.context("compatibility").unwrap();
     assert!(
@@ -363,31 +368,18 @@ fn zero_cases_short_fuzz_and_oversized_receipts_never_publish() {
             )
             .is_err()
     );
-    let fuzz = fixture.context("fuzz").unwrap();
-    assert!(
-        fuzz.publish(12, Duration::from_millis(899_999), json!({}))
-            .is_err()
-    );
     assert!(fixture.entries().is_empty());
-    fuzz.publish(12, Duration::from_secs(900), json!({"executed_units": 12}))
+    compatibility
+        .publish(
+            12,
+            Duration::from_millis(10),
+            json!({"binary_comparisons": 12}),
+        )
         .unwrap();
-    assert_eq!(fixture.entries(), [fixture.out.join("receipt-fuzz.json")]);
-}
-
-#[test]
-fn fuzz_uses_a_stricter_minimum_from_the_versioned_policy() {
-    let fixture = Fixture::new();
-    fixture.change(|observed| {
-        observed.plan["release_policy"]["candidate_fuzz_seconds"] = json!(1200);
-    });
-    let fuzz = fixture.context("fuzz").unwrap();
-    assert!(
-        fuzz.publish(1, Duration::from_secs(900), json!({}))
-            .is_err()
+    assert_eq!(
+        fixture.entries(),
+        [fixture.out.join("receipt-compatibility.json")]
     );
-    assert!(fixture.entries().is_empty());
-    fuzz.publish(1, Duration::from_secs(1200), json!({}))
-        .unwrap();
 }
 
 #[test]

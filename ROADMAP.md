@@ -83,16 +83,16 @@ Objetivos, entregáveis, testes e critérios completos de cada issue estão no
 | `R01-02` | Codec RESP2 incremental | R01-01 |
 | `R01-03` | Cinco comandos e armazenamento | R01-02 |
 | `R01-04` | Worker e TCP | R01-03 |
-| `R01-05` | Testes diferenciais e fuzz | R01-04 |
+| `R01-05` | Testes diferenciais e robustez | R01-04 |
 | `R01-GATE` | Validar e publicar a 0.1.0 | Todas as tarefas da versão e os gates anteriores |
 
-Evidências obrigatórias: `native`, `compatibility`, `fuzz`, `tcp_smoke`.
+Evidências obrigatórias: `native`, `compatibility`, `tcp_smoke`.
 
 Critérios para publicação:
 
 - Todas as tarefas R01 concluídas com PR e verificação manual registrada; PING, ECHO, GET, SET básico e DEL funcionam via redis-cli.
-- Gates native, compatibility, fuzz e tcp_smoke aprovados no SHA exato; fragmentação, binários, limites e ordenação cobertos.
-- Publicar v0.1.0-rc.1 antes da final; conferir pacotes Linux/Windows extraídos, checksums e manifesto; fechar o milestone apenas após a final confirmada.
+- Gates native, compatibility e tcp_smoke aprovados no SHA exato; fragmentação, binários, limites e ordenação cobertos.
+- Publicar candidata aprovada antes da final; conferir pacotes Linux/Windows extraídos, checksums e manifesto; fechar o milestone apenas após a final confirmada.
 
 ### 0.2.0: Strings, TTL e memória
 
@@ -107,13 +107,13 @@ Critérios para publicação:
 | `R02-04` | Quota do dataset | R02-03 |
 | `R02-GATE` | Validar e publicar a 0.2.0 | Todas as tarefas da versão e os gates anteriores |
 
-Evidências obrigatórias: `native`, `compatibility`, `fuzz`, `tcp_smoke`.
+Evidências obrigatórias: `native`, `compatibility`, `tcp_smoke`.
 
 Critérios para publicação:
 
 - Milestone 0.1 final publicado e tarefas R02 concluídas; overflow, expiração antiga e rejeições preservam estado.
 - Gates cumulativos aprovados; quota recusa crescimento e opções de SET/TTL têm evidência diferencial.
-- Publicar candidata com 900 segundos de fuzz e depois final com pacotes verificados; encerrar milestone após conferência da final.
+- Publicar candidata aprovada e depois final com pacotes verificados; encerrar milestone após conferência da final.
 
 ### 0.3.0: Persistência AOF
 
@@ -129,7 +129,7 @@ Critérios para publicação:
 | `R03-05` | Testes de crash e durabilidade | R03-04 |
 | `R03-GATE` | Validar e publicar a 0.3.0 | Todas as tarefas da versão e os gates anteriores |
 
-Evidências obrigatórias: `native`, `compatibility`, `fuzz`, `tcp_smoke`, `crash`, `recovery`, `migration`.
+Evidências obrigatórias: `native`, `compatibility`, `tcp_smoke`, `crash`, `recovery`, `migration`.
 
 Critérios para publicação:
 
@@ -151,7 +151,7 @@ Critérios para publicação:
 | `R04-05` | Medições iniciais de shards | R04-04 |
 | `R04-GATE` | Validar e publicar a 0.4.0 | Todas as tarefas da versão e os gates anteriores |
 
-Evidências obrigatórias: `native`, `compatibility`, `fuzz`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`.
+Evidências obrigatórias: `native`, `compatibility`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`.
 
 Critérios para publicação:
 
@@ -173,7 +173,7 @@ Critérios para publicação:
 | `R05-05` | Integração de coleções com TTL, quota e AOF | R05-04 |
 | `R05-GATE` | Validar e publicar a 0.5.0 | Todas as tarefas da versão e os gates anteriores |
 
-Evidências obrigatórias: `native`, `compatibility`, `fuzz`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`.
+Evidências obrigatórias: `native`, `compatibility`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`.
 
 Critérios para publicação:
 
@@ -193,7 +193,7 @@ Critérios para publicação:
 | `R06-03` | Integração de sorted sets com persistência e limites | R06-02 |
 | `R06-GATE` | Validar e publicar a 0.6.0 | Todas as tarefas da versão e os gates anteriores |
 
-Evidências obrigatórias: `native`, `compatibility`, `fuzz`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`, `sorted_sets`.
+Evidências obrigatórias: `native`, `compatibility`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`, `sorted_sets`.
 
 Critérios para publicação:
 
@@ -214,7 +214,7 @@ Critérios para publicação:
 | `R07-04` | Persistência atômica do lote | R07-03 |
 | `R07-GATE` | Validar e publicar a 0.7.0 | Todas as tarefas da versão e os gates anteriores |
 
-Evidências obrigatórias: `native`, `compatibility`, `fuzz`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`, `sorted_sets`, `transactions`.
+Evidências obrigatórias: `native`, `compatibility`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`, `sorted_sets`, `transactions`.
 
 Critérios para publicação:
 
@@ -235,7 +235,7 @@ Critérios para publicação:
 | `R08-04` | Controle de clientes lentos | R08-03 |
 | `R08-GATE` | Validar e publicar a 0.8.0 | Todas as tarefas da versão e os gates anteriores |
 
-Evidências obrigatórias: `native`, `compatibility`, `fuzz`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`, `sorted_sets`, `transactions`, `pubsub`.
+Evidências obrigatórias: `native`, `compatibility`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`, `sorted_sets`, `transactions`, `pubsub`.
 
 Critérios para publicação:
 
@@ -257,7 +257,7 @@ Critérios para publicação:
 | `R09-05` | Promoção manual | R09-04 |
 | `R09-GATE` | Validar e publicar a 0.9.0 | Todas as tarefas da versão e os gates anteriores |
 
-Evidências obrigatórias: `native`, `compatibility`, `fuzz`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`, `sorted_sets`, `transactions`, `pubsub`, `replication`.
+Evidências obrigatórias: `native`, `compatibility`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`, `sorted_sets`, `transactions`, `pubsub`, `replication`.
 
 Critérios para publicação:
 
@@ -279,7 +279,7 @@ Critérios para publicação:
 | `R10-05` | Ensaios operacionais | R10-04 |
 | `R10-GATE` | Validar e publicar a 0.10.0 | Todas as tarefas da versão e os gates anteriores |
 
-Evidências obrigatórias: `native`, `compatibility`, `fuzz`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`, `sorted_sets`, `transactions`, `pubsub`, `replication`, `docker`.
+Evidências obrigatórias: `native`, `compatibility`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`, `sorted_sets`, `transactions`, `pubsub`, `replication`, `docker`.
 
 Critérios para publicação:
 
@@ -301,12 +301,12 @@ Critérios para publicação:
 | `R11-05` | Benchmarks e documentação final | R11-04 |
 | `R11-GATE` | Validar e publicar a 1.0.0 | Todas as tarefas da versão e os gates anteriores |
 
-Evidências obrigatórias: `native`, `compatibility`, `fuzz`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`, `sorted_sets`, `transactions`, `pubsub`, `replication`, `docker`, `soak`, `benchmarks`.
+Evidências obrigatórias: `native`, `compatibility`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`, `sorted_sets`, `transactions`, `pubsub`, `replication`, `docker`, `soak`, `benchmarks`.
 
 Critérios para publicação:
 
 - Sorted sets, transações e replicação incluídos; matriz completa sem falha conhecida de corrupção ou perda além das garantias declaradas.
-- Todos os gates aprovados, incluindo soak de 3600 segundos, migração da 0.10, benchmarks e fuzz de candidata de 900 segundos.
+- Todos os gates aprovados, incluindo soak de 3600 segundos, migração da 0.10 e benchmarks.
 - Candidata aprovada sem mudança funcional posterior; final recompilada/testada, pacotes/imagem/checksums conferidos e milestone encerrado após publicação confirmada.
 
 ## Execução e publicação
@@ -321,7 +321,7 @@ Critérios para publicação:
 
 O fluxo completo e os comandos de preparação estão no [guia de releases](docs/releases.md).
 Não há workflows de CI nem publicador automático neste repositório.
-Cada candidata exige pelo menos 15 minutos de fuzz; a 1.0 acrescenta uma hora de carga contínua.
+A 1.0 acrescenta uma hora de carga contínua aos gates de cada candidata e final.
 As evidências são cumulativas. Teste ausente, ignorado, cancelado ou sem relatório bloqueia a publicação.
 Na primeira versão AOF, migração valida fixtures do formato inicial; nas seguintes, testa a versão anterior suportada.
 

@@ -12,7 +12,7 @@ pelas operações manuais no GitHub. Não há um segundo publicador para manter.
 | Durante a implementação | `cargo test --locked <filtro>` | Comportamento que está sendo alterado |
 | Antes de integrar código do banco | `cargo xtask check` | fmt, Clippy, build do binário real e testes nativos |
 | Ao alterar ferramentas ou plano | `cargo xtask check --tools` | fmt, Clippy, testes do xtask, manifesto, gates e roadmap |
-| Antes de publicar | Gates da versão no SHA exato | Linux, Windows, diferenciais, fuzz e pacotes extraídos |
+| Antes de publicar | Gates da versão no SHA exato | Linux, Windows, diferenciais e pacotes extraídos |
 
 Clippy já verifica os targets; não repita `cargo check` na mesma sequência.
 Os checks param na primeira falha e não iniciam Docker ou testes externos.
@@ -20,9 +20,9 @@ Documentação isolada pede revisão de texto, links e comandos. Interfaces e bu
 também exigem `cargo doc --locked --no-deps` e build de distribuição.
 
 Preserve os caches Cargo. Rode testes em paralelo quando não disputarem o mesmo
-estado externo. Não limpe `target/`, reconstrua ambientes ou execute ensaios de
-15 minutos em cada edição. Resultados de release continuam vinculados ao SHA,
-à plataforma e à configuração em que foram produzidos; cache de compilação não
+estado externo. Não limpe `target/` nem reconstrua ambientes em cada edição.
+Resultados de release continuam vinculados ao SHA, à plataforma e à configuração
+em que foram produzidos; cache de compilação não
 é reaproveitamento de recibos de aprovação.
 
 Na publicação, use um `CARGO_TARGET_DIR` isolado por versão, SHA e plataforma;
@@ -34,7 +34,7 @@ de uma RC anterior ser tratado como build da final.
 
 `cargo xtask` é um [alias Cargo](https://doc.rust-lang.org/cargo/reference/config.html#alias)
 para o pacote em [xtask/](../xtask/). Seu manifesto e lockfile são independentes:
-as dependências de tooling não entram no servidor, no fuzz ou nos pacotes do banco.
+as dependências de tooling não entram no servidor ou nos pacotes do banco.
 Use os comandos a partir da raiz. A toolchain é a mesma do projeto.
 
 ```sh
@@ -99,28 +99,33 @@ Não crie datas artificiais nem renumere tarefas.
 
 A [v0.1.0-rc.1](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1)
 já foi publicada como candidata privada. A final ainda não foi publicada.
-A migração de tooling não altera tags ou evidências anteriores.
+A migração de tooling e a remoção do fuzz exigem outra candidata para publicar
+essas alterações na final. Tags e evidências anteriores são preservadas e
+continuam vinculadas aos seus próprios SHAs; não aprovam a nova revisão.
 O bootstrap não deve ser publicado como banco funcional.
 
 Atualize `main`, busque tags e use a branch `chore/release-v<VERSAO>`.
-Atualize juntos a versão em `Cargo.toml`, a entrada local `sider` em
-`Cargo.lock` e `fuzz/Cargo.lock`, o changelog e
-`releases/notes/v<VERSAO>.md`. O título das notas é `# Sider v<VERSAO>`.
-Preserve `publish = false`, dependências e a versão `0.0.0` do pacote `sider-fuzz`.
+Atualize juntos a versão em `Cargo.toml`, a entrada local `sider` em `Cargo.lock`,
+o changelog e `releases/notes/v<VERSAO>.md`. O título das notas é `# Sider v<VERSAO>`.
+Preserve `publish = false` e as dependências.
 O pacote `sider-xtask` tem versão e lockfile independentes; não acompanha a versão
 do servidor.
 
-Confira os dois manifestos com `cargo metadata --locked --format-version 1`,
-usando também `--manifest-path fuzz/Cargo.toml`. Abra PR com `type:release`,
-do próprio repositório para `main`, e referência ao gate, sem fechá-lo.
+Confira o manifesto do servidor com `cargo metadata --locked --format-version 1`.
+Abra PR com `type:release`, do próprio repositório para `main`, e referência ao
+gate, sem fechá-lo.
 O merge commit não publica nada. Registre seu SHA completo, nunca o substitua
 por um `main` mais recente.
 
 A final exige uma candidata aprovada da mesma versão-base e ancestral do commit
-final. Só podem mudar a identidade do pacote nos três arquivos Cargo, changelog
+final. Só podem mudar a identidade do pacote em `Cargo.toml` e `Cargo.lock`, changelog
 e notas. Mudanças em código, dependências, configuração, ferramentas ou gates no
 SHA da final exigem outra candidata. A final recompila e testa novamente.
 Evidências de um SHA congelado anterior continuam válidas apenas para esse SHA.
+
+Confira bundles históricos com o procedimento e a política do SHA da publicação.
+O verificador atual exige a matriz de gates atual e pode rejeitar bundles antigos
+que incluam gates removidos. Preserve os recibos e artefatos originais nesses casos.
 
 ## Gates do produto
 
@@ -131,7 +136,7 @@ erro, cancelados, ignorados ou sem casos positivos bloqueiam publicação.
 | Gate | Plataforma e início |
 | --- | --- |
 | `native`, `tcp_smoke` | Linux GNU e Windows MSVC desde 0.1 |
-| `compatibility`, `fuzz` | Linux desde 0.1 |
+| `compatibility` | Linux desde 0.1 |
 | `crash`, `recovery`, `migration` | Linux e Windows desde 0.3 |
 | `sharding`, `types`, `sorted_sets`, `transactions`, `pubsub`, `replication` | Linux, cumulativos desde cada capacidade |
 | `docker` | Linux desde 0.10 |
@@ -143,14 +148,12 @@ O diretório de evidências é novo. O recibo `receipt-ID.json` registra SHA,
 versão, target, `status: "success"`, `cases` positivo e detalhes reais da execução.
 Não reutilize recibos antigos ou sintetize resultados.
 
-Fuzz exige pelo menos 900 segundos na candidata e na revalidação final, excluindo
-compilação. Essa exigência não foi reduzida pela migração para Rust.
 O soak da 1.0 dura 3600 segundos. Benchmarks registram throughput, p50/p95/p99,
 memória, pipelines, hot keys e quantidades de shards.
 
 Redis e `redis-cli` usam a versão e o digest fixados no plano. Respostas sem ordem
 garantida são normalizadas por conteúdo; as ordenadas também comparam ordem.
-Veja os guias de [diferenciais](differential.md), [fuzz](../fuzz/README.md) e
+Veja os guias de [diferenciais](differential.md) e
 [testes](testing.md). A migração inicial da 0.3 usa fixtures AOF; a partir da versão
 seguinte, também abre dados reais da versão anterior suportada.
 

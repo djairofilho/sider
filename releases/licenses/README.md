@@ -18,7 +18,7 @@ Distribua este diretório completo junto do `LICENSE` próprio do Sider.
 - [Inventário da biblioteca padrão Rust 1.97.1](rust-1.97.1/COPYRIGHT-library.html)
   e os textos MIT, Apache-2.0, BSD-2-Clause, Unicode-3.0 e LLVM-exception.
 
-Dependências exclusivas de testes, Redis, libFuzzer, cargo-fuzz e o inventário
+Dependências exclusivas de testes, Redis e o inventário
 geral do compilador não fazem parte da coleção. O inventário Rust inclui avisos
 de outras plataformas; sua presença não afirma uso desses componentes pelo Sider.
 

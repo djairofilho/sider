@@ -814,7 +814,7 @@ mod tests {
         let mut releases = Vec::new();
         for index in 1..=2 {
             let id = format!("R{index:02}");
-            releases.push(json!({"id":id,"version":format!("0.{index}.0"),"title":format!("Versão {index}"),"depends_on":if index == 1 {vec![]} else {vec!["R01"]},"scope":["Escopo"],"required_gates":["native","compatibility","fuzz","tcp_smoke"],"tasks":[{"id":format!("{id}-01"),"title":"Implementar operação","area":"storage","objective":"Comportamento binário.","deliverables":["Implementação"],"tests":["Regressão"],"acceptance":["Estado correto"],"depends_on":if index == 1 {vec!["B00-01"]} else {vec![]}}],"gate":{"id":format!("{id}-GATE"),"title":"Validar e publicar","acceptance":["Publicação confirmada"]}}));
+            releases.push(json!({"id":id,"version":format!("0.{index}.0"),"title":format!("Versão {index}"),"depends_on":if index == 1 {vec![]} else {vec!["R01"]},"scope":["Escopo"],"required_gates":["native","compatibility","tcp_smoke"],"tasks":[{"id":format!("{id}-01"),"title":"Implementar operação","area":"storage","objective":"Comportamento binário.","deliverables":["Implementação"],"tests":["Regressão"],"acceptance":["Estado correto"],"depends_on":if index == 1 {vec!["B00-01"]} else {vec![]}}],"gate":{"id":format!("{id}-GATE"),"title":"Validar e publicar","acceptance":["Publicação confirmada"]}}));
         }
         plan["releases"] = json!(releases);
         plan
