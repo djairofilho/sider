@@ -146,8 +146,40 @@ enum Request {
 pub struct AofHandle {
     requests: mpsc::Sender<Request>,
     failed: watch::Receiver<bool>,
+    diagnostics: super::diagnostics::Shared,
 }
+
+/// Observador que não mantém o escritor nem sua fila abertos.
+#[derive(Clone)]
+pub struct AofDiagnosticsHandle {
+    requests: mpsc::WeakSender<Request>,
+    diagnostics: super::diagnostics::Shared,
+}
+impl AofDiagnosticsHandle {
+    pub fn snapshot(&self) -> super::AofDiagnostics {
+        let mut state = self.diagnostics.snapshot();
+        state.queue_depth = self
+            .requests
+            .upgrade()
+            .filter(|requests| !requests.is_closed())
+            .map_or(0, |requests| requests.max_capacity() - requests.capacity());
+        state
+    }
+}
+
 impl AofHandle {
+    /// Lê campos numéricos e categorias fixas sem esperar pelo escritor ou fazer I/O.
+    pub fn diagnostics(&self) -> super::AofDiagnostics {
+        self.diagnostics_handle().snapshot()
+    }
+
+    pub fn diagnostics_handle(&self) -> AofDiagnosticsHandle {
+        AofDiagnosticsHandle {
+            requests: self.requests.downgrade(),
+            diagnostics: self.diagnostics.clone(),
+        }
+    }
+
     pub async fn append(&self, batch: ResolvedBatch) -> Result<u64, AofError> {
         let (reply, result) = oneshot::channel();
         self.requests
@@ -227,16 +259,31 @@ impl Recovered {
     ) {
         let (requests, receiver) = mpsc::channel(self.writer.config.queue_capacity);
         let (failure, failed) = watch::channel(false);
+        let diagnostics = self.writer.diagnostics.clone();
+        diagnostics.update(|state| {
+            state.running = true;
+            state.queue_capacity = requests.max_capacity();
+        });
+        let completed = diagnostics.clone();
         let runtime = tokio::runtime::Handle::current();
         let task = tokio::task::spawn_blocking(move || {
             let result = self.writer.run(receiver, runtime);
+            completed.stopped(result.as_ref().err());
             if let Err(error) = &result {
                 tracing::error!(%error, "escritor AOF encerrado com falha");
                 failure.send_replace(true);
             }
             result
         });
-        (self.store, AofHandle { requests, failed }, task)
+        (
+            self.store,
+            AofHandle {
+                requests,
+                failed,
+                diagnostics,
+            },
+            task,
+        )
     }
 }
 
@@ -261,6 +308,7 @@ struct Writer {
     synced: Instant,
     compaction: Option<Compaction>,
     faults: Arc<dyn FaultInjector>,
+    diagnostics: super::diagnostics::Shared,
 }
 
 pub(super) struct DirectoryLock(File);
@@ -492,6 +540,15 @@ fn load(
             synced: Instant::now(),
             compaction: None,
             faults,
+            diagnostics: super::diagnostics::Shared(Arc::new(std::sync::Mutex::new(
+                super::AofDiagnostics {
+                    written_sequence: sequence,
+                    synced_sequence: sequence,
+                    generation,
+                    bytes_since_compaction: valid_bytes,
+                    ..super::AofDiagnostics::default()
+                },
+            ))),
         },
     })
 }
@@ -563,6 +620,16 @@ impl Writer {
             match request {
                 Ok(Some(Request::Append(batch, reply))) => {
                     let result = self.append(batch);
+                    self.refresh_diagnostics();
+                    if let Err(error) = &result {
+                        self.diagnostics.error(error);
+                        if matches!(error, AofError::Format(FormatError::Limit)) {
+                            self.diagnostics.update(|state| {
+                                state.record_rejections_total =
+                                    state.record_rejections_total.saturating_add(1)
+                            });
+                        }
+                    }
                     if result.is_err()
                         && !matches!(result, Err(AofError::Format(FormatError::Limit)))
                     {
@@ -573,6 +640,7 @@ impl Writer {
                 }
                 Ok(Some(Request::Flush(reply))) => {
                     if let Err(error) = self.sync() {
+                        self.diagnostics.error(&error);
                         let _ = reply.send(Err(error));
                         return Err(AofError::Unavailable);
                     }
@@ -601,6 +669,7 @@ impl Writer {
                 self.sync()?;
             }
             self.finish_compaction()?;
+            self.refresh_diagnostics();
         }
     }
 
@@ -616,6 +685,9 @@ impl Writer {
             .bytes_since_compact
             .saturating_add(encoded.len() as u64);
         self.dirty = true;
+        self.diagnostics.update(|state| {
+            state.records_written_total = state.records_written_total.saturating_add(1)
+        });
         if let Some(compaction) = &mut self.compaction {
             if compaction.aborted {
                 // O produtor anterior ainda termina; não abre outro snapshot em paralelo.
@@ -645,6 +717,12 @@ impl Writer {
         self.faults.hit("after_sync")?;
         self.synced = Instant::now();
         self.dirty = false;
+        self.diagnostics.update(|state| {
+            state.written_sequence = self.sequence;
+            state.synced_sequence = self.sequence;
+            state.syncs_total = state.syncs_total.saturating_add(1);
+        });
+        self.refresh_diagnostics();
         Ok(())
     }
 
@@ -731,6 +809,10 @@ impl Writer {
             drop(ready);
             let _ = fs::remove_file(&compaction.temporary);
             let _ = compaction.reply.send(Err(AofError::DeltaLimit));
+            self.diagnostics.error(&AofError::DeltaLimit);
+            self.diagnostics.update(|state| {
+                state.compaction_failures_total = state.compaction_failures_total.saturating_add(1)
+            });
             return Ok(());
         }
         let result = (|| {
@@ -766,11 +848,33 @@ impl Writer {
             let _ = fs::remove_file(&compaction.temporary);
         }
         let failed = result.is_err();
+        self.diagnostics.update(|state| {
+            if failed {
+                state.compaction_failures_total = state.compaction_failures_total.saturating_add(1);
+            } else {
+                state.compactions_total = state.compactions_total.saturating_add(1);
+                state.synced_sequence = self.sequence;
+            }
+        });
+        if let Err(error) = &result {
+            self.diagnostics.error(error);
+        }
+        self.refresh_diagnostics();
         let _ = compaction.reply.send(result);
         if failed && published {
             return Err(AofError::Unavailable);
         }
         Ok(())
+    }
+
+    fn refresh_diagnostics(&self) {
+        self.diagnostics.update(|state| {
+            state.written_sequence = self.sequence;
+            state.generation = self.generation;
+            state.bytes_since_compaction = self.bytes_since_compact;
+            state.dirty = self.dirty;
+            state.compacting = self.compaction.is_some();
+        });
     }
 }
 
