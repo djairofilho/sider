@@ -50,6 +50,7 @@ pub struct Hello {
     pub shard_count: u32,
     pub routing_version: u32,
     pub max_record_bytes: u32,
+    pub max_mutations: u32,
     pub max_snapshot_bytes: u64,
     pub cursor: Option<Cursor>,
 }
@@ -67,6 +68,7 @@ impl Hello {
             return Err(Reject::IncompatibleLayout);
         }
         if self.max_record_bytes < source.max_record_bytes
+            || self.max_mutations < source.max_mutations
             || self.max_snapshot_bytes < source.max_snapshot_bytes
         {
             return Err(Reject::ResourceLimit);
@@ -157,6 +159,7 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
                 || hello.routing_version == 0
                 || hello.record_version == 0
                 || hello.max_record_bytes == 0
+                || hello.max_mutations == 0
                 || hello.max_snapshot_bytes == 0
             {
                 return Err(Error::Invalid("handshake"));
@@ -168,6 +171,7 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
                 hello.shard_count,
                 hello.routing_version,
                 hello.max_record_bytes,
+                hello.max_mutations,
             ] {
                 body.extend_from_slice(&value.to_le_bytes());
             }
@@ -285,7 +289,7 @@ fn header(header: &[u8], limits: Limits) -> Result<(u8, usize), Error> {
         return Err(Error::Limit);
     }
     let valid_size = match header[10] {
-        1 => len <= 82,
+        1 => len <= 86,
         2 | 7 | 8 => len == 24,
         3 => len == 32,
         5 => len == 36,
@@ -386,6 +390,7 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
                 shard_count: fields.u32()?,
                 routing_version: fields.u32()?,
                 max_record_bytes: fields.u32()?,
+                max_mutations: fields.u32()?,
                 max_snapshot_bytes: fields.u64()?,
                 cursor: match fields.byte()? {
                     0 => None,
@@ -443,6 +448,15 @@ pub async fn read(
     limits: Limits,
     deadline: Duration,
 ) -> Result<Message, Error> {
+    Ok(read_with_frame(input, limits, deadline).await?.1)
+}
+
+/// Conserva os bytes validados para a assinatura do snapshot, sem recodificação.
+pub async fn read_with_frame(
+    input: &mut (impl AsyncRead + Unpin),
+    limits: Limits,
+    deadline: Duration,
+) -> Result<(Bytes, Message), Error> {
     if deadline.is_zero() || tokio::time::Instant::now().checked_add(deadline).is_none() {
         return Err(Error::Limit);
     }
@@ -454,7 +468,9 @@ pub async fn read(
         let mut frame = vec![0; HEADER_BYTES + size];
         frame[..HEADER_BYTES].copy_from_slice(&prefix);
         input.read_exact(&mut frame[HEADER_BYTES..]).await?;
-        decode(Bytes::from(frame), limits)
+        let frame = Bytes::from(frame);
+        let message = decode(frame.clone(), limits)?;
+        Ok((frame, message))
     })
     .await
     .map_err(|_| Error::Timeout)?

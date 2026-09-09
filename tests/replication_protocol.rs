@@ -25,6 +25,7 @@ fn hello() -> Hello {
         shard_count: 4,
         routing_version: 1,
         max_record_bytes: 4096,
+        max_mutations: 100_000,
         max_snapshot_bytes: 65536,
         cursor: Some(CURSOR),
     }
@@ -112,6 +113,9 @@ fn handshake_checks_versions_layout_and_receiver_capacity() {
     assert_eq!(receiver.accepts(&source), Err(Reject::ResourceLimit));
     receiver = hello();
     receiver.max_snapshot_bytes -= 1;
+    assert_eq!(receiver.accepts(&source), Err(Reject::ResourceLimit));
+    receiver = hello();
+    receiver.max_mutations -= 1;
     assert_eq!(receiver.accepts(&source), Err(Reject::ResourceLimit));
     assert!(
         protocol::encode(
@@ -317,10 +321,9 @@ async fn tcp_transports_all_types_snapshot_and_resolved_batch_to_real_replay() {
     let mut mutations = Vec::new();
     let mut digest = 0;
     for _ in 0..5 {
-        let message = protocol::read(&mut socket, Limits::default(), DEADLINE)
+        let (frame, message) = protocol::read_with_frame(&mut socket, Limits::default(), DEADLINE)
             .await
             .unwrap();
-        let frame = protocol::encode(&message, Limits::default()).unwrap();
         digest = format::snapshot_digest(digest, &frame);
         let Message::SnapshotEntry(mutation) = message else {
             panic!("entrada ausente")
