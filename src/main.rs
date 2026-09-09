@@ -19,7 +19,7 @@ fn main() -> ExitCode {
                  Limites: SIDER_MAX_CONNECTIONS, SIDER_WORKER_QUEUE_CAPACITY,\n\
                  SIDER_MAX_FRAME_BYTES, SIDER_MAX_BULK_BYTES, SIDER_MAX_LINE_BYTES,\n\
                  SIDER_MAX_NODES, SIDER_MAX_DEPTH, SIDER_MAX_INPUT_BUFFER_BYTES,\n\
-                 SIDER_MAX_RESPONSE_BYTES. Prazos em milissegundos:\n\
+                 SIDER_MAX_RESPONSE_BYTES, SIDER_MAX_DATASET_BYTES. Prazos em milissegundos:\n\
                  SIDER_FRAME_TIMEOUT_MS, SIDER_REQUEST_TIMEOUT_MS,\n\
                  SIDER_WRITE_TIMEOUT_MS e SIDER_SHUTDOWN_TIMEOUT_MS.\n\
                  Sem argumentos, inicia o servidor TCP. Use Ctrl+C para encerrar."

@@ -11,9 +11,38 @@ use std::time::Duration;
 use bytes::Bytes;
 use tokio::time::Instant;
 
+use crate::ConfigError;
 use crate::command::{
     Command, ExecutionError, ExpiryUnit, Reply, SetCondition, SetExpiry, SetOptions, parse_decimal,
 };
+
+/// Taxa lógica fixa por entrada; inclui metadados e índice de expiração.
+pub const ENTRY_OVERHEAD_BYTES: usize = 128;
+
+/// Orçamento lógico, independente das alocações reais e do RSS.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StoreConfig {
+    pub max_dataset_bytes: usize,
+}
+
+impl Default for StoreConfig {
+    fn default() -> Self {
+        Self {
+            max_dataset_bytes: 64 * 1024 * 1024,
+        }
+    }
+}
+
+impl StoreConfig {
+    pub fn validate(self) -> Result<(), ConfigError> {
+        if self.max_dataset_bytes == 0 || self.max_dataset_bytes > isize::MAX as usize {
+            return Err(ConfigError::InvalidServerLimits {
+                reason: "SIDER_MAX_DATASET_BYTES precisa estar entre 1 e isize::MAX",
+            });
+        }
+        Ok(())
+    }
+}
 
 /// Valor e metadados comuns. O prazo absoluto registra o instante resolvido da escrita.
 #[derive(Clone, Debug)]
@@ -32,6 +61,8 @@ pub struct Store {
     expirations: BTreeSet<(Instant, u64, Bytes)>,
     generation: u64,
     clock: Arc<dyn Clock>,
+    config: StoreConfig,
+    used_bytes: usize,
 }
 
 impl Default for Store {
@@ -47,12 +78,23 @@ impl Store {
     }
 
     pub fn with_clock(clock: Arc<dyn Clock>) -> Self {
-        Self {
+        Self::with_config(StoreConfig::default(), clock).expect("configuração padrão válida")
+    }
+
+    pub fn with_config(config: StoreConfig, clock: Arc<dyn Clock>) -> Result<Self, ConfigError> {
+        config.validate()?;
+        Ok(Self {
             values: HashMap::new(),
             expirations: BTreeSet::new(),
             generation: 0,
             clock,
-        }
+            config,
+            used_bytes: 0,
+        })
+    }
+
+    pub fn used_bytes(&self) -> usize {
+        self.used_bytes
     }
 
     /// Quantidade física de entradas, incluindo expiradas ainda não visitadas.
@@ -82,7 +124,7 @@ impl Store {
             if self.values.get(&key).is_some_and(|entry| {
                 entry.generation == generation && entry.expires_at == Some(deadline)
             }) {
-                self.values.remove(&key);
+                self.remove(&key);
                 removed += 1;
             }
         }
@@ -136,12 +178,7 @@ impl Store {
                     })
                     .collect(),
             ),
-            Command::MSet { entries } => {
-                for (key, value) in entries {
-                    self.insert(key, value, None);
-                }
-                Reply::Ok
-            }
+            Command::MSet { entries } => self.mset(entries, now),
             Command::Incr { key } => self.increment(key, 1, now),
             Command::Decr { key } => self.increment(key, -1, now),
             Command::Expire { key, value, unit } => self.expire(key, value, unit, now),
@@ -195,7 +232,11 @@ impl Store {
             return Reply::Error(ExecutionError::IntegerOverflow);
         };
         let expiry = self.values.get(&key).and_then(Self::entry_expiry);
-        self.insert(key, Bytes::from(value.to_string()), expiry);
+        let encoded = Bytes::from(value.to_string());
+        if !self.can_replace(&key, &encoded) {
+            return Reply::Error(ExecutionError::OutOfMemory);
+        }
+        self.insert(key, encoded, expiry);
         Reply::Integer(value)
     }
 
@@ -245,6 +286,9 @@ impl Store {
         } else {
             deadline
         };
+        if !self.can_replace(&key, &value) {
+            return Reply::Error(ExecutionError::OutOfMemory);
+        }
         self.insert(key, value, expiry);
         reply
     }
@@ -294,6 +338,7 @@ impl Store {
 
     fn remove(&mut self, key: &Bytes) -> Option<Entry> {
         let entry = self.values.remove(key)?;
+        self.used_bytes -= Self::entry_bytes(key, &entry.value).expect("entrada contabilizada");
         if let Some(deadline) = entry.expires_at {
             self.expirations
                 .remove(&(deadline, entry.generation, key.clone()));
@@ -303,6 +348,7 @@ impl Store {
 
     fn insert(&mut self, key: Bytes, value: Bytes, expiry: Option<(Instant, i64)>) {
         self.remove(&key);
+        self.used_bytes += Self::entry_bytes(&key, &value).expect("mutação pré-validada");
         // Há no máximo um evento por chave; o anterior foi removido antes da geração avançar.
         self.generation = self.generation.wrapping_add(1);
         let entry = Entry {
@@ -316,6 +362,54 @@ impl Store {
                 .insert((deadline, entry.generation, key.clone()));
         }
         self.values.insert(key, entry);
+    }
+
+    fn entry_bytes(key: &Bytes, value: &Bytes) -> Option<usize> {
+        key.len()
+            .checked_add(value.len())?
+            .checked_add(ENTRY_OVERHEAD_BYTES)
+    }
+
+    fn can_replace(&self, key: &Bytes, value: &Bytes) -> bool {
+        let old = self
+            .values
+            .get(key)
+            .and_then(|entry| Self::entry_bytes(key, &entry.value))
+            .unwrap_or(0);
+        let proposed = Self::entry_bytes(key, value)
+            .and_then(|new| self.used_bytes.checked_sub(old)?.checked_add(new));
+        proposed
+            .is_some_and(|usage| usage <= self.config.max_dataset_bytes || usage <= self.used_bytes)
+    }
+
+    fn mset(&mut self, entries: Vec<(Bytes, Bytes)>, now: Instant) -> Reply {
+        // Reduz duplicatas antes de contabilizar: só o último valor pertence ao estado final.
+        let entries: HashMap<_, _> = entries.into_iter().collect();
+        for key in entries.keys() {
+            self.expire_key(key, now);
+        }
+        let mut base = self.used_bytes;
+        for key in entries.keys() {
+            if let Some(old) = self.values.get(key) {
+                base -= Self::entry_bytes(key, &old.value).expect("entrada contabilizada");
+            }
+        }
+        let proposed = entries.iter().try_fold(base, |usage, (key, value)| {
+            usage.checked_add(Self::entry_bytes(key, value)?)
+        });
+        if !proposed
+            .is_some_and(|usage| usage <= self.config.max_dataset_bytes || usage <= self.used_bytes)
+        {
+            return Reply::Error(ExecutionError::OutOfMemory);
+        }
+        // Retira os valores anteriores após validar o lote completo, evitando pico contábil.
+        for key in entries.keys() {
+            self.remove(key);
+        }
+        for (key, value) in entries {
+            self.insert(key, value, None);
+        }
+        Reply::Ok
     }
 }
 

@@ -16,6 +16,8 @@ pub enum ExecutionError {
     InvalidSetExpiry,
     #[error("ERR invalid expire time in '{0}' command")]
     InvalidExpiry(&'static str),
+    #[error("OOM dataset memory quota exceeded")]
+    OutOfMemory,
 }
 
 /// Resultado da execução síncrona no armazenamento.

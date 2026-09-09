@@ -61,6 +61,16 @@ pub fn channel(
     request_timeout: Duration,
     shutdown: watch::Receiver<bool>,
 ) -> Result<(DbHandle, Worker), ConfigError> {
+    channel_with_store(capacity, request_timeout, shutdown, Store::new())
+}
+
+/// Cria o canal para um armazenamento já configurado ou recuperado.
+pub fn channel_with_store(
+    capacity: usize,
+    request_timeout: Duration,
+    shutdown: watch::Receiver<bool>,
+    store: Store,
+) -> Result<(DbHandle, Worker), ConfigError> {
     if capacity == 0 || capacity > Semaphore::MAX_PERMITS {
         return Err(ConfigError::InvalidServerLimits {
             reason: "capacidade da fila deve estar entre 1 e Semaphore::MAX_PERMITS",
@@ -84,7 +94,7 @@ pub fn channel(
             shutdown: shutdown.clone(),
         },
         Worker {
-            store: Store::new(),
+            store,
             requests: receiver,
             shutdown,
         },
