@@ -493,6 +493,69 @@ fn repetition(
     Ok((summary, raw, rates))
 }
 
+// O JSON compacto acrescenta só uma vírgula ao ampliar um array não vazio.
+// O envelope já entra na conta, sem indentação adicional pelo aninhamento.
+struct RawSamples {
+    document: Value,
+    bytes: usize,
+    limit: usize,
+}
+impl RawSamples {
+    fn new(document: Value, limit: usize) -> Result<Self, String> {
+        let bytes = serde_json::to_vec(&document)
+            .map_err(|e| e.to_string())?
+            .len();
+        if bytes > limit {
+            return Err(format!("amostras excederam o limite de {limit} bytes"));
+        }
+        Ok(Self {
+            document,
+            bytes,
+            limit,
+        })
+    }
+
+    fn push_repetition(&mut self, scenario: usize, detail: Value) -> Result<(), String> {
+        let repetitions = self.document["scenarios"][scenario]["repetitions"]
+            .as_array_mut()
+            .unwrap();
+        let detail_bytes = serde_json::to_vec(&detail)
+            .map_err(|e| e.to_string())?
+            .len();
+        let bytes = self
+            .bytes
+            .checked_add(detail_bytes)
+            .and_then(|bytes| bytes.checked_add(usize::from(!repetitions.is_empty())))
+            .filter(|bytes| *bytes <= self.limit)
+            .ok_or_else(|| format!("amostras excederam o limite de {} bytes", self.limit))?;
+        repetitions.push(detail);
+        self.bytes = bytes;
+        Ok(())
+    }
+
+    fn finish(mut self, loadavg_after: String) -> Result<Vec<u8>, String> {
+        let previous_bytes = serde_json::to_vec(&self.document["loadavg_after"])
+            .map_err(|e| e.to_string())?
+            .len();
+        let observation = Value::String(loadavg_after);
+        let observation_bytes = serde_json::to_vec(&observation)
+            .map_err(|e| e.to_string())?
+            .len();
+        self.bytes = self
+            .bytes
+            .checked_sub(previous_bytes)
+            .and_then(|bytes| bytes.checked_add(observation_bytes))
+            .filter(|bytes| *bytes <= self.limit)
+            .ok_or_else(|| format!("amostras excederam o limite de {} bytes", self.limit))?;
+        self.document["loadavg_after"] = observation;
+        let bytes = serde_json::to_vec(&self.document).map_err(|e| e.to_string())?;
+        if bytes.len() != self.bytes || bytes.len() > self.limit {
+            return Err("tamanho final das amostras difere do orçamento compacto".into());
+        }
+        Ok(bytes)
+    }
+}
+
 #[test]
 #[ignore = "gate Linux do pacote: requer SIDER_BENCH_IDLE_MACHINE=1 e máquina sem builds ou outra carga"]
 fn release_benchmarks_gate() {
@@ -507,32 +570,6 @@ fn release_benchmarks_gate() {
     assert!(!raw_path.exists(), "não substituir amostras anteriores");
     let began = Instant::now();
     let hardware = hardware().unwrap();
-    let mut summaries = Vec::new();
-    let mut samples = Vec::new();
-    let mut sample_bytes = 0usize;
-    for (index, scenario) in matrix().into_iter().enumerate() {
-        let mut repetitions = Vec::new();
-        let mut raw = Vec::new();
-        let mut throughput = Vec::new();
-        for iteration in 0..REPETITIONS {
-            let (summary, detail, rate) =
-                repetition(&package, context.version(), scenario, index, iteration).unwrap();
-            sample_bytes += serde_json::to_vec_pretty(&detail).unwrap().len();
-            assert!(
-                sample_bytes < MAX_RAW_BYTES,
-                "amostras acumuladas excederam 64 MiB"
-            );
-            repetitions.push(summary);
-            raw.push(detail);
-            throughput.push(rate);
-        }
-        summaries.push(
-            json!({"scenario":scenario.details(), "repetitions":repetitions,
-            "throughput_variation":variation(&throughput)}),
-        );
-        samples.push(json!({"scenario":scenario.details(),"repetitions":raw}));
-    }
-    package.verify_again(&context).unwrap();
     let methodology = json!({"scenarios":16,"repetitions":REPETITIONS,"clients":CLIENTS,
         "warmup_operations_per_client":WARMUP,"measured_operations_per_client":OPERATIONS,"seed":SEED,
         "lcg_multiplier":6364136223846793005u64,"lcg_increment":1,
@@ -547,9 +584,30 @@ fn release_benchmarks_gate() {
             "sem limiar de superioridade sobre Redis ou garantia de desempenho"]});
     let raw = json!({"schema_version":1,"task":"R11-05","sha":context.sha(),"version":context.version(),
         "target":context.target(),"input":package.details(),"hardware":hardware,"methodology":methodology,
-        "loadavg_after":fs::read_to_string("/proc/loadavg").unwrap(),"scenarios":samples});
-    let bytes = serde_json::to_vec_pretty(&raw).unwrap();
-    assert!(bytes.len() <= MAX_RAW_BYTES, "amostras excederam 64 MiB");
+        "loadavg_after":null,"scenarios":matrix().into_iter().map(|scenario|json!({
+            "scenario":scenario.details(),"repetitions":[]
+        })).collect::<Vec<_>>()});
+    let mut samples = RawSamples::new(raw, MAX_RAW_BYTES).unwrap();
+    let mut summaries = Vec::new();
+    for (index, scenario) in matrix().into_iter().enumerate() {
+        let mut repetitions = Vec::new();
+        let mut throughput = Vec::new();
+        for iteration in 0..REPETITIONS {
+            let (summary, detail, rate) =
+                repetition(&package, context.version(), scenario, index, iteration).unwrap();
+            samples.push_repetition(index, detail).unwrap();
+            repetitions.push(summary);
+            throughput.push(rate);
+        }
+        summaries.push(
+            json!({"scenario":scenario.details(), "repetitions":repetitions,
+            "throughput_variation":variation(&throughput)}),
+        );
+    }
+    package.verify_again(&context).unwrap();
+    let bytes = samples
+        .finish(fs::read_to_string("/proc/loadavg").unwrap())
+        .unwrap();
     let mut file = fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -611,4 +669,82 @@ fn benchmark_contract_rss_requires_observation_and_known_units() {
     ] {
         assert!(parse_rss(invalid).is_err());
     }
+}
+
+#[test]
+fn benchmark_contract_raw_samples_preserve_nested_values_without_pretty_growth() {
+    let detail = json!({
+        "effective_configuration":"diagnóstico\npath=\"C:\\dados\"",
+        "clients":[{"client":0,"seed":SEED,"samples":(0..128).map(|index|json!({
+            "start_seconds":index as f64 / 1000.0,"rtt_nanoseconds":123456
+        })).collect::<Vec<_>>()}],
+        "rss_samples":(0..64).map(|index|json!({
+            "seconds":index as f64 / 1000.0,"bytes":12345678
+        })).collect::<Vec<_>>()
+    });
+    let envelope = json!({"schema_version":1,"task":"R11-05",
+    "hardware":{"cpu":["CPU de teste"],"toolchain_file":"[toolchain]\nchannel=\"1.97.1\""},
+    "loadavg_after":null,"scenarios":[
+        {"scenario":{"shards":1},"repetitions":[]},
+        {"scenario":{"shards":4},"repetitions":[]}
+    ]});
+    let observation = "0.25 0.10 0.05 2/123 456\n";
+    let mut expected = envelope.clone();
+    for scenario in 0..2 {
+        expected["scenarios"][scenario]["repetitions"] = json!(vec![detail.clone(); 3]);
+    }
+    expected["loadavg_after"] = json!(observation);
+    let legacy_accumulated = 6 * serde_json::to_vec_pretty(&detail).unwrap().len();
+    let limit = legacy_accumulated + 1;
+    assert!(serde_json::to_vec_pretty(&expected).unwrap().len() > limit);
+    let compact = serde_json::to_vec(&expected).unwrap();
+    assert!(compact.len() < limit);
+
+    let mut samples = RawSamples::new(envelope, limit).unwrap();
+    for scenario in 0..2 {
+        for _ in 0..3 {
+            samples.push_repetition(scenario, detail.clone()).unwrap();
+        }
+    }
+    let bytes = samples.finish(observation.into()).unwrap();
+    assert_eq!(bytes, compact);
+    assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), expected);
+}
+
+#[test]
+fn benchmark_contract_raw_samples_limit_includes_envelope_and_final_observation() {
+    assert_eq!(MAX_RAW_BYTES, 64 * 1024 * 1024);
+    let envelope = json!({"schema_version":1,"task":"R11-05","loadavg_after":null,
+        "scenarios":[{"scenario":{"shards":4},"repetitions":[]}]});
+    let envelope_bytes = serde_json::to_vec(&envelope).unwrap().len();
+    assert!(RawSamples::new(envelope.clone(), envelope_bytes - 1).is_err());
+    let detail = json!({"rss_samples":[{"seconds":0.001,"bytes":12345678}]});
+    let mut expected = envelope.clone();
+    expected["scenarios"][0]["repetitions"] = json!([detail.clone()]);
+    // "é" ocupa os mesmos quatro bytes de null, contando aspas e UTF-8.
+    expected["loadavg_after"] = json!("é");
+    let exact_bytes = serde_json::to_vec(&expected).unwrap();
+    let mut samples = RawSamples::new(envelope.clone(), exact_bytes.len()).unwrap();
+    samples.push_repetition(0, detail.clone()).unwrap();
+    assert!(samples.push_repetition(0, json!(null)).is_err());
+    assert_eq!(samples.finish("é".into()).unwrap(), exact_bytes);
+
+    let mut samples = RawSamples::new(envelope.clone(), exact_bytes.len() - 1).unwrap();
+    assert!(samples.push_repetition(0, detail.clone()).is_err());
+    let mut unchanged = envelope.clone();
+    unchanged["loadavg_after"] = json!("é");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&samples.finish("é".into()).unwrap()).unwrap(),
+        unchanged
+    );
+
+    let observation = "0.25 0.10 0.05 2/123 456\n";
+    expected["loadavg_after"] = json!(observation);
+    let final_bytes = serde_json::to_vec(&expected).unwrap();
+    let mut samples = RawSamples::new(envelope.clone(), final_bytes.len() - 1).unwrap();
+    samples.push_repetition(0, detail.clone()).unwrap();
+    assert!(samples.finish(observation.into()).is_err());
+    let mut samples = RawSamples::new(envelope, final_bytes.len()).unwrap();
+    samples.push_repetition(0, detail).unwrap();
+    assert_eq!(samples.finish(observation.into()).unwrap(), final_bytes);
 }
