@@ -496,34 +496,6 @@ fn load(
     })
 }
 
-#[cfg(test)]
-mod lock_tests {
-    use super::*;
-
-    #[test]
-    fn explicit_unlock_releases_ownership_while_duplicate_descriptor_survives() {
-        let directory = temporary_path(&std::env::temp_dir(), "sider-lock-regression");
-        fs::create_dir(&directory).unwrap();
-        let config = AofConfig::new(directory.clone());
-        let recovered = recover(
-            config.clone(),
-            StoreConfig::default(),
-            Arc::new(crate::storage::SystemClock),
-        )
-        .unwrap();
-        let duplicate = recovered.writer._lock.0.try_clone().unwrap();
-        drop(recovered);
-        let reopened = recover(
-            config,
-            StoreConfig::default(),
-            Arc::new(crate::storage::SystemClock),
-        )
-        .unwrap();
-        drop((reopened, duplicate));
-        fs::remove_dir_all(directory).unwrap();
-    }
-}
-
 fn batch_shard(mutations: &[Mutation], layout: DurableLayout) -> Result<usize, AofError> {
     let mut selected = None;
     for mutation in mutations {
@@ -799,5 +771,33 @@ impl Writer {
             return Err(AofError::Unavailable);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_unlock_releases_ownership_while_duplicate_descriptor_survives() {
+        let directory = temporary_path(&std::env::temp_dir(), "sider-lock-regression");
+        fs::create_dir(&directory).unwrap();
+        let config = AofConfig::new(directory.clone());
+        let recovered = recover(
+            config.clone(),
+            StoreConfig::default(),
+            Arc::new(crate::storage::SystemClock),
+        )
+        .unwrap();
+        let duplicate = recovered.writer._lock.0.try_clone().unwrap();
+        drop(recovered);
+        let reopened = recover(
+            config,
+            StoreConfig::default(),
+            Arc::new(crate::storage::SystemClock),
+        )
+        .unwrap();
+        drop((reopened, duplicate));
+        fs::remove_dir_all(directory).unwrap();
     }
 }
