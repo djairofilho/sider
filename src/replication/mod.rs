@@ -2,6 +2,7 @@
 //!
 //! A integração com papéis, snapshot e AOF pertence ao coordenador de replicação.
 
+pub mod journal;
 pub mod protocol;
 
 /// Uma posição só identifica estado dentro da mesma época do primário.
