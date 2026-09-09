@@ -1,158 +1,158 @@
-# Matriz do subconjunto 1.0
+# 1.0 subset matrix
 
-Esta é a consolidação técnica para R11-01 e R11-02. O checkout prepara o pacote
-`1.0.0`; os ensaios do build candidato e a publicação dependem dos gates e dos
-arquivos exatos. Os marcos internos e a baseline R10 conservaram `0.1.0`, sem
-ampliar a release histórica 0.1 ou aprovar a candidata atual.
+This is the technical consolidation for R11-01 and R11-02. The checkout prepares
+package `1.0.0`; candidate build testing and publication depend on the gates and
+exact files. Internal milestones and the R10 baseline retained `0.1.0`, without
+expanding the historical 0.1 release or approving the current candidate.
 
-O contrato Redis usa servidor e `redis-cli` **8.10.1**, imagem Linux amd64
-fixada por tag e digest em [releases/plan.json](../releases/plan.json).
-Todas as formas abaixo usam arrays RESP2 não vazios de bulk strings não nulas.
-Nomes e opções não distinguem maiúsculas/minúsculas ASCII; chaves, valores, membros,
-campos e canais preservam bytes arbitrários, inclusive vazio e bytes não UTF-8.
-`[argumento]` significa opcional; `...` repete o grupo anterior.
+The Redis contract uses server and `redis-cli` **8.10.1**, with a Linux amd64 image
+pinned by tag and digest in [releases/plan.json](../releases/plan.json).
+Every form below uses nonempty RESP2 arrays of non-null bulk strings.
+Names and options are ASCII case-insensitive; keys, values, members, fields,
+and channels preserve arbitrary bytes, including empty and non-UTF-8 bytes.
+`[argument]` means optional; `...` repeats the preceding group.
 
-## Formas atendidas
+## Supported forms
 
-As siglas de evidência remetem aos arquivos e resultados na seção seguinte.
-Limites próprios de memória, filas e rede também se aplicam a cada forma.
+Evidence abbreviations refer to the files and results in the following section.
+Sider's memory, queue, and network limits also apply to every form.
 
-| Forma | Contrato e restrições | Evidência |
+| Form | Contract and restrictions | Evidence |
 | --- | --- | --- |
-| `PING [mensagem]` | Modo normal: `PONG` ou bulk; modo assinante: array `pong`/mensagem | R, P, X |
-| `ECHO mensagem` | Devolve exatamente os bytes | R |
-| `GET chave` | String ou nulo; coleção produz `WRONGTYPE` | R, S, C, X |
-| `SET chave valor [NX\|XX] [EX segundos\|PX ms\|KEEPTTL] [GET]` | Última escrita substitui o tipo; GET exige string antes de avaliar NX/XX; sem EXAT/PXAT | S, C, X |
-| `DEL chave [chave ...]` | Conta entradas removidas uma vez; elimina TTL; multichave exige mesmo shard | R, S, C, X |
-| `EXISTS chave [chave ...]` | Conta duplicatas; não conta entradas expiradas; mesmo shard | S |
-| `INCR chave` | i64 decimal canônico; ausência parte de zero; erro preserva valor e TTL | S, X |
-| `DECR chave` | Mesmas regras numéricas de INCR; detecta underflow | S |
-| `MGET chave [chave ...]` | Array em ordem, preserva duplicatas; coleção aparece como nulo; mesmo shard | S, C, X |
-| `MSET chave valor [chave valor ...]` | Um lote, último par repetido vence; substitui tipos e limpa TTL; mesmo shard | S, C |
-| `EXPIRE chave segundos` | Prazo relativo; valor não positivo remove; sem NX/XX/GT/LT | S |
-| `PEXPIRE chave ms` | Prazo relativo em milissegundos; remoção imediata com zero/negativo | S, C, X |
-| `TTL chave` | Segundos restantes, -1 persistente, -2 ausente/expirada | S, X |
-| `PTTL chave` | Milissegundos restantes, -1 persistente, -2 ausente/expirada | S |
-| `PERSIST chave` | Remove prazo existente e responde 1; demais casos respondem 0 | S, C, X |
-| `HSET chave campo valor [campo valor ...]` | Conta campos novos; último campo repetido vence | C, X |
-| `HGET chave campo` | Bulk ou nulo | C, X |
-| `HDEL chave campo [campo ...]` | Conta campos removidos; último campo elimina a chave/TTL | C |
-| `HEXISTS chave campo` | 0 ou 1 | C |
-| `HLEN chave` | Cardinalidade; zero se ausente | C |
-| `HGETALL chave` | Pares campo/valor, sem ordem pública garantida | C |
-| `LPUSH chave valor [valor ...]` | Insere cada argumento à esquerda | C |
-| `RPUSH chave valor [valor ...]` | Insere cada argumento à direita | C, X |
-| `LPOP chave` | Remove um elemento à esquerda; sem opção count | C |
-| `RPOP chave` | Remove um elemento à direita; sem opção count | C |
-| `LLEN chave` | Comprimento; zero se ausente | C |
-| `LRANGE chave início fim` | Índices i64, negativos a partir do fim; extremos inclusivos | C, X |
-| `SADD chave membro [membro ...]` | Conta membros novos, sem duplicatas | C, X |
-| `SREM chave membro [membro ...]` | Conta remoções, sem duplicatas; último membro elimina a chave | C |
-| `SISMEMBER chave membro` | 0 ou 1 | C, X |
-| `SCARD chave` | Cardinalidade; zero se ausente | C |
-| `SMEMBERS chave` | Membros únicos, sem ordem pública garantida | C |
-| `ZADD chave score membro [score membro ...]` | Somente pares básicos; valida todos os scores antes de alterar | Z, X |
-| `ZREM chave membro [membro ...]` | Conta remoções, sem duplicatas; último membro elimina a chave | Z |
-| `ZCARD chave` | Cardinalidade; zero se ausente | Z |
-| `ZSCORE chave membro` | Score como bulk ou nulo | Z |
-| `ZRANGE chave início fim [WITHSCORES]` | Rank inclusivo, índices negativos; sem BYSCORE/BYLEX/REV/LIMIT | Z, X |
-| `MULTI` | Inicia fila da conexão; não executa os comandos enfileirados | T, X |
-| `EXEC` | Executa no mesmo shard; array em ordem, sem rollback de erros individuais | T, X |
-| `DISCARD` | Descarta fila e observações; erro fora de MULTI | T, X |
-| `WATCH chave [chave ...]` | Observa até EXEC/DISCARD/UNWATCH/EOF; conflito inclui expiração e ABA | T, X |
-| `UNWATCH` | Remove observações; dentro de MULTI é enfileirado | T, X |
-| `SUBSCRIBE canal [canal ...]` | Confirma cada argumento e entra no modo assinante RESP2 | P, T, X |
-| `UNSUBSCRIBE [canal ...]` | Confirma cada argumento; sem argumentos remove todas; volta ao normal na última | P, T, X |
-| `PUBLISH canal mensagem` | Conta filas que aceitaram; somente modo normal ou comando previamente enfileirado | P, T, X |
-| `INFO [seção ...]` | Diagnóstico próprio do Sider; não replica todos os campos do Redis | I |
+| `PING [message]` | Normal mode: `PONG` or bulk; subscriber mode: `pong`/message array | R, P, X |
+| `ECHO message` | Returns the exact bytes | R |
+| `GET key` | String or null; collections produce `WRONGTYPE` | R, S, C, X |
+| `SET key value [NX\|XX] [EX seconds\|PX ms\|KEEPTTL] [GET]` | Last write replaces the type; GET requires a string before evaluating NX/XX; no EXAT/PXAT | S, C, X |
+| `DEL key [key ...]` | Counts removed entries once; removes TTL; multikey requires the same shard | R, S, C, X |
+| `EXISTS key [key ...]` | Counts duplicates; excludes expired entries; same shard | S |
+| `INCR key` | Canonical decimal i64; absent starts at zero; errors preserve value and TTL | S, X |
+| `DECR key` | Same numeric rules as INCR; detects underflow | S |
+| `MGET key [key ...]` | Ordered array, preserving duplicates; collections appear as null; same shard | S, C, X |
+| `MSET key value [key value ...]` | One batch, last repeated pair wins; replaces types and clears TTL; same shard | S, C |
+| `EXPIRE key seconds` | Relative deadline; nonpositive values remove; no NX/XX/GT/LT | S |
+| `PEXPIRE key ms` | Relative deadline in milliseconds; immediate removal with zero/negative values | S, C, X |
+| `TTL key` | Remaining seconds, -1 persistent, -2 absent/expired | S, X |
+| `PTTL key` | Remaining milliseconds, -1 persistent, -2 absent/expired | S |
+| `PERSIST key` | Removes an existing deadline and returns 1; otherwise returns 0 | S, C, X |
+| `HSET key field value [field value ...]` | Counts new fields; last repeated field wins | C, X |
+| `HGET key field` | Bulk or null | C, X |
+| `HDEL key field [field ...]` | Counts removed fields; the last field removes the key/TTL | C |
+| `HEXISTS key field` | 0 or 1 | C |
+| `HLEN key` | Cardinality; zero if absent | C |
+| `HGETALL key` | Field/value pairs, with no publicly guaranteed order | C |
+| `LPUSH key value [value ...]` | Inserts each argument on the left | C |
+| `RPUSH key value [value ...]` | Inserts each argument on the right | C, X |
+| `LPOP key` | Removes one element from the left; no count option | C |
+| `RPOP key` | Removes one element from the right; no count option | C |
+| `LLEN key` | Length; zero if absent | C |
+| `LRANGE key start stop` | i64 indexes, negative from the end; inclusive endpoints | C, X |
+| `SADD key member [member ...]` | Counts new members, excluding duplicates | C, X |
+| `SREM key member [member ...]` | Counts removals, excluding duplicates; last member removes the key | C |
+| `SISMEMBER key member` | 0 or 1 | C, X |
+| `SCARD key` | Cardinality; zero if absent | C |
+| `SMEMBERS key` | Unique members, with no publicly guaranteed order | C |
+| `ZADD key score member [score member ...]` | Basic pairs only; validates all scores before changing state | Z, X |
+| `ZREM key member [member ...]` | Counts removals, excluding duplicates; last member removes the key | Z |
+| `ZCARD key` | Cardinality; zero if absent | Z |
+| `ZSCORE key member` | Score as bulk or null | Z |
+| `ZRANGE key start stop [WITHSCORES]` | Inclusive rank, negative indexes; no BYSCORE/BYLEX/REV/LIMIT | Z, X |
+| `MULTI` | Starts the connection queue; does not execute queued commands | T, X |
+| `EXEC` | Executes on the same shard; ordered array, no rollback of individual errors | T, X |
+| `DISCARD` | Discards queue and watches; error outside MULTI | T, X |
+| `WATCH key [key ...]` | Watches until EXEC/DISCARD/UNWATCH/EOF; conflicts include expiration and ABA | T, X |
+| `UNWATCH` | Removes watches; queued inside MULTI | T, X |
+| `SUBSCRIBE channel [channel ...]` | Acknowledges every argument and enters RESP2 subscriber mode | P, T, X |
+| `UNSUBSCRIBE [channel ...]` | Acknowledges every argument; without arguments removes all; returns to normal after the last | P, T, X |
+| `PUBLISH channel message` | Counts queues that accepted; only normal mode or a previously queued command | P, T, X |
+| `INFO [section ...]` | Sider-specific diagnostics; does not reproduce every Redis field | I |
 
-Operações específicas de coleção exigem o tipo correspondente. Mutações válidas
-preservam TTL; remoção do último item elimina chave, prazo e quota. `SET` sem GET
-e `MSET` podem substituir coleções. Erro de tipo, score, inteiro ou quota não
-deixa uma alteração parcial do comando. Consulte [coleções](collections.md),
-[sorted sets](sorted-sets.md) e [strings](strings.md) para detalhes e precedência
-dos erros verificados.
+Collection-specific operations require the corresponding type. Valid mutations
+preserve TTL; removing the last item removes the key, deadline, and quota usage.
+`SET` without GET and `MSET` can replace collections. Type, score, integer, or quota
+errors leave no partial command changes. See [collections](collections.md),
+[sorted sets](sorted-sets.md), and [strings](strings.md) for details and verified
+error precedence.
 
-Scores são IEEE-754 f64. Aceitam os decimais, expoentes, hexadecimais e infinitos
-verificados; rejeitam NaN, espaços, overflow finito e underflow não zero até zero.
-Zero negativo é normalizado. Ordem e representação textual de scores são
-comparadas exatamente, sem normalização pelo teste.
+Scores are IEEE-754 f64. They accept the verified decimal, exponent, hexadecimal,
+and infinity forms; they reject NaN, whitespace, finite overflow, and nonzero
+underflow to zero. Negative zero is normalized. Score ordering and text
+representation are compared exactly, without test normalization.
 
-## Evidência por forma
+## Evidence by form
 
-| Sigla | Testes e referência | Escopo observado |
+| Code | Tests and reference | Observed scope |
 | --- | --- | --- |
-| R | [commands.rs](../tests/commands.rs), [tcp.rs](../tests/tcp.rs), [compatibility.rs](../tests/compatibility.rs), Redis/CLI 8.10.1 | 3.588 comparações binárias históricas R01; nove casos CLI; fixtures, pipelines, binários e payloads até 1 MiB |
-| S | [compatibility.rs](../tests/compatibility.rs), testes de strings/TTL em armazenamento e TCP, Redis 8.10.1 | 461 comparações binárias R02; prazos observados separadamente; 48 combinações de SET |
-| C | [collections.rs](../tests/collections.rs), [collections_differential.rs](../tests/collections_differential.rs), Redis 8.10.1 | 2.383 comparações: 2.188 exatas e 195 normalizadas; apenas pares de HGETALL e membros de SMEMBERS têm ordem normalizada |
-| Z | [sorted_sets.rs](../tests/sorted_sets.rs), [collections_differential.rs](../tests/collections_differential.rs), Redis 8.10.1 | 8.561 respostas exatas; scores, empate binário, rank, erros e extremos numéricos |
-| T | [transactions.rs](../tests/transactions.rs), [transactions_persistence.rs](../tests/transactions_persistence.rs), Redis 8.10.1 | 91 respostas diferenciais históricas; WATCH, erros, framing de EXEC, cancelamento, append único e replay |
-| P | [pubsub.rs](../tests/pubsub.rs), testes do hub e conexão, Redis 8.10.1 | 245 comparações históricas, 64 mensagens, 16 reconexões; filas e clientes lentos em testes próprios |
-| I | [metrics.rs](../tests/metrics.rs), testes INFO/diagnóstico | Valores do Sider observados no sistema real; sem equivalência de campos Redis |
-| X | [cross_family.rs](../tests/common/cross_family.rs), consumido pelo gate compatibility | Corpus R11 entre tipos, TTL, EXEC/WATCH e Pub/Sub; relatório próprio sem reatribuir contagens R01/R02 |
+| R | [commands.rs](../tests/commands.rs), [tcp.rs](../tests/tcp.rs), [compatibility.rs](../tests/compatibility.rs), Redis/CLI 8.10.1 | 3,588 historical R01 binary comparisons; nine CLI cases; fixtures, pipelines, binary data, and payloads up to 1 MiB |
+| S | [compatibility.rs](../tests/compatibility.rs), storage and TCP string/TTL tests, Redis 8.10.1 | 461 R02 binary comparisons; deadlines observed separately; 48 SET combinations |
+| C | [collections.rs](../tests/collections.rs), [collections_differential.rs](../tests/collections_differential.rs), Redis 8.10.1 | 2,383 comparisons: 2,188 exact and 195 normalized; only HGETALL pairs and SMEMBERS members have normalized order |
+| Z | [sorted_sets.rs](../tests/sorted_sets.rs), [collections_differential.rs](../tests/collections_differential.rs), Redis 8.10.1 | 8,561 exact responses; scores, binary tie-breaking, rank, errors, and numeric extremes |
+| T | [transactions.rs](../tests/transactions.rs), [transactions_persistence.rs](../tests/transactions_persistence.rs), Redis 8.10.1 | 91 historical differential responses; WATCH, errors, EXEC framing, cancellation, single append, and replay |
+| P | [pubsub.rs](../tests/pubsub.rs), hub and connection tests, Redis 8.10.1 | 245 historical comparisons, 64 messages, 16 reconnections; queues and slow clients in dedicated tests |
+| I | [metrics.rs](../tests/metrics.rs), INFO/diagnostic tests | Sider values observed in the real system; no Redis field equivalence |
+| X | [cross_family.rs](../tests/common/cross_family.rs), consumed by the compatibility gate | R11 corpus across types, TTL, EXEC/WATCH, and Pub/Sub; separate report without reattributing R01/R02 counts |
 
-Os números históricos identificam seus ensaios de origem. Não comprovam outro
-SHA ou uma candidata futura. A matriz completa da candidata exige execução dos
-gates no build congelado, conforme [releases](releases.md). A contagem do corpus
-X e seus comandos de reprodução ficam em [differential.md](differential.md).
+Historical counts identify their original test runs. They do not establish results
+for another SHA or a future candidate. The candidate's complete matrix requires
+running gates against the frozen build, as described in [releases](releases.md).
+Corpus X counts and reproduction commands are in [differential.md](differential.md).
 
-## Protocolos, persistência e operação
+## Protocols, persistence, and operations
 
-| Capacidade | Contrato e limitação | Evidência responsável |
+| Capability | Contract and limitation | Supporting evidence |
 | --- | --- | --- |
-| RESP2/TCP | Framing limitado, fragmentação/pipeline, um pedido por conexão em voo; requisição inválida fecha conexão | [resp_codec.rs](../tests/resp_codec.rs), [tcp.rs](../tests/tcp.rs), fixtures e diferenciais |
-| Shards | FNV-1a 64 com hash tags; multichave e EXEC no mesmo shard; CROSSSLOT antes de efeito | [sharding.rs](../tests/sharding.rs), [transações](transactions.md) |
-| AOF | Formato próprio, lote resolvido indivisível, checksum/limites/selo; sem compatibilidade de arquivo Redis | [persistence.rs](../tests/persistence.rs), [types-persistence.md](types-persistence.md) |
-| Sync | `always` confirma após sync; `everysec` admite janela anterior ao sync | [persistence.md](persistence.md), testes de falha e recovery |
-| Compactação | Snapshot global e delta; publicação mantém corte e lotes completos | [sharding.rs](../tests/sharding.rs), testes de persistência/transações |
-| TTL durável | Prazo Unix absoluto no arquivo; tempo durante parada consome TTL | [aof_migration.rs](../tests/aof_migration.rs), [backup.rs](../tests/backup.rs) |
-| Replicação | Sider→Sider assíncrona, mesma versão/layout, FULL/CONTINUE e ACK após apply durável | [replication_network.rs](../tests/replication_network.rs), [replication_storage.rs](../tests/replication_storage.rs) |
-| Papel/promover | Réplica rejeita escrita de cliente; promoção explícita local; sem eleição, fencing distribuído ou failover automático | [replication_persistence.rs](../tests/replication_persistence.rs), CLI sider-replica |
-| Backup | Export por listener interno, corte consistente, manifesto/checksums, restauração em diretório novo | [backup.rs](../tests/backup.rs), [backup_process.rs](../tests/backup_process.rs), [guia](backup.md) |
-| Mudança de shards | Migração offline para novo diretório com quotas e replay verificados | [aof_migration.rs](../tests/aof_migration.rs), [guia](aof-migration.md) |
-| Distribuição | Pacotes Linux/Windows com quatro binários; Docker privado contém os mesmos bytes Linux | [package.rs](../tests/package.rs), [docker_distribution.rs](../tests/docker_distribution.rs) |
-| Observabilidade | INFO e `--diagnose` descrevem estado/configuração; sem conteúdo do dataset | [metrics.rs](../tests/metrics.rs), [metrics.md](metrics.md) |
+| RESP2/TCP | Bounded framing, fragmentation/pipeline, one in-flight request per connection; invalid requests close the connection | [resp_codec.rs](../tests/resp_codec.rs), [tcp.rs](../tests/tcp.rs), fixtures and differential tests |
+| Shards | FNV-1a 64 with hash tags; multikey and EXEC on the same shard; CROSSSLOT before any effect | [sharding.rs](../tests/sharding.rs), [transactions](transactions.md) |
+| AOF | Custom format, indivisible resolved batch, checksum/limits/seal; no Redis file compatibility | [persistence.rs](../tests/persistence.rs), [types-persistence.md](types-persistence.md) |
+| Sync | `always` acknowledges after sync; `everysec` allows a window before sync | [persistence.md](persistence.md), failure and recovery tests |
+| Compaction | Global snapshot and delta; publication preserves the cut and complete batches | [sharding.rs](../tests/sharding.rs), persistence/transaction tests |
+| Durable TTL | Absolute Unix deadline in the file; downtime consumes TTL | [aof_migration.rs](../tests/aof_migration.rs), [backup.rs](../tests/backup.rs) |
+| Replication | Asynchronous Sider→Sider, same version/layout, FULL/CONTINUE and ACK after durable apply | [replication_network.rs](../tests/replication_network.rs), [replication_storage.rs](../tests/replication_storage.rs) |
+| Role/promotion | Replica rejects client writes; explicit local promotion; no election, distributed fencing, or automatic failover | [replication_persistence.rs](../tests/replication_persistence.rs), sider-replica CLI |
+| Backup | Export through internal listener, consistent cut, manifest/checksums, restoration into a new directory | [backup.rs](../tests/backup.rs), [backup_process.rs](../tests/backup_process.rs), [guide](backup.md) |
+| Shard changes | Offline migration to a new directory with verified quotas and replay | [aof_migration.rs](../tests/aof_migration.rs), [guide](aof-migration.md) |
+| Distribution | Linux/Windows packages with four binaries; private Docker contains the same Linux bytes | [package.rs](../tests/package.rs), [docker_distribution.rs](../tests/docker_distribution.rs) |
+| Observability | INFO and `--diagnose` describe state/configuration; no dataset content | [metrics.rs](../tests/metrics.rs), [metrics.md](metrics.md) |
 
-Sem AOF, o processo não promete recuperação após término. Pub/Sub é efêmero e
-não entra no AOF, backup ou replicação. ACK de replicação não torna a escrita
-do primário síncrona. Uma queda do primário pode perder dados ainda não aplicados
-na réplica. Timeout ou desconexão de um cliente depois do aceite não desfaz
-comando nem prova ausência de efeito.
+Without AOF, the process does not promise recovery after termination. Pub/Sub is
+ephemeral and is not included in AOF, backup, or replication. Replication ACK does
+not make primary writes synchronous. A primary failure may lose data not yet
+applied on the replica. Client timeout or disconnection after acceptance does
+not undo a command or prove that it had no effect.
 
-## Divergências intencionais
+## Intentional differences
 
-Há somente o banco lógico padrão e RESP2 em arrays. AUTH, ACL, TLS, SELECT,
-RESP3, protocolo inline, Cluster/replicação Redis, scripts, módulos, streams,
-eviction e comandos não listados estão fora do subconjunto. Não se promete
-compatibilidade com bibliotecas que exigem HELLO, CLIENT ou COMMAND no handshake.
+Only the default logical database and array-based RESP2 are supported. AUTH, ACL,
+TLS, SELECT, RESP3, the inline protocol, Redis Cluster/replication, scripts, modules,
+streams, eviction, and unlisted commands are outside the subset. Compatibility is
+not promised for libraries that require HELLO, CLIENT, or COMMAND during handshake.
 
-As opções não listadas de SET, EXPIRE, ZADD e ZRANGE não são capacidades
-suportadas. O texto de rejeição de comando desconhecido é simplificado e não
-repete argumentos. Aridades e erros das formas declaradas têm evidência própria;
-isso não estende equivalência às formas excluídas.
+Unlisted SET, EXPIRE, ZADD, and ZRANGE options are not supported capabilities.
+Unknown-command rejection text is simplified and does not repeat arguments.
+Arity and errors for declared forms have their own evidence; this does not extend
+equivalence to excluded forms.
 
-Quota lógica por shard, filas, conexões, prazos e limite de resposta são políticas
-do Sider. Não representam maxmemory, RSS ou defaults do Redis. Saída acima do
-limite pode fechar a conexão; o comando aceito pode já ter alterado dados.
-Pub/Sub expulsa assinante com fila cheia e sua contagem confirma aceitação na
-fila, não leitura pelo cliente. HGETALL/SMEMBERS não têm ordem pública. A ordem
-das confirmações de UNSUBSCRIBE sem argumentos e vários canais pode diferir.
+Per-shard logical quota, queues, connections, deadlines, and response limits are
+Sider policies. They do not represent Redis maxmemory, RSS, or defaults. Output
+above the limit may close the connection; an accepted command may already have
+changed data. Pub/Sub evicts subscribers with full queues and its count confirms
+queue acceptance, not client receipt. HGETALL/SMEMBERS have no publicly guaranteed
+order. The order of UNSUBSCRIBE acknowledgments without arguments and with multiple
+channels may differ.
 
-## Política após a 1.0 e pendências de congelamento
+## Post-1.0 policy and remaining freeze requirements
 
-Cada nova forma precisa de parser, semântica, limites e evidência antes de entrar
-na matriz. Mudança incompatível no contrato declarado exige nova versão major
-e guia de migração. Correções que restabeleçam o contrato podem ser patches,
-com regressão reproduzível e descrição do comportamento alterado. Adições
-compatíveis podem entrar em minor; nenhuma delas amplia retroativamente os
-artefatos já publicados.
+Each new form needs a parser, semantics, limits, and evidence before entering the
+matrix. An incompatible change to the declared contract requires a new major
+version and migration guide. Fixes restoring the contract may be patches, with a
+reproducible regression and description of the changed behavior. Compatible
+additions may enter a minor release; none retroactively expands published artifacts.
 
-Evolução do AOF exige versão explícita, fixtures e migração verificadas. Não se
-promete ler versões futuras nem manter replicação entre versões diferentes.
-A matriz registra as divergências intencionais; um resultado divergente fora
-dela é investigado como defeito ou lacuna antes da publicação.
+AOF evolution requires an explicit version, verified fixtures, and migration.
+There is no promise to read future versions or maintain replication across
+different versions. The matrix records intentional differences; a divergent result
+outside it is investigated as a defect or gap before publication.
 
-O responsável pela integração confere a baseline R10 completa, migração para
-1.0, soak de pelo menos 3.600 segundos, benchmarks e todos os gates da candidata.
-Esses itens continuam pendentes até evidência do SHA e assets exatos. Este
-documento e o corpus X não encerram R10, R11 ou a aprovação de release.
+The integrator checks the complete R10 baseline, migration to 1.0, a soak of at
+least 3,600 seconds, benchmarks, and every candidate gate.
+These items remain pending until evidence exists for the exact SHA and assets.
+This document and corpus X do not close R10, R11, or release approval.

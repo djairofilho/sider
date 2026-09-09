@@ -1,72 +1,71 @@
-# Hashes, listas e sets
+# Hashes, lists, and sets
 
-As três famílias usam chaves e payloads binários. Strings e coleções compartilham
-TTL, quota e mutações resolvidas do armazenamento. O worker continua sendo o
-proprietário dos dados.
+All three families use binary keys and payloads. Strings and collections share
+TTL, quota, and resolved storage mutations. The worker continues to own the data.
 
-## Formas suportadas
+## Supported forms
 
-| Forma | Resposta e efeito |
+| Form | Response and effect |
 | --- | --- |
-| `HSET key field value [field value ...]` | Inteiro com campos novos; a última ocorrência de um campo prevalece. |
-| `HGET key field` | Bulk com valor ou nulo se campo/chave ausente. |
-| `HDEL key field [field ...]` | Inteiro com campos removidos, sem contar duplicatas. |
-| `HEXISTS key field` | `1` se existe, `0` se ausente. |
-| `HLEN key` | Quantidade de campos, `0` se ausente. |
-| `HGETALL key` | Array alternando campo e valor; vazio se ausente, sem ordem pública garantida. |
-| `LPUSH key value [value ...]` | Insere cada argumento à esquerda e retorna o tamanho final. |
-| `RPUSH key value [value ...]` | Insere cada argumento à direita e retorna o tamanho final. |
-| `LPOP key` / `RPOP key` | Remove um elemento da ponta; bulk nulo se ausente. A opção `count` fica fora do subconjunto. |
-| `LLEN key` | Tamanho da lista, `0` se ausente. |
-| `LRANGE key start stop` | Array na ordem da lista, com extremos inclusivos e índices negativos a partir do fim. |
-| `SADD key member [member ...]` | Inteiro com membros novos, sem contar duplicatas. |
-| `SREM key member [member ...]` | Inteiro com membros removidos, sem contar duplicatas. |
-| `SISMEMBER key member` | `1` se pertence ao conjunto, `0` se ausente. |
-| `SCARD key` | Quantidade de membros, `0` se ausente. |
-| `SMEMBERS key` | Array com membros únicos; vazio se ausente, sem ordem pública garantida. |
+| `HSET key field value [field value ...]` | Integer count of new fields; the last occurrence of a field wins. |
+| `HGET key field` | Bulk value, or null if the field/key is absent. |
+| `HDEL key field [field ...]` | Integer count of removed fields, excluding duplicates. |
+| `HEXISTS key field` | `1` if present, `0` if absent. |
+| `HLEN key` | Field count, `0` if absent. |
+| `HGETALL key` | Array alternating fields and values; empty if absent, with no publicly guaranteed order. |
+| `LPUSH key value [value ...]` | Inserts each argument on the left and returns the final length. |
+| `RPUSH key value [value ...]` | Inserts each argument on the right and returns the final length. |
+| `LPOP key` / `RPOP key` | Removes one element from the end; null bulk if absent. The `count` option is outside the subset. |
+| `LLEN key` | List length, `0` if absent. |
+| `LRANGE key start stop` | Array in list order, with inclusive endpoints and negative indexes counted from the end. |
+| `SADD key member [member ...]` | Integer count of new members, excluding duplicates. |
+| `SREM key member [member ...]` | Integer count of removed members, excluding duplicates. |
+| `SISMEMBER key member` | `1` if a member of the set, `0` if absent. |
+| `SCARD key` | Member count, `0` if absent. |
+| `SMEMBERS key` | Array of unique members; empty if absent, with no publicly guaranteed order. |
 
-`LPUSH l a b` produz a lista `b, a`. Em ranges, índices menores que o início
-são limitados a zero; o fim é limitado ao último elemento. Um intervalo invertido
-ou inteiramente fora da lista retorna array vazio. Os argumentos de índice usam
-inteiros decimais `i64`, com as mesmas rejeições de formato de [strings](strings.md).
+`LPUSH l a b` produces the list `b, a`. In ranges, indexes before the start are
+clamped to zero; the end is clamped to the last element. An inverted range or one
+entirely outside the list returns an empty array. Index arguments use decimal
+`i64` integers, with the same format rejections as [strings](strings.md).
 
-## Tipos, TTL e quota
+## Types, TTL, and quota
 
-Um comando aplicado a outro tipo retorna
-`WRONGTYPE Operation against a key holding the wrong kind of value` sem mudar o
-valor. `GET`, `INCR`, `DECR` e `SET ... GET` também rejeitam coleções. `MGET`
-retorna nulo para cada chave de outro tipo. `SET` sem `GET` e `MSET` substituem
-qualquer tipo; `SET ... GET` verifica o tipo antes das condições `NX`/`XX`.
+A command applied to another type returns
+`WRONGTYPE Operation against a key holding the wrong kind of value` without
+changing the value. `GET`, `INCR`, `DECR`, and `SET ... GET` also reject collections.
+`MGET` returns null for each key of another type. `SET` without `GET` and `MSET`
+replace any type; `SET ... GET` checks type before the `NX`/`XX` conditions.
 
-Leituras de chaves ausentes não criam coleções. A remoção do último campo,
-elemento ou membro elimina a entrada, seu índice de expiração e seu consumo
-lógico. Mutações preservam TTL, enquanto a substituição por strings segue as
-opções de `SET`. A expiração passiva acontece antes da consulta ao tipo.
+Reading absent keys does not create collections. Removing the last field, element,
+or member removes the entry, its expiration index, and its logical usage.
+Mutations preserve TTL, while replacement by strings follows `SET` options.
+Passive expiration occurs before the type check.
 
-A quota soma `128 + key.len()` por entrada e o payload abaixo:
+Quota adds `128 + key.len()` per entry and the following payload cost:
 
-| Tipo | Custo lógico do payload |
+| Type | Logical payload cost |
 | --- | --- |
 | String | `value.len()` |
-| Hash | Soma de `field.len() + value.len() + 64` por campo |
-| Lista | Soma de `value.len() + 32` por elemento |
-| Set | Soma de `member.len() + 64` por membro |
+| Hash | Sum of `field.len() + value.len() + 64` per field |
+| List | Sum of `value.len() + 32` per element |
+| Set | Sum of `member.len() + 64` per member |
 
-Esse orçamento não mede RSS. Escritas validam o resultado completo antes de
-substituir a entrada. Um lote recusado por quota não deixa efeito parcial;
-campos e membros repetidos são contabilizados pelo estado final.
+This budget does not measure RSS. Writes validate the complete result before
+replacing the entry. A batch rejected for quota leaves no partial effect;
+repeated fields and members are accounted for by final state.
 
-Os limites RESP e de resposta da [rede](network.md) também se aplicam às
-coleções. Ranges e arrays acima deles fecham a conexão sem resposta parcial.
-`LRANGE`, `HGETALL` e `SMEMBERS` não alteram dados ao exceder esse limite.
+The [network](network.md) RESP and response limits also apply to collections.
+Ranges and arrays exceeding them close the connection without a partial response.
+`LRANGE`, `HGETALL`, and `SMEMBERS` do not change data when exceeding this limit.
 
-## Persistência e evidência
+## Persistence and evidence
 
-Snapshots compartilham payloads imutáveis por `Arc`; uma escrita cria uma nova
-pós-imagem. `Mutation::Put` inclui o tipo completo e o prazo absoluto já resolvido.
-O codec AOF v1 mantém a representação anterior de strings (tag `1`) e usa tags
-`3`, `4` e `5` para hash, lista e set. O replay valida tipos, unicidade e quota;
-coleções vazias ou registros com campos/membros duplicados são inválidos.
+Snapshots share immutable payloads through `Arc`; a write creates a new postimage.
+`Mutation::Put` includes the complete type and already resolved absolute deadline.
+The AOF v1 codec retains the previous string representation (tag `1`) and uses
+tags `3`, `4`, and `5` for hashes, lists, and sets. Replay validates types,
+uniqueness, and quota; empty collections or records with duplicate fields/members are invalid.
 
 ```powershell
 cargo test --locked --test collections
@@ -74,15 +73,14 @@ cargo test --locked --test tcp r05_
 cargo test --locked --test collections_differential -- --ignored --exact collections_match_redis --nocapture
 ```
 
-O diferencial usa o binário Sider Windows e a imagem Redis/CLI 8.10.1 fixada em
-`releases/plan.json`, com instâncias descartáveis. São 2.188 respostas exatas e
-195 arrays normalizados, totalizando 2.383 comparações. A normalização de
-`HGETALL` preserva pares campo/valor; ambas as normalizações rejeitam duplicatas.
-As quatro seeds estão no teste e cada uma executa 256 operações com leituras
-intermediárias e conferência do estado final.
+The differential test uses the Windows Sider binary and the Redis/CLI 8.10.1 image
+pinned in `releases/plan.json`, with disposable instances. There are 2,188 exact
+responses and 195 normalized arrays, totaling 2,383 comparisons. `HGETALL`
+normalization preserves field/value pairs; both normalizations reject duplicates.
+The four seeds are in the test, and each runs 256 operations with intermediate
+reads and a final state check.
 
-Os testes nativos cobrem quota, TTL, tipos, binários, aridade, índices extremos,
-codec e replay. A [integração com o writer AOF](types-persistence.md) verifica
-crash, compactação, recuperação e evolução da fixture de strings. O diferencial
-de comandos permanece separado dessas evidências e não comprova execução nativa
-em Linux.
+Native tests cover quota, TTL, types, binary data, arity, extreme indexes, codec,
+and replay. [AOF writer integration](types-persistence.md) checks crashes,
+compaction, recovery, and evolution of the string fixture. The command differential
+test remains separate from this evidence and does not establish native Linux execution.

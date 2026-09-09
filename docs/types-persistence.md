@@ -1,85 +1,87 @@
-# Persistência de coleções e sorted sets
+# Persistence for collections and sorted sets
 
-O teste `typed_migration_from_frozen_r04_binary_output_preserves_shards_and_elapsed_ttl`
-lê `tests/fixtures/aof-r04-four-shards.hex`, cópia exata do AOF produzido pelo
-migrador `4739d596f8d80d0038a9a97838395c90be60ceff` a partir da baseline real R03
-`c7b148abeff43fd354d29b1bbce36aea43ea8f3f`. SHA256 dos bytes:
+The `typed_migration_from_frozen_r04_binary_output_preserves_shards_and_elapsed_ttl`
+test reads `tests/fixtures/aof-r04-four-shards.hex`, an exact copy of the AOF
+produced by migrator `4739d596f8d80d0038a9a97838395c90be60ceff` from the real R03
+baseline `c7b148abeff43fd354d29b1bbce36aea43ea8f3f`. SHA-256 of the bytes:
 `b6be7a45ad5e57eb7957d10136afddec6488c60f7aa59bb1c5522388ba4a246f`.
-Com relógio injetado, confere quatro shards, sequência dois, dados antigos e TTL;
-acrescenta cada tipo, compacta e recupera após o deadline. É evidência do arquivo
-congelado e do leitor atual; não atribui os resultados ao executável histórico.
+With an injected clock, it verifies four shards, sequence two, old data, and TTL;
+adds every type, compacts, and recovers after the deadline. It is evidence for the
+frozen file and current reader; it does not attribute results to the historical
+executable.
 
-Hashes, listas, sets e sorted sets usam o mesmo writer AOF das strings. A gravação
-recebe a pós-imagem tipada completa e o prazo absoluto resolvido. Em `always`, o
-armazenamento aplica essa imagem depois de o writer confirmar o sync do lote.
+Hashes, lists, sets, and sorted sets use the same AOF writer as strings. Writing
+receives the complete typed post-image and resolved absolute deadline. Under
+`always`, storage applies that image after the writer confirms batch sync.
 
-O codec AOF v1 mantém as tags anteriores de string e remoção. As tags `3`, `4`,
-`5` e `6` identificam hash, lista, set e sorted set. O decoder limita o registro
-antes de alocar o corpo e valida contagens, duplicatas e scores. A compactação
-preserva a sequência e reaplica o delta antes de publicar a nova geração.
+The AOF v1 codec retains the earlier string and deletion tags. Tags `3`, `4`, `5`,
+and `6` identify hash, list, set, and sorted set. The decoder bounds a record
+before allocating its body and validates counts, duplicates, and scores. Compaction
+preserves sequence and reapplies the delta before publishing the new generation.
 
-## Limites e expiração
+## Limits and expiration
 
-O registro AOF tem limite configurável de até 64 MiB, também usado como padrão.
-Um comando cujo resultado cabe na quota mas excede esse registro retorna
-`ERR AOF record limit exceeded`. Ele não muda dados, sequência ou arquivo e
-permite continuar usando o worker. A quota lógica segue os custos definidos nos
-guias de [coleções](collections.md) e [sorted sets](sorted-sets.md).
+The AOF record has a configurable limit of up to 64 MiB, also its default. A
+command whose result fits quota but exceeds that record returns
+`ERR AOF record limit exceeded`. It does not change data, sequence, or file and
+allows continued use of the worker. Logical quota follows the costs defined in
+the [collections](collections.md) and [sorted sets](sorted-sets.md) guides.
 
-Leituras que encontram coleções expiradas preparam tombstones com origem
-`Expiration`. A remoção passa pelo AOF antes de ser aplicada. Após essa remoção
-durável, voltar o relógio de parede durante o restart não ressuscita a chave.
-O replay descarta também pós-imagens cujo prazo absoluto já venceu e restaura
-a quota somente dos valores ainda presentes.
+Reads that encounter expired collections prepare tombstones with `Expiration`
+origin. Deletion passes through the AOF before being applied. After this durable
+deletion, moving wall clock backward during restart does not resurrect the key.
+Replay also discards post-images whose absolute deadline has elapsed and restores
+quota only for values still present.
 
-## Evidência executada
+## Executed evidence
 
 ```powershell
 cargo test --locked --test persistence typed_
 ```
 
-Cinco testes passam no Windows, cada um cobrindo as quatro famílias:
+Five tests pass on Windows, each covering all four families:
 
-- Roundtrip e compactação restauram dados completos, bits dos scores, TTL e
-  quota. Um relógio injetado verifica prazo de 250 ms e remoção no vencimento.
-- Erros de tipo, quota e limite de registro preservam o valor, a sequência AOF
-  e o atendimento de `PING`.
-- Atualizações enquanto um snapshot está pausado aparecem no delta recuperado.
-  Uma expiração passiva posterior persiste seu tombstone antes do restart.
-- Trinta e seis processos são interrompidos nos nove pontos de append, sync,
-  resposta, snapshot e publicação. O recovery aceita o estado anterior ou novo
-  completo quando não houve confirmação; após sync ou confirmação, exige o novo.
-- A fixture fixa de strings AOF v1 pode receber cada tipo novo, passar por
-  compactação e ser recuperada sem perder a string anterior.
+- Round trip and compaction restore complete data, score bits, TTL, and quota.
+  An injected clock verifies a 250 ms deadline and deletion on expiration.
+- Type, quota, and record-limit errors preserve the value, AOF sequence, and
+  `PING` service.
+- Updates while a snapshot is paused appear in the recovered delta. A later
+  passive expiration persists its tombstone before restart.
+- Thirty-six processes are interrupted at the nine append, sync, response,
+  snapshot, and publication points. Recovery accepts the previous or complete new
+  state when there was no confirmation; after sync or confirmation, it requires
+  the new state.
+- The fixed v1 AOF strings fixture can receive every new type, pass through
+  compaction, and recover without losing the prior string.
 
-O helper `typed_aof_process_child` é ignorado na execução comum e iniciado
-explicitamente pelos testes pais com variáveis restritas ao processo filho.
-Nenhum teste altera o ambiente global ou depende de portas fixas.
+The `typed_aof_process_child` helper is ignored in ordinary runs and started
+explicitly by parent tests with variables restricted to the child process. No test
+changes the global environment or depends on fixed ports.
 
-## Limites da migração verificada
+## Limits of verified migration
 
-A baseline interna R05 foi gerada pelo executável do checkout limpo
-`a615f705266c7562eece5e751d43d94b2b0eb363`, com quatro shards, strings, hashes,
-listas, sets e TTL. O processo confirmou cinco mutações com `always`; uma
-reinicialização do mesmo binário conferiu os quatro tipos. O binário, a
-configuração, os comandos, os logs e os hashes ficam preservados em
+A clean-checkout executable at `a615f705266c7562eece5e751d43d94b2b0eb363`
+generated the R05 internal baseline with four shards, strings, hashes, lists,
+sets, and TTL. The process confirmed five mutations with `always`; restarting the
+same binary checked all four types. The binary, configuration, commands, logs,
+and hashes are preserved in
 `target/baselines/r05-a615f705266c7562eece5e751d43d94b2b0eb363/`.
-O executável tem SHA-256
+The executable has SHA-256
 `7eb68f536d9ba8c6e41f430fb7ed66cb04b2e0dab38dcb8f6e6401b20da42aba`;
-os 403 bytes AOF têm SHA-256
+the 403 AOF bytes have SHA-256
 `87d12a8fc88698266882a6dce88506249fdd7dac3ffe594fc12e42cded47242b`.
 
 `sorted_set_migration_from_frozen_r05_binary_output_preserves_collections`
-usa esses bytes em `tests/fixtures/aof-r05-collections.hex`, recupera os tipos
-anteriores, acrescenta e atualiza um sorted set, compacta e reinicia com relógio
-injetado após o vencimento do hash. Os demais tipos e a ordenação permanecem.
-O ensaio passou no Windows e Linux; o SHA histórico identifica a origem dos
-dados, sem atribuir a ele a validação do código novo.
+uses those bytes in `tests/fixtures/aof-r05-collections.hex`, recovers previous
+types, adds and updates a sorted set, compacts, and restarts with an injected
+clock after hash expiration. The other types and ordering remain. The rehearsal
+passed on Windows and Linux; the historical SHA identifies the data source without
+attributing validation of new code to it.
 
-`tests/fixtures/aof-v1.hex` foi introduzida no commit
-`ea86917` antes dos tipos novos. O SHA-256 do arquivo textual é
+`tests/fixtures/aof-v1.hex` was introduced at commit
+`ea86917`, before the new types. The SHA-256 of the text file is
 `9236640383afe34c7733dddc5cbf30153b0be8b1f7108c584bff3133f8b10862`.
-O ensaio verifica a evolução do formato preservado, incluindo leitura, nova
-escrita e compactação. Ele não substitui a migração entre executáveis de
-baselines internas congeladas por SHA e hashes, nem comprova execução nativa
-Linux ou aprovação dos artefatos da candidata 1.0.
+The rehearsal verifies preserved format evolution, including reading, new writes,
+and compaction. It does not replace migration between executables from internal
+baselines frozen by SHA and hashes, or demonstrate native Linux execution or
+approval of 1.0 candidate artifacts.

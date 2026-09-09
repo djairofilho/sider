@@ -1,97 +1,97 @@
-# Ensaios operacionais do pacote extraído
+# Operational testing of the extracted package
 
-O teste opt-in `tests/operational_package.rs::operational_extracted_package`
-confere diagnóstico e limites por interfaces públicas dos executáveis
-distribuídos. Recebe um diretório extraído, executa casos curtos e grava JSON
-com observações reais. Não cria recibo de release nem substitui a verificação
-do manifesto e dos hashes do pacote.
+The opt-in `tests/operational_package.rs::operational_extracted_package` test
+checks diagnostics and limits through the public interfaces of the distributed
+executables. It receives an extracted directory, runs short cases, and writes
+JSON with actual observations. It does not create a release receipt or replace
+verification of the package manifest and hashes.
 
-## Entrada e execução
+## Input and execution
 
-O diretório deve conter os quatro executáveis da mesma compilação:
-`sider`, `sider-aof-migrate`, `sider-backup` e `sider-replica`, com sufixo
-`.exe` no Windows. Todos precisam ser arquivos regulares. O runner calcula
-SHA-256, verifica a ajuda de cada CLI e confirma a versão exposta por `sider`
-e `sider-backup`. A CLI de migração e a de replicação não oferecem
-`--version` nessa interface. Os mesmos hashes são conferidos ao terminar.
+The directory must contain the four executables from the same build:
+`sider`, `sider-aof-migrate`, `sider-backup`, and `sider-replica`, with the
+`.exe` suffix on Windows. All must be regular files. The runner calculates
+SHA-256, verifies each CLI's help text, and confirms the version reported by
+`sider` and `sider-backup`. The migration and replication CLIs do not provide
+`--version` in this interface. The same hashes are checked at the end.
 
-Primeiro confira o pacote conforme o [guia de releases](releases.md). Use
-`SIDER_OPERATIONAL_PACKAGE_DIR` com o caminho absoluto do diretório extraído
-e `SIDER_OPERATIONAL_OUTPUT_DIR` com um caminho absoluto ainda inexistente.
-A versão do runner precisa corresponder à versão do binário.
+First verify the package according to the [release guide](releases.md). Set
+`SIDER_OPERATIONAL_PACKAGE_DIR` to the absolute path of the extracted directory
+and `SIDER_OPERATIONAL_OUTPUT_DIR` to an absolute path that does not yet exist.
+The runner version must match the binary version.
 
-No Linux:
+On Linux:
 
 ```sh
-SIDER_OPERATIONAL_PACKAGE_DIR=/caminho/pacote-extraido \
-SIDER_OPERATIONAL_OUTPUT_DIR=/caminho/evidencia-nova \
+SIDER_OPERATIONAL_PACKAGE_DIR=/path/extracted-package \
+SIDER_OPERATIONAL_OUTPUT_DIR=/path/new-evidence \
 cargo test --locked --test operational_package -- --ignored --exact operational_extracted_package --nocapture
 ```
 
-No PowerShell:
+In PowerShell:
 
 ```powershell
-$env:SIDER_OPERATIONAL_PACKAGE_DIR = 'C:/caminho/pacote-extraido'
-$env:SIDER_OPERATIONAL_OUTPUT_DIR = 'C:/caminho/evidencia-nova'
+$env:SIDER_OPERATIONAL_PACKAGE_DIR = 'C:/path/extracted-package'
+$env:SIDER_OPERATIONAL_OUTPUT_DIR = 'C:/path/new-evidence'
 cargo test --locked --test operational_package -- --ignored --exact operational_extracted_package --nocapture
 ```
 
-O teste usa apenas os executáveis desse diretório. Não consulta
-`CARGO_BIN_EXE_sider` para escolher o servidor. O ambiente dos filhos é
-limpo de opções `SIDER_*` herdadas e recebe apenas a configuração de cada
-cenário. As alterações não atingem o ambiente global do processo de teste.
+The test uses only the executables in that directory. It does not consult
+`CARGO_BIN_EXE_sider` to choose the server. Child environments are cleared of
+inherited `SIDER_*` options and receive only each scenario's configuration.
+The changes do not affect the test process's global environment.
 
-## Casos observados
+## Observed cases
 
-| Caso | Condição e resultado exigido |
+| Case | Required condition and outcome |
 | --- | --- |
-| Configuração e diagnóstico | Com a porta RESP e a porta interna ocupadas, `--diagnose` termina com sucesso sem criar AOF ou prontidão. Uma configuração inválida termina com erro e identifica a opção sem repetir o valor sensível recebido. |
-| Quota | Em quatro shards e quota total de 4 KiB, SET grande é recusado com OOM. GET preserva o valor anterior e INFO preserva uso/chaves. DEL libera o consumo; novo SET e PING funcionam. |
-| Conexões | Quatro vagas são confirmadas por PING. A conexão excedente fecha e aumenta `rejected_connections`; uma conexão admitida continua consultando INFO. Depois de liberar uma vaga, outra conexão executa PING. |
-| Cliente lento | Dois assinantes recebem publicações binárias. Um não drena o socket; o outro confirma cada frame em ordem. A fila limitada remove o lento sem bloquear o saudável, e PING continua funcionando. Após fechar os assinantes, as inscrições chegam a zero. |
-| Abertura AOF e recuperação | Um arquivo regular obstrui o diretório pai da AOF. A inicialização termina com erro, preserva esse arquivo e não publica prontidão. Após remover somente a obstrução criada pelo teste, o servidor confirma uma escrita com AOF `always`. Uma segunda instância com a mesma AOF é recusada; a primeira continua atendendo. Após recolher a primeira, a reabertura recupera exatamente o valor binário e a sequência confirmada. |
+| Configuration and diagnostics | With the RESP and internal ports occupied, `--diagnose` succeeds without creating an AOF or readiness file. An invalid configuration fails and identifies the option without repeating the received sensitive value. |
+| Quota | With four shards and a total 4 KiB quota, a large SET is rejected with OOM. GET retains the previous value and INFO retains usage/key information. DEL frees consumption; a new SET and PING work. |
+| Connections | Four slots are confirmed with PING. The excess connection closes and increments `rejected_connections`; an admitted connection can still query INFO. After a slot is released, another connection executes PING. |
+| Slow client | Two subscribers receive binary publications. One does not drain its socket; the other confirms each frame in order. The bounded queue removes the slow client without blocking the healthy one, and PING continues to work. After closing the subscribers, subscriptions reach zero. |
+| AOF opening and recovery | A regular file obstructs the AOF parent directory. Startup fails, preserves that file, and does not publish readiness. After removing only the obstruction created by the test, the server confirms a write with `always` AOF. A second instance using the same AOF is rejected; the first keeps serving. After collecting the first instance, reopening recovers exactly the binary value and confirmed sequence. |
 
-A carga do cliente lento tem limite de 512 mensagens de 64 KiB e fila de uma
-mensagem por assinante. A confirmação do leitor saudável ordena cada publicação;
-não há espera fixa usada como prova de processamento. Convergência de métricas,
-operações de rede e processos têm prazos limitados.
+The slow-client load is limited to 512 messages of 64 KiB and a queue of one
+message per subscriber. Confirmation by the healthy reader orders each
+publication; no fixed delay is used as proof of processing. Metric convergence,
+network operations, and processes have bounded deadlines.
 
-A obstrução testa um **erro de abertura de caminho**. Ela não simula ENOSPC,
-remoção de permissão durante append, falha de escrita em um arquivo já aberto
-ou atomicidade sob escrita curta. Esses caminhos continuam nas suítes nativas
-de injeção e nos testes de persistência. Não interprete esse ensaio como
-evidência de falha de disco cheio.
+The obstruction tests a **path-opening error**. It does not simulate ENOSPC,
+permission removal during append, a write failure on an already open file, or
+atomicity under a short write. Those paths remain in the native injection suites
+and persistence tests. Do not interpret this rehearsal as evidence of a
+full-disk failure.
 
-O teste de baseline cobre migração, backup/restauração, tipos, TTL, réplica e
-parada cooperativa onde suportada. Esses cenários não são repetidos aqui.
-Este runner recolhe apenas os PIDs de sua propriedade; a reabertura AOF ocorre
-após uma escrita confirmada em política `always`. Esse recolhimento não
-comprova shutdown cooperativo no Windows.
+The baseline test covers migration, backup/restore, types, TTL, replicas, and
+cooperative shutdown where supported. Those scenarios are not repeated here.
+This runner collects only PIDs it owns; the AOF is reopened after a confirmed
+write under the `always` policy. This collection does not demonstrate
+cooperative shutdown on Windows.
 
-## Evidências e limites
+## Evidence and limits
 
-Cada caso concluído é gravado em `observed-cases.jsonl`. O relatório final
-`operational-report.json` reúne plataforma, versão, duração, hashes das quatro
-CLIs, códigos de saída, diagnósticos e contagens observadas. Somente aparece
-quando todos os casos passam e os executáveis permanecem iguais. Uma falha
-preserva os casos anteriores e os diretórios de dados para inspeção, sem
-publicar sucesso.
+Each completed case is written to `observed-cases.jsonl`. The final
+`operational-report.json` collects the platform, version, duration, hashes of
+the four CLIs, exit codes, diagnostics, and observed counts. It is produced
+only when every case passes and the executables remain unchanged. A failure
+preserves previous cases and data directories for inspection without reporting
+success.
 
-A saída exige diretório novo. Os dados e as evidências são preservados; o teste
-não remove uma fonte de dados existente. As únicas remoções de arquivo da
-carga atingem a obstrução criada pelo próprio cenário. O helper de processo
-remove sua prontidão e seus arquivos temporários próprios ao recolher o filho.
+Output requires a new directory. Data and evidence are preserved; the test does
+not remove an existing data source. The only file removals performed by the load
+target the obstruction created by the scenario itself. The process helper removes
+its own readiness file and temporary files when it collects the child.
 
-Para conferir a compilação sem executar processos do ensaio:
+To check the build without running rehearsal processes:
 
 ```sh
 cargo clippy --locked --test operational_package -- -D warnings
 ```
 
-Uma execução com binários de desenvolvimento serve para depurar o runner.
-A implementação passou nesse modo no Windows, com os cinco casos, incluindo
-a recusa de uma conexão excedente, remoção do assinante lento e erro de abertura
-de caminho AOF. Isso não é evidência de distribuição.
-A evidência operacional de distribuição exige repetir o teste com os pacotes
-realmente extraídos de Windows e Linux, depois de conferir sua identidade.
-Uma entrada ignorada na suíte nativa não equivale a aprovação.
+A run using development binaries is useful for debugging the runner. The
+implementation passed in that mode on Windows, with all five cases, including
+rejection of an excess connection, removal of the slow subscriber, and the AOF
+path-opening error. This is not distribution evidence. Operational distribution
+evidence requires rerunning the test with packages actually extracted on Windows
+and Linux after verifying their identity. An ignored entry in the native suite
+does not constitute approval.

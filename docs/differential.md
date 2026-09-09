@@ -1,180 +1,180 @@
-# Diferenciais e gates locais
+# Differential tests and local gates
 
-Os testes novos usam Rust/Cargo. A suíte envia os mesmos bytes ao binário Sider
-e a um Redis descartável da imagem fixada em `releases/plan.json`. O leitor de
-respostas em `tests/common/wire.rs` não importa o codec do produto: distingue
-tipos, preserva os bytes completos e limita bytes, linhas, nós e profundidade.
+New tests use Rust/Cargo. The suite sends the same bytes to the Sider binary
+and a disposable Redis instance from the image pinned in `releases/plan.json`.
+The response reader in `tests/common/wire.rs` does not import the product codec:
+it distinguishes types, preserves complete bytes, and limits bytes, lines, nodes, and depth.
 
-## Cobertura
+## Coverage
 
-- Oito fixtures, 48 trocas sequenciais e repetição em pipelines, com respostas
-  literais e sentinela para detectar bytes residuais.
-- Seis seeds fixas, 256 operações por seed, repetidas sequencialmente e em
-  pipelines de 16 comandos. Incluem os cinco comandos, chaves binárias/vazias,
-  sobrescritas e duplicatas em `DEL`.
-- Observação de todas as chaves após cada sequência; remoção somente das chaves
-  do caso e conferência de ausência. Não há `FLUSHALL` nem endpoint Redis externo.
-- Payloads de 0, 1, 127, 8.192 e 1.048.576 bytes em `ECHO`, `SET` e `GET`.
-- Comparação de bytes e tipos das respostas, incluindo erros de aridade do
-  subconjunto, seguida de half-close e EOF sem bytes adicionais.
-- Nove chamadas separadas de `redis-cli -2 --raw` nos dois servidores, cobrindo os
-  cinco comandos. A saída textual da CLI não substitui o oráculo binário.
+- Eight fixtures, 48 sequential exchanges, and pipeline repetition, with literal
+  responses and a sentinel to detect residual bytes.
+- Six fixed seeds, 256 operations per seed, repeated sequentially and in pipelines
+  of 16 commands. They include the five commands, binary/empty keys,
+  overwrites, and duplicates in `DEL`.
+- Observation of every key after each sequence; removal of only that case's keys
+  and verification of their absence. There is no `FLUSHALL` or external Redis endpoint.
+- Payloads of 0, 1, 127, 8,192, and 1,048,576 bytes in `ECHO`, `SET`, and `GET`.
+- Comparison of response bytes and types, including subset arity errors,
+  followed by half-close and EOF with no additional bytes.
+- Nine separate `redis-cli -2 --raw` calls to both servers, covering all five
+  commands. Textual CLI output does not replace the binary oracle.
 
-O núcleo R01 compara 3.588 respostas binárias. As nove chamadas CLI adicionais
-só são contabilizadas no caminho Linux compartilhado. Opções de `SET`, comando
-desconhecido e framing fora do subconjunto não são anunciados como equivalentes
-ao Redis. Consulte a [matriz de compatibilidade](compatibility.md).
+The R01 core compares 3,588 binary responses. The nine additional CLI calls are
+counted only in the shared Linux path. `SET` options, unknown commands, and framing
+outside the subset are not advertised as equivalent to Redis.
+See the [compatibility matrix](compatibility.md).
 
-R02 acrescenta 461 comparações binárias de strings e opções de SET, mantendo as
-contagens de R01 separadas. Inclui 48 combinações de condição, retorno e prazo,
-inteiros inválidos/overflow, duplicatas, MGET com três payloads de 1 MiB e erros
-seguidos de novas operações. O leitor independente aceita respostas de até 4 MiB.
+R02 adds 461 binary comparisons for strings and SET options, keeping R01 counts
+separate. It includes 48 condition/return/deadline combinations, invalid integers
+and overflow, duplicates, MGET with three 1 MiB payloads, and errors followed by
+new operations. The independent reader accepts responses up to 4 MiB.
 
-As observações temporais ficam fora de `binary_comparisons`: `PTTL` tolera 100 ms
-e `TTL`, um segundo entre os dois processos. Um polling com deadline de cinco
-segundos confirma expiração real nos dois servidores. Seu número de iterações é
-registrado separadamente. O [guia de strings](strings.md) reúne a semântica e os
-testes determinísticos que verificam limites exatos e quota.
+Timing observations remain outside `binary_comparisons`: `PTTL` allows 100 ms and
+`TTL` one second between the two processes. Polling with a five-second deadline
+confirms actual expiration on both servers. Its iteration count is recorded
+separately. The [strings guide](strings.md) covers semantics and deterministic
+tests that check exact boundaries and quota.
 
-## Auditoria R11 entre famílias
+## R11 cross-family audit
 
-O helper [cross_family.rs](../tests/common/cross_family.rs) é consumido pelo
-gate `compatibility` com os processos já abertos. Seu relatório fica em
-`r11_cross_family`; `r01_binary_comparisons`, `r02_binary_comparisons` e
-`r01_cli_cases` preservam as contagens históricas. Totais incluem o corpus novo,
-sem atribuí-lo a R01/R02.
+The [cross_family.rs](../tests/common/cross_family.rs) helper is consumed by the
+`compatibility` gate using the already running processes. Its report is under
+`r11_cross_family`; `r01_binary_comparisons`, `r02_binary_comparisons`, and
+`r01_cli_cases` preserve historical counts. Totals include the new corpus
+without attributing it to R01/R02.
 
-São quatro seeds: `1`, `42`, `0x511de011` e `0xfeedfacedeadbeef`. Cada seed usa
-40 rodadas de tipos/TTL, dez de transações e quatro de Pub/Sub. O gerador
-`Sequence` existente fornece payloads binários reproduzíveis, incluindo vazio.
-Os casos alternam string, hash, lista, set e sorted set na mesma chave; conferem
-tipo/estado após rejeição, substituição com KEEPTTL, remoção imediata por TTL,
-WATCH por expiração e criação/remoção, erros individuais dentro de EXEC,
-DISCARD/UNWATCH e publicações junto de mutações transacionais.
+There are four seeds: `1`, `42`, `0x511de011`, and `0xfeedfacedeadbeef`.
+Each seed uses 40 type/TTL rounds, ten transaction rounds, and four Pub/Sub rounds.
+The existing `Sequence` generator provides reproducible binary payloads, including
+empty ones. Cases alternate string, hash, list, set, and sorted set on the same
+key; they check type/state after rejection, replacement with KEEPTTL, immediate
+TTL removal, WATCH conflicts from expiration and creation/removal, individual
+errors inside EXEC, DISCARD/UNWATCH, and publications alongside transactional mutations.
 
-O corpus passou em 9 de setembro de 2026 com **5.128 comparações binárias**
-no Windows e no Linux. O caminho Linux acrescentou **16 casos de redis-cli**
-contra os dois servidores, totalizando 5.144 verificações novas. A referência
-Redis/CLI 8.10.1 e seu digest foram conferidos pelo harness. Não houve divergência
-não declarada nesses casos. Processos, assinaturas, chaves e contêiner Redis
-foram recolhidos ao terminar.
+The corpus passed on September 9, 2026 with **5,128 binary comparisons** on
+Windows and Linux. The Linux path added **16 redis-cli cases** against both
+servers, totaling 5,144 new checks. The Redis/CLI 8.10.1 reference and its digest
+were checked by the harness. There were no undeclared differences in these cases.
+Processes, subscriptions, keys, and the Redis container were cleaned up at completion.
 
-Todas as respostas deste corpus são exatas. Ele evita leituras sem ordem pública
-e usa PEXPIRE zero, TTL ausente/persistente e PERSIST para conferir presença do
-prazo sem acrescentar tolerância de relógio. Fronteiras temporais exatas continuam
-nos testes com relógio injetado; PTTL/TTL positivos mantêm as tolerâncias R02.
-Não testa eviction, replica Redis, comandos fora da matriz ou equivalência de RSS.
-Persistência, shards e falhas de transporte continuam nos respectivos runners;
-este corpus novo não substitui a matriz de gates.
+Every response in this corpus is exact. It avoids reads without publicly guaranteed
+order and uses PEXPIRE zero, absent/persistent TTL, and PERSIST to check deadline
+presence without adding clock tolerance. Exact timing boundaries remain in
+injected-clock tests; positive PTTL/TTL retain R02 tolerances.
+It does not test eviction, Redis replication, commands outside the matrix, or RSS
+equivalence. Persistence, shards, and transport failures remain in their respective
+runners; this new corpus does not replace the gate matrix.
 
-Durante desenvolvimento, execute somente o corpus novo:
+During development, run only the new corpus:
 
 ```powershell
 cargo test --locked --test compatibility -- --ignored --exact cross_family_audit_only --nocapture
 ```
 
-No runner Linux isolado da receita abaixo, use esse mesmo nome no lugar de
-`sider_matches_redis_and_cli`. A presença de `SIDER_TEST_RUNNER_CONTAINER` habilita
-os 16 casos CLI. A candidata usa `release_compatibility_gate`, que inclui
-R01, R02, CLI e R11 juntos. A execução parcial não produz recibo de release.
+In the isolated Linux runner described below, use that same name instead of
+`sider_matches_redis_and_cli`. The presence of `SIDER_TEST_RUNNER_CONTAINER`
+enables the 16 CLI cases. The candidate uses `release_compatibility_gate`,
+which includes R01, R02, CLI, and R11 together. A partial run produces no release receipt.
 
-## Ciclo nativo, sem infraestrutura externa
+## Native cycle without external infrastructure
 
 ```sh
 cargo test --locked --test compatibility --test harness --test gate_contract
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
-Os testes externos são explicitamente ignorados por padrão. Isso não aprova os
-gates. Os testes nativos cobrem o leitor independente, o gerador reproduzível,
-processos com deadline/saída limitada, prontidão inválida, contexto de release
-divergente, recibo antigo e zero casos.
+External tests are explicitly ignored by default. This does not approve gates.
+Native tests cover the independent reader, reproducible generator, processes with
+deadlines/bounded output, invalid readiness, mismatched release context, stale
+receipts, and zero cases.
 
-## Comparação binária no Windows
+## Binary comparison on Windows
 
-Com Docker Desktop em modo Linux e a imagem fixada disponível:
+With Docker Desktop in Linux mode and the pinned image available:
 
 ```powershell
 docker --context desktop-linux pull --platform linux/amd64 redis:8.10.1@sha256:76961cd2a0f40ef6fdd334b6b1b3a76a2bad1848d89f3030ca30a7521d4a9493
 cargo test --locked --test compatibility -- --ignored --exact sider_matches_redis --nocapture
 ```
 
-Use o mesmo contexto Docker no pull e no processo de teste. O helper chama a CLI
-Docker disponível no ambiente; este exemplo pressupõe `desktop-linux` já como
-contexto corrente. Não altera o contexto global. Esse caminho executa o Sider
-Windows e a referência Redis Linux, com porta efêmera publicada em loopback.
-Ele não executa `redis-cli` contra o Sider nem aprova o gate Linux.
+Use the same Docker context for the pull and test process. The helper calls the
+Docker CLI available in the environment; this example assumes `desktop-linux`
+is already the current context. It does not change the global context.
+This path runs Windows Sider and the Linux Redis reference, with an ephemeral
+port published on loopback. It does not run `redis-cli` against Sider or approve
+the Linux gate.
 
-## Linux e redis-cli em rede isolada
+## Linux and redis-cli on an isolated network
 
-`127.0.0.1` dentro de um container não é o host do Docker. Por isso, o Redis usa
-`--network container:<runner-id>` e compartilha o loopback do runner Ubuntu.
-O Sider usa porta efêmera; o Redis usa 6379. Não há portas publicadas, nem bind
-do Sider fora do loopback. Execute uma referência por runner, sem paralelizar
-os entrypoints externos. [Rede compartilhada do Docker](https://docs.docker.com/engine/network/#container-networks).
+`127.0.0.1` inside a container is not the Docker host. Redis therefore uses
+`--network container:<runner-id>` and shares the Ubuntu runner's loopback.
+Sider uses an ephemeral port; Redis uses 6379. No ports are published and Sider
+does not bind outside loopback. Run one reference per runner, without parallelizing
+external entry points. [Docker shared networking](https://docs.docker.com/engine/network/#container-networks).
 
-A receita [dev/test.Dockerfile](../dev/test.Dockerfile) fixa Ubuntu 24.04 e Docker
-CLI por digest, Rust 1.97.1 e rustup com checksum.
-Ela é uma ferramenta local, não a imagem de distribuição prevista para a 0.10.
-Os pacotes Ubuntu vêm dos repositórios da distribuição; não há promessa de imagem
-bit a bit idêntica em builds feitos em datas diferentes.
+The [dev/test.Dockerfile](../dev/test.Dockerfile) recipe pins Ubuntu 24.04 and
+Docker CLI by digest, Rust 1.97.1, and rustup by checksum.
+It is a local tool, not the distribution image planned for 0.10.
+Ubuntu packages come from the distribution repositories; there is no promise
+of bit-for-bit identical images built on different dates.
 
-Exemplo PowerShell, executado na raiz do repositório:
+PowerShell example, run at the repository root:
 
 ```powershell
 docker --context desktop-linux build --platform linux/amd64 --tag sider-dev:tests --file dev/test.Dockerfile dev
-if ($LASTEXITCODE -ne 0) { throw 'Falha no build do ambiente' }
+if ($LASTEXITCODE -ne 0) { throw 'Environment build failed' }
 
 $siderRoot = (Get-Location).Path
 $siderRunner = docker --context desktop-linux run --detach --rm --platform linux/amd64 --label dev.sider.purpose=local-tests --mount "type=bind,source=$siderRoot,target=/workspace,readonly" --mount 'type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock' --env DOCKER_HOST=unix:///var/run/docker.sock --env GIT_OPTIONAL_LOCKS=0 --workdir /workspace sider-dev:tests tail -f /dev/null
-if ($LASTEXITCODE -ne 0 -or $siderRunner -cnotmatch '^[a-f0-9]{64}$') { throw 'Runner não identificado' }
+if ($LASTEXITCODE -ne 0 -or $siderRunner -cnotmatch '^[a-f0-9]{64}$') { throw 'Runner not identified' }
 try {
     docker --context desktop-linux exec --env "SIDER_TEST_RUNNER_CONTAINER=$siderRunner" $siderRunner cargo test --locked --test compatibility -- --ignored --exact sider_matches_redis_and_cli --nocapture
-    if ($LASTEXITCODE -ne 0) { throw 'Diferencial/CLI falhou' }
+    if ($LASTEXITCODE -ne 0) { throw 'Differential/CLI failed' }
 } finally {
     docker --context desktop-linux stop $siderRunner
 }
 ```
 
-O socket Docker dá ao runner acesso administrativo ao daemon. Use somente fontes
-e imagem de teste confiáveis, num ambiente de desenvolvimento controlado. Não use
-esse comando para executar PRs externos não revisados. Os fontes ficam somente
-para leitura; o build fica em `/tmp/sider-target` dentro do container. Um cache
-opcional deve ser separado do target Windows e não deve ocultar `/opt/cargo/bin`.
+The Docker socket gives the runner administrative access to the daemon. Use only
+trusted sources and test images in a controlled development environment. Do not
+use this command to run unreviewed external PRs. Sources are read-only; the build
+goes in `/tmp/sider-target` inside the container. An optional cache must be separate
+from the Windows target and must not hide `/opt/cargo/bin`.
 
-O harness confere imagem, digest, versões Redis/CLI, IDs completos, estado dos
-containers e rede antes dos testes. Prontidão do Sider exige versão, PID do filho
-vivo, IP/porta e PING literal. No sucesso, confirma o recolhimento do filho e a
-remoção do container Redis e dos arquivos temporários próprios. Em falhas normais,
-os guards também tentam a limpeza. Matar o executor à força pode impedir o cleanup;
-inspecione o ID registrado antes de remover um recurso. Nunca use prune global.
+The harness checks the image, digest, Redis/CLI versions, full IDs, container
+state, and network before testing. Sider readiness requires the version, live
+child PID, IP/port, and literal PING. On success it confirms the child has been
+reaped and the Redis container and its own temporary files removed. On normal
+failures, guards also attempt cleanup. Forcibly killing the executor may prevent
+cleanup; inspect the recorded ID before removing a resource. Never use a global prune.
 
-## Recibos de release
+## Release receipts
 
-Os comandos em [releases/gates.json](../releases/gates.json) usam testes Cargo
-explícitos. O processo precisa estar num checkout limpo do SHA escolhido, com
-toolchain estável e target Linux GNU nativo. Além do ID do runner, forneça:
+Commands in [releases/gates.json](../releases/gates.json) use explicit Cargo tests.
+The process must run in a clean checkout of the selected SHA, with the stable
+toolchain and a native Linux GNU target. In addition to the runner ID, provide:
 
-| Variável | Conteúdo |
+| Variable | Contents |
 | --- | --- |
-| `SIDER_RELEASE_VERSION` | Versão exata do pacote compilado |
-| `SIDER_RELEASE_SHA` | HEAD completo, verificado antes e depois da execução |
+| `SIDER_RELEASE_VERSION` | Exact version of the built package |
+| `SIDER_RELEASE_SHA` | Full HEAD, checked before and after execution |
 | `SIDER_RELEASE_TARGET` | `x86_64-unknown-linux-gnu` |
-| `SIDER_REFERENCE_IMAGE` | Imagem Redis exata do manifesto |
-| `SIDER_RELEASE_DIR` | Diretório absoluto existente para esta execução |
+| `SIDER_REFERENCE_IMAGE` | Exact Redis image from the manifest |
+| `SIDER_RELEASE_DIR` | Existing absolute directory for this run |
 
 ```sh
 cargo test --locked --test compatibility -- --ignored --exact release_compatibility_gate --nocapture
 ```
 
-Os recibos só são publicados após sucesso e cleanup, com casos positivos, duração,
-seeds e ferramentas. A escrita usa arquivo temporário e hard link, sem substituir
-destino; o filesystem de resultados precisa suportar hard links. Contexto ausente,
-checkout alterado, target errado, recibo antigo ou execução filtrada sem casos não
-produzem aprovação. Se o diretório estiver dentro do checkout, use `target/`, que
-é ignorado pelo Git. Copie os resultados para fora do runner antes de removê-lo.
+Receipts are published only after success and cleanup, with positive case counts,
+duration, seeds, and tools. Writing uses a temporary file and hard link without
+replacing the destination; the results filesystem must support hard links.
+Missing context, changed checkout, wrong target, stale receipt, or a filtered run
+with no cases produces no approval. If the directory is inside the checkout,
+use `target/`, which Git ignores. Copy results out of the runner before removing it.
 
-A candidata 1.0 exige novos recibos no próprio SHA, com versão de build `1.0.0`.
-A final promove esses mesmos arquivos; não gera novos recibos. Resultados de uma
-branch de trabalho não substituem a validação do build candidato. Ensaios internos
-usam as entradas diretas da suíte e registram tarefa/SHA, sem contexto de release.
+The 1.0 candidate requires new receipts at its own SHA, with build version `1.0.0`.
+The final release promotes these same files; it does not generate new receipts.
+Results from a working branch do not replace candidate build validation.
+Internal tests use the suite's direct entry points and record task/SHA without release context.

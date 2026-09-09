@@ -1,80 +1,82 @@
-# Ensaio prolongado da candidata
+# Candidate soak test
 
-O runner `tests/soak.rs::release_soak_gate` executa pelo menos 3600 segundos
-de carga em processos Linux reais do pacote extraído. Confere o executável
-contra o membro do `.tar.gz` e o manifesto preliminar antes e depois do ensaio.
-O recibo só é publicado após verificar os invariantes e recolher os processos.
+The `tests/soak.rs::release_soak_gate` runner executes at least 3,600 seconds of
+load against real Linux processes from the extracted package. It checks the
+executable against the `.tar.gz` member and preliminary manifest before and after
+the rehearsal. The receipt is published only after verifying invariants and
+collecting the processes.
 
-## Carga e limites declarados
+## Declared load and limits
 
-São oito conjuntos de chaves binárias, distribuídos por hash tags em quatro
-shards, com seed `0x511e1103`. Cada iteração confirma um EXEC de oito comandos:
-duas strings pareadas, hash, lista, set e sorted set. O modelo independente
-mantém o valor esperado de cada conjunto e verifica bytes, cardinalidade,
-ordem da lista e score. A réplica deve convergir e preservar o mesmo estado.
+There are eight binary-key sets, distributed by hash tags across four shards,
+with seed `0x511e1103`. Each iteration confirms an eight-command EXEC: two paired
+strings, a hash, list, set, and sorted set. The independent model retains each
+set's expected value and checks bytes, cardinality, list order, and score. The
+replica must converge and retain the same state.
 
-A carga é limitada a 20 iterações por segundo, com quota de 4 MiB por instância,
-AOF `always` e compactação a partir de 128 KiB. Isso é a configuração deste
-ensaio de duração, sem promessa de throughput do produto. A quota mede memória
-lógica do dataset; o RSS é lido separadamente em `/proc/PID/status`. O envelope
-do ensaio é 512 MiB de RSS por processo, incluindo runtime e buffers.
+Load is limited to 20 iterations per second, with a 4 MiB quota per instance,
+`always` AOF, and compaction starting at 128 KiB. This is this duration test's
+configuration, not a product throughput promise. The quota measures logical
+dataset memory; RSS is read separately from `/proc/PID/status`. The rehearsal
+envelope is 512 MiB RSS per process, including runtime and buffers.
 
-A cada segundo o runner registra RSS, filas, dataset, expiração, AOF e estado
-de replicação em `soak-samples.jsonl`. Filas não podem exceder sua capacidade,
-o dataset não pode ultrapassar a quota e falhas de worker/AOF, inclusive de
-compactação, são bloqueantes. Ao menos uma compactação precisa ser observada;
-o relatório soma os contadores de cada processo antes dos cortes e ao terminar,
-acumulando as compactações observadas antes de cada reinício.
-Os resultados incluem configuração, duração monotônica, contagens e estado
-final. A amostragem não promete capturar picos entre observações.
+Every second the runner records RSS, queues, dataset, expiration, AOF, and
+replication state in `soak-samples.jsonl`. Queues must not exceed capacity, the
+dataset must not exceed quota, and worker/AOF failures, including compaction
+failures, are blocking. At least one compaction must be observed; the report sums
+each process's counters before interruptions and at the end, accumulating
+compactions seen before each restart. Results include configuration, monotonic
+duration, counts, and final state. Sampling does not promise to capture peaks
+between observations.
 
-## Falhas e progresso
+## Failures and progress
 
-A cada minuto são verificados WATCH abortado, expiração real de TTL, reconexão
-RESP e isolamento de um assinante lento. O assinante saudável precisa receber
-128 mensagens de 64 KiB em ordem; o lento deve ser expulso pela fila limitada.
+Every minute, the runner checks an aborted WATCH, actual TTL expiration, RESP
+reconnection, and isolation of a slow subscriber. The healthy subscriber must
+receive 128 64 KiB messages in order; the slow one must be removed by the bounded
+queue.
 
-A cada cinco minutos a réplica é interrompida e reiniciada. Alternadamente,
-o primário também é interrompido, recupera os dados confirmados e inicia uma
-nova época. O relatório exige observar tanto CONTINUE quanto FULL. Há escritas
-durante a indisponibilidade da réplica e verificação de todos os tipos após
-recuperação. Os cortes acontecem entre lotes confirmados; interrupções dentro
-de append, sync e publicação pertencem aos testes de falha e ao gate `crash`.
+Every five minutes the replica is interrupted and restarted. Alternately, the
+primary is also interrupted, recovers confirmed data, and starts a new epoch.
+The report requires observing both CONTINUE and FULL. Writes occur while the
+replica is unavailable, and all types are verified after recovery. Interruptions
+happen between confirmed batches; interruptions during append, sync, and
+publication belong to failure tests and the `crash` gate.
 
-Os diretórios de dados e os registros do ensaio são preservados em uma saída
-nova. Nenhum diretório existente é sobrescrito. Uma falha interrompe o teste
-sem recibo de sucesso; as amostras já gravadas continuam disponíveis.
+Data directories and rehearsal records are preserved in a new output directory.
+No existing directory is overwritten. A failure stops the test without a success
+receipt; samples already written remain available.
 
-## Execução
+## Execution
 
-Prepare o contexto de [releases](releases.md), com manifesto preliminar e
-pacote Linux na raiz de `SIDER_RELEASE_DIR`. `SIDER_PACKAGE_DIR` aponta para
-o diretório realmente extraído. Execute explicitamente:
+Prepare the [release](releases.md) context, with a preliminary manifest and Linux
+package at the root of `SIDER_RELEASE_DIR`. `SIDER_PACKAGE_DIR` points to the
+directory actually extracted. Run explicitly:
 
 ```sh
 cargo test --locked --test soak -- --ignored --exact release_soak_gate --nocapture
 ```
 
-O runner cria `SIDER_RELEASE_DIR/soak`; esse caminho precisa estar ausente.
-O recibo inclui os hashes dos registros, além da identidade do pacote. Os
-arquivos entram no conjunto de evidências da candidata. A final promove
-exatamente esse conjunto, sem repetir a hora de carga.
+The runner creates `SIDER_RELEASE_DIR/soak`; that path must be absent. The receipt
+includes record hashes in addition to package identity. The files enter the
+candidate evidence set. The final promotes exactly that set without repeating the
+hour of load.
 
-Para testar o próprio runner durante desenvolvimento, existe um ensaio de
-25 segundos com eventos acelerados, sem recibo de release:
+To test the runner itself during development, there is a 25-second rehearsal with
+accelerated events and no release receipt:
 
 ```sh
-SIDER_SOAK_BINARY=/caminho/absoluto/sider \
-SIDER_SOAK_OUTPUT_DIR=/caminho/absoluto/saida-nova \
+SIDER_SOAK_BINARY=/absolute/path/sider \
+SIDER_SOAK_OUTPUT_DIR=/absolute/path/new-output \
 cargo test --locked --test soak -- --ignored --exact internal_soak_rehearsal --nocapture
 ```
 
-O ensaio curto reduz o limiar de compactação para **8 KiB** e mantém a exigência
-de observar uma compactação concluída, sem falhas. O relatório registra
-`compaction_after_bytes:8192` e a contagem `compactions`. Os eventos funcionais
-acontecem a cada cinco segundos e os reinícios a cada oito segundos. O gate de
-3600 segundos mantém 128 KiB, eventos por minuto e reinícios a cada cinco minutos.
+The short rehearsal reduces the compaction threshold to **8 KiB** and retains the
+requirement to observe a completed compaction with no failures. The report records
+`compaction_after_bytes:8192` and the `compactions` count. Functional events occur
+every five seconds and restarts every eight seconds. The 3,600-second gate retains
+128 KiB, events per minute, and restarts every five minutes.
 
-Esse ensaio curto exige o binário integrado com replicação e métricas. Ele
-não aprova a duração, o pacote ou o gate da candidata. Uma entrada ignorada
-na suíte comum também não é evidência de aprovação.
+This short rehearsal requires the binary integrated with replication and metrics.
+It does not approve duration, the package, or the candidate gate. An ignored entry
+in the ordinary suite is also not evidence of approval.

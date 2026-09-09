@@ -1,102 +1,102 @@
-# Strings, expiração e quota
+# Strings, expiration, and quota
 
-R02 amplia os comandos do núcleo sem alterar as fronteiras entre protocolo,
-execução e rede. Todos os comandos válidos continuam passando por um worker
-proprietário, que aplica cada operação ou lote sem suspender a execução.
+R02 expands core commands without changing boundaries between protocol, execution,
+and networking. All valid commands still pass through an owning worker, which
+applies every operation or batch without suspending execution.
 
-## Operações de strings
+## String operations
 
-| Forma | Resultado |
+| Form | Result |
 | --- | --- |
-| `EXISTS chave [chave ...]` | Quantidade de ocorrências de chaves existentes; duplicatas contam |
-| `INCR chave` / `DECR chave` | Novo inteiro i64; chave ausente começa em zero |
-| `MGET chave [chave ...]` | Array ordenado de valores ou nulos, preservando duplicatas |
-| `MSET chave valor [chave valor ...]` | `OK` após aplicar o lote inteiro; último valor de uma chave vence |
+| `EXISTS key [key ...]` | Count of existing-key occurrences; duplicates count |
+| `INCR key` / `DECR key` | New i64 integer; an absent key starts at zero |
+| `MGET key [key ...]` | Ordered array of values or nulls, retaining duplicates |
+| `MSET key value [key value ...]` | `OK` after applying the entire batch; the last value for a key wins |
 
-Incrementos aceitam somente decimais canônicos: `0` ou sinal negativo opcional
-seguido de dígitos, com primeiro dígito entre `1` e `9`. `+1`, `-0`, zeros à
-esquerda, espaços, vazio, bytes não numéricos e valores fora de i64 são rejeitados.
-Overflow da operação tem erro distinto de um valor que já era inválido. Ambos
-preservam o valor e seu prazo de expiração.
+Increments accept only canonical decimal values: `0`, or an optional minus sign
+followed by digits with a first digit from `1` to `9`. `+1`, `-0`, leading zeroes,
+spaces, empty input, nonnumeric bytes, and values outside i64 are rejected.
+Operation overflow has a distinct error from an already-invalid value. Both retain
+the value and its expiration deadline.
 
-Aridade e formato completos são validados antes do envio ao worker. Com limites
-padrão, `EXISTS` e `MGET` admitem até 1.022 chaves e `MSET` até 511 pares, também
-sujeitos aos limites de bytes. São valores derivados do limite de nós do RESP.
-Um lote rejeitado por aridade ou quota não aplica pares parcialmente.
+Complete arity and format are validated before sending to the worker. Under default
+limits, `EXISTS` and `MGET` admit up to 1,022 keys and `MSET` up to 511 pairs, also
+subject to byte limits. These values derive from the RESP node limit. A batch
+rejected for arity or quota does not apply pairs partially.
 
-`MGET` compartilha os payloads imutáveis de `Bytes`. Repetir chaves pode gerar uma
-resposta maior que a requisição. Se a resposta exceder `SIDER_MAX_RESPONSE_BYTES`,
-o encoder a rejeita antes de emitir bytes e a conexão fecha; o estado permanece.
-Cancelar o receptor depois da aceitação de `MSET` não desfaz o lote.
+`MGET` shares immutable `Bytes` payloads. Repeating keys can produce a response
+larger than the request. If it exceeds `SIDER_MAX_RESPONSE_BYTES`, the encoder
+rejects it before emitting bytes and the connection closes; state remains. Cancelling
+the receiver after `MSET` acceptance does not undo the batch.
 
-## Opções de SET
+## SET options
 
 ```text
-SET chave valor [NX | XX] [EX segundos | PX milissegundos | KEEPTTL] [GET]
+SET key value [NX | XX] [EX seconds | PX milliseconds | KEEPTTL] [GET]
 ```
 
-- `NX` escreve somente quando ausente; `XX`, somente quando presente.
-- `GET` devolve o valor anterior, inclusive quando uma condição impede a escrita.
-  Sem `GET`, uma condição não satisfeita retorna bulk nula.
-- `EX` e `PX` definem prazo relativo positivo, validado antes de testar a condição.
-  Zero, duração negativa, overflow ou deadline não representável são rejeitados.
-- `KEEPTTL` preserva o prazo anterior. SET básico, inclusive com `GET`, remove o
-  prazo quando não há opção temporal. `MSET` também remove prazos anteriores.
-- Ordem das opções é livre. Repetir `NX`, `XX`, `GET` ou `KEEPTTL` é aceito;
-  repetir `EX` ou `PX` usa seu último argumento. `NX` com `XX`, `EX` com `PX` e
-  expiração explícita com `KEEPTTL` retornam `ERR syntax error`.
+- `NX` writes only when absent; `XX`, only when present.
+- `GET` returns the previous value, including when a condition prevents the write.
+  Without `GET`, an unsatisfied condition returns a null bulk.
+- `EX` and `PX` set a positive relative deadline, validated before testing the
+  condition. Zero, negative duration, overflow, or an unrepresentable deadline
+  are rejected.
+- `KEEPTTL` retains the previous deadline. Basic SET, including with `GET`, removes
+  the deadline when no time option is present. `MSET` also removes prior deadlines.
+- Option order is unrestricted. Repeating `NX`, `XX`, `GET`, or `KEEPTTL` is
+  accepted; repeating `EX` or `PX` uses its final argument. `NX` with `XX`, `EX`
+  with `PX`, and explicit expiration with `KEEPTTL` return `ERR syntax error`.
 
-`EXAT`, `PXAT`, `IFEQ`, `IFNE`, `IFDEQ` e `IFDNE` não integram este subconjunto.
-As formas implementadas foram comparadas com o
-[código de strings do Redis 8.10.1](https://github.com/redis/redis/blob/8.10.1/src/t_string.c)
-e com uma instância dessa versão.
+`EXAT`, `PXAT`, `IFEQ`, `IFNE`, `IFDEQ`, and `IFDNE` are not in this subset. The
+implemented forms were compared against [Redis 8.10.1 string code](https://github.com/redis/redis/blob/8.10.1/src/t_string.c)
+and an instance of that version.
 
-## Expiração
+## Expiration
 
-| Forma | Resultado |
+| Form | Result |
 | --- | --- |
-| `EXPIRE chave segundos` / `PEXPIRE chave milissegundos` | `1` se o prazo foi aplicado ou a chave removida; `0` quando ausente |
-| `TTL chave` / `PTTL chave` | Tempo restante; `-1` sem prazo; `-2` ausente ou expirada |
-| `PERSIST chave` | `1` ao remover prazo existente; `0` se não havia chave ou prazo |
+| `EXPIRE key seconds` / `PEXPIRE key milliseconds` | `1` if the deadline was applied or the key removed; `0` when absent |
+| `TTL key` / `PTTL key` | Remaining time; `-1` with no deadline; `-2` when absent or expired |
+| `PERSIST key` | `1` when removing an existing deadline; `0` with no key or deadline |
 
-Prazo não positivo em `EXPIRE`/`PEXPIRE` remove a chave imediatamente. Os comandos
-aceitam somente essas formas básicas, sem opções `NX`, `XX`, `GT` ou `LT`.
-`TTL` arredonda milissegundos com `(restante + 500) / 1000`, como a
-[implementação Redis](https://github.com/redis/redis/blob/8.10.1/src/expire.c).
+A nonpositive `EXPIRE`/`PEXPIRE` deadline removes the key immediately. Commands
+accept only these basic forms, without `NX`, `XX`, `GT`, or `LT` options. `TTL`
+rounds milliseconds with `(remaining + 500) / 1000`, like the
+[Redis implementation](https://github.com/redis/redis/blob/8.10.1/src/expire.c).
 
-`Clock` fornece relógios monotônico e Unix injetáveis. Na escrita, `Entry`
-guarda deadline monotônico, deadline absoluto em milissegundos e geração. O
-monotônico governa o processo em execução, portanto saltos posteriores do relógio
-civil não mudam a expiração. O valor absoluto permite futura persistência; replay
-precisará convertê-lo novamente para o relógio monotônico no reinício.
+`Clock` provides injectable monotonic and Unix clocks. On write, `Entry` retains a
+monotonic deadline, absolute millisecond deadline, and generation. The monotonic
+clock governs the running process, so later civil-clock jumps do not alter expiry.
+The absolute value enables future persistence; replay must convert it again to a
+monotonic clock after restart.
 
-Todo acesso às chaves trata `deadline <= agora` como expirado. Além da expiração
-passiva, o worker processa até 64 eventos a cada 100 ms, sem percorrer todo o mapa.
-Um índice ordenado mantém no máximo um evento por chave: substituição, remoção e
-`PERSIST` retiram o anterior. Conferir geração e deadline impede que um evento
-antigo apague um valor novo. Grandes lotes expirados podem exigir várias rodadas.
+Every key access treats `deadline <= now` as expired. Beyond passive expiration,
+the worker processes up to 64 events every 100 ms without scanning the entire map.
+An ordered index retains at most one event per key: replacement, deletion, and
+`PERSIST` remove the old one. Checking generation and deadline prevents an old
+event from deleting a new value. Large expired batches can require several rounds.
 
-## Quota lógica
+## Logical quota
 
-`SIDER_MAX_DATASET_BYTES` tem padrão de 64 MiB e aceita valores positivos até
-`isize::MAX`. A configuração é verificada antes da abertura do servidor.
-O consumo de uma entrada é `chave.len() + valor.len() + 128` bytes. A taxa fixa
-inclui metadados e índice temporal, mesmo quando a entrada não tem expiração.
+`SIDER_MAX_DATASET_BYTES` defaults to 64 MiB and accepts positive values up to
+`isize::MAX`. Configuration is checked before opening the server. An entry consumes
+`key.len() + value.len() + 128` bytes. The fixed charge includes metadata and the
+time index, even when the entry has no expiration.
 
-Isso é uma contabilidade lógica, não uma medição de RSS. Não inclui capacidade
-reservada das tabelas, alocador, buffers de rede, pedidos na fila nem respostas
-que ainda compartilhem valores removidos. O limite não garante que o processo
-consuma apenas essa quantidade de memória física.
+This is logical accounting, not an RSS measurement. It excludes reserved table
+capacity, allocator, network buffers, queued requests, and responses still sharing
+removed values. The limit does not guarantee that the process consumes only that
+amount of physical memory.
 
-`SET`, `MSET` e incrementos calculam o estado final antes de aplicar crescimento.
-Em `MSET`, duplicatas são reduzidas ao último valor antes dessa conta. Exceder a
-quota retorna `OOM dataset memory quota exceeded`, preservando valores, prazos e
-contadores das chaves vivas. Não há eviction automática. `DEL`, expiração e
-substituições menores liberam consumo; expirações passivas já devidas podem ser
-recolhidas durante a inspeção das chaves de um comando posteriormente rejeitado.
-Chaves expiradas ainda não visitadas contam até sua limpeza ativa ou passiva.
+`SET`, `MSET`, and increments calculate final state before applying growth. In
+`MSET`, duplicates are reduced to the last value before that calculation. Exceeding
+quota returns `OOM dataset memory quota exceeded`, retaining values, deadlines,
+and live-key counters. There is no automatic eviction. `DEL`, expiration, and
+smaller replacements free consumption; already-due passive expirations can be
+collected while inspecting keys of a command later rejected. Unvisited expired
+keys count until active or passive cleanup.
 
-## Validação reproduzível
+## Reproducible validation
 
 ```sh
 cargo test --locked --test strings --test expiration --test memory
@@ -105,16 +105,16 @@ cargo test --locked --lib storage::worker::tests::r02
 cargo test --locked --test compatibility -- --ignored --exact sider_matches_redis --nocapture
 ```
 
-A execução Windows MSVC com Redis 8.10.1 em Docker comparou 3.588 respostas
-binárias de R01 e 461 de R02. R02 inclui 48 combinações de SET, inteiros nos
-limites, rejeições, valores binários, duplicatas e MGET com três payloads de 1 MiB.
-Os relatórios separam essas comparações das observações temporais: tolerância de
-100 ms para `PTTL` e um segundo para `TTL`, mais polling com prazo de cinco
-segundos até a expiração observada nos dois processos. A quantidade de iterações
-temporais varia com o escalonamento e não é anunciada como comparação binária.
+The Windows MSVC run with Redis 8.10.1 in Docker compared 3,588 R01 binary
+responses and 461 R02 responses. R02 includes 48 SET combinations, boundary
+integers, rejections, binary values, duplicates, and MGET with three 1 MiB payloads.
+Reports separate these comparisons from temporal observations: 100 ms tolerance
+for `PTTL` and one second for `TTL`, plus polling with a five-second deadline until
+expiration was observed in both processes. The number of temporal iterations varies
+with scheduling and is not presented as a binary comparison.
 
-Testes com relógio injetado verificam a fronteira exata, geração antiga, limpeza
-ativa limitada, quota e preservação de estado. Os testes TCP verificam resposta
-MGET de 128 bytes e rejeição de 129 bytes sem saída parcial, além de MSET
-indivisível entre clientes. Isso é evidência local de implementação, sem aprovar
-pacotes distribuídos ou afirmar execução nativa em Linux.
+Tests with an injected clock verify the exact boundary, old generation, bounded
+active cleanup, quota, and state retention. TCP tests verify a 128-byte MGET
+response and rejection of 129 bytes with no partial output, as well as indivisible
+MSET between clients. This is local implementation evidence; it neither approves
+distributed packages nor claims native Linux execution.

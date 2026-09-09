@@ -1,132 +1,133 @@
-# Compatibilidade com Redis
+# Redis compatibility
 
-Consulte a [matriz consolidada para 1.0](compatibility-matrix.md) para todas as
-formas implementadas, restrições, testes responsáveis e política após a 1.0.
-Esta página preserva as evidências históricas por marco. A consolidação não
-encerra os gates nem representa aprovação da candidata.
+See the [consolidated 1.0 matrix](compatibility-matrix.md) for all implemented
+forms, restrictions, supporting tests, and post-1.0 policy.
+This page preserves historical evidence by milestone. Consolidation does not
+close gates or represent candidate approval.
 
-Os cinco comandos da 0.1 estão implementados e verificados por comparação
-diferencial do binário Sider com Redis 8.10.1. O teste separado com `redis-cli`
-também passou contra o Sider. Isso comprova o subconjunto abaixo nos casos
-registrados, não compatibilidade com todos os comandos ou clientes Redis.
+The five 0.1 commands are implemented and verified by differential comparison
+of the Sider binary with Redis 8.10.1. The separate `redis-cli` test also passed
+against Sider. This establishes the subset below for the recorded cases,
+not compatibility with every Redis command or client.
 
-R02 acrescentou strings, opções de SET, TTL e quota. Essa extensão está descrita
-abaixo e no [guia de strings](strings.md). Os marcos internos conservaram a
-versão Cargo `0.1.0`; o checkout atual prepara `1.0.0`, com validação própria
-do build candidato antes de qualquer publicação.
+R02 added strings, SET options, TTL, and quota. This extension is described below
+and in the [strings guide](strings.md). Internal milestones retained Cargo version
+`0.1.0`; the current checkout prepares `1.0.0`, with separate candidate build
+validation before any publication.
 
-## Matriz da versão 0.1
+## Version 0.1 matrix
 
-| Forma do comando | Comportamento alvo | Implementação | Verificação contra Redis |
+| Command form | Target behavior | Implementation | Verification against Redis |
 | --- | --- | --- | --- |
-| `PING` | Responder com simple string `PONG` | TCP | Diferencial literal e CLI |
-| `PING mensagem` | Devolver a mensagem como bulk string | TCP | Diferencial literal/gerado e CLI |
-| `ECHO mensagem` | Devolver exatamente os bytes da mensagem | TCP | Diferencial, fronteiras até 1 MiB e CLI |
-| `GET chave` | Devolver bulk string ou bulk string nula se ausente | TCP | Diferencial, estado final e CLI |
-| `SET chave valor` | Criar ou substituir; responder com simple string `OK` | TCP | Diferencial, sobrescrita/binários e CLI |
-| `DEL chave [chave ...]` | Contar apenas as chaves efetivamente removidas | TCP | Diferencial, duplicatas/ausentes e CLI |
+| `PING` | Return simple string `PONG` | TCP | Literal differential and CLI |
+| `PING message` | Return the message as a bulk string | TCP | Literal/generated differential and CLI |
+| `ECHO message` | Return the exact message bytes | TCP | Differential, boundaries up to 1 MiB, and CLI |
+| `GET key` | Return a bulk string or null bulk string if absent | TCP | Differential, final state, and CLI |
+| `SET key value` | Create or replace; return simple string `OK` | TCP | Differential, overwrite/binary data, and CLI |
+| `DEL key [key ...]` | Count only keys actually removed | TCP | Differential, duplicates/absent keys, and CLI |
 
-A referência inicial é Redis e `redis-cli` **8.10.1**, na plataforma Linux amd64.
-A tag e o digest da imagem estão fixados em [releases/plan.json](../releases/plan.json):
+The initial reference is Redis and `redis-cli` **8.10.1**, on Linux amd64.
+The image tag and digest are pinned in [releases/plan.json](../releases/plan.json):
 
 ```text
 redis:8.10.1@sha256:76961cd2a0f40ef6fdd334b6b1b3a76a2bad1848d89f3030ca30a7521d4a9493
 ```
 
-Em `R01-01`, a referência passou pelas fixtures literais: oito casos, 48 trocas
-sequenciais, oito pipelines e os cinco comandos via `redis-cli`. O teste confere
-digest, plataforma e versões do servidor e da CLI antes da execução. Consulte
-os [comandos de reprodução](testing.md).
+In `R01-01`, the reference passed the literal fixtures: eight cases, 48 sequential
+exchanges, eight pipelines, and the five commands through `redis-cli`.
+The test checks digest, platform, and server/CLI versions before execution.
+See the [reproduction commands](testing.md).
 
-Em `R01-03`, `tests/commands.rs` executa essas mesmas fixtures no núcleo Sider e
-confere os bytes esperados, sem sockets. R01-04 repete as fixtures pelo TCP do
-Sider, incluindo pipelines. Em R01-05, `tests/compatibility.rs` passou com 3.588
-comparações binárias no Windows e no Linux Ubuntu 24.04. O caminho Linux também
-passou em nove cenários de CLI contra ambos os servidores, com processos e
-containers descartáveis. Os [comandos reproduzíveis](differential.md) registram
-seeds, cobertura e limites. A candidata 1.0 valida a matriz completa no seu SHA;
-a final promove os mesmos arquivos e evidências desse build aprovado.
+In `R01-03`, `tests/commands.rs` runs these same fixtures against the Sider core
+and checks the expected bytes without sockets. R01-04 repeats the fixtures over
+Sider TCP, including pipelines. In R01-05, `tests/compatibility.rs` passed with
+3,588 binary comparisons on Windows and Linux Ubuntu 24.04. The Linux path also
+passed nine CLI scenarios against both servers, using disposable processes and
+containers. The [reproducible commands](differential.md) record seeds, coverage,
+and limits. The 1.0 candidate validates the complete matrix at its SHA;
+the final release promotes the same files and evidence from that approved build.
 
-## Matriz implementada em R02
+## Matrix implemented in R02
 
-| Forma | Contrato verificado | Evidência |
+| Form | Verified contract | Evidence |
 | --- | --- | --- |
-| `EXISTS chave [chave ...]` | Duplicatas contam; ausentes e expiradas não contam | Nativo, TCP e diferencial Redis |
-| `INCR chave` / `DECR chave` | Decimal canônico i64; ausência começa em zero; rejeição preserva valor/TTL | Nativo, TCP e diferencial Redis |
-| `MGET chave [chave ...]` | Array ordenado com nulos e duplicatas | Nativo, TCP e diferencial até três payloads de 1 MiB |
-| `MSET chave valor [chave valor ...]` | Lote indivisível; último par vence; limpa TTL | Nativo, concorrência TCP e diferencial Redis |
-| `SET ... [NX|XX] [EX segundos|PX ms|KEEPTTL] [GET]` | Condições, retorno anterior, combinações e prazos validados | 48 combinações e casos inválidos comparados com Redis |
-| `EXPIRE chave segundos` / `PEXPIRE chave ms` | Prazo relativo; não positivo remove; ausência retorna zero | Relógio injetado e diferencial Redis |
-| `TTL chave` / `PTTL chave` | Prazo restante, -1 persistente, -2 ausente/expirada | Fronteiras exatas nativas; diferencial com tolerância declarada |
-| `PERSIST chave` | Remove somente um prazo existente | Nativo e diferencial Redis |
+| `EXISTS key [key ...]` | Duplicates count; absent and expired keys do not | Native, TCP, and Redis differential |
+| `INCR key` / `DECR key` | Canonical decimal i64; absent starts at zero; rejection preserves value/TTL | Native, TCP, and Redis differential |
+| `MGET key [key ...]` | Ordered array with nulls and duplicates | Native, TCP, and differential with up to three 1 MiB payloads |
+| `MSET key value [key value ...]` | Indivisible batch; last pair wins; clears TTL | Native, TCP concurrency, and Redis differential |
+| `SET ... [NX\|XX] [EX seconds\|PX ms\|KEEPTTL] [GET]` | Validated conditions, previous-value return, combinations, and deadlines | 48 combinations and invalid cases compared with Redis |
+| `EXPIRE key seconds` / `PEXPIRE key ms` | Relative deadline; nonpositive removes; absent returns zero | Injected clock and Redis differential |
+| `TTL key` / `PTTL key` | Remaining deadline, -1 persistent, -2 absent/expired | Exact native boundaries; differential with declared tolerance |
+| `PERSIST key` | Removes only an existing deadline | Native and Redis differential |
 
-O relatório separa 3.588 comparações binárias históricas de R01 e 461 novas de
-R02. As observações temporais usam tolerância de 100 ms para `PTTL` e um segundo
-para `TTL`; a expiração real é observada com deadline de cinco segundos. Esse
-caminho passou com Sider Windows e Redis Linux em Docker; não comprova build
-nativo Linux nem aprovação de pacotes. Veja a [reprodução](strings.md#validação-reproduzível).
+The report separates 3,588 historical R01 binary comparisons from 461 new R02
+comparisons. Timing observations use a 100 ms tolerance for `PTTL` and one second
+for `TTL`; actual expiration is observed with a five-second deadline.
+This path passed with Windows Sider and Linux Redis in Docker; it does not
+establish a native Linux build or package approval. See
+[reproduction](strings.md#reproducible-validation).
 
-## Coleções implementadas em R05 e R06
+## Collections implemented in R05 and R06
 
-Hashes, listas e sets estão descritos no [guia de coleções](collections.md), com
-2.383 comparações diferenciais. Sorted sets estão no [guia de scores e ordem](sorted-sets.md),
-com 8.561 respostas exatas. As famílias preservam TTL e quota; `WRONGTYPE` rejeita
-operações entre tipos, `MGET` retorna nulo para coleções e `SET` sem `GET` pode
-substituir qualquer tipo. A [validação do writer AOF completo](types-persistence.md)
-permanece separada da comparação de comandos e distingue evolução do formato de
-migração entre executáveis congelados.
+Hashes, lists, and sets are described in the [collections guide](collections.md),
+with 2,383 differential comparisons. Sorted sets are in the
+[scores and ordering guide](sorted-sets.md), with 8,561 exact responses.
+The families preserve TTL and quota; `WRONGTYPE` rejects operations across types,
+`MGET` returns null for collections, and `SET` without `GET` can replace any type.
+[Full AOF writer validation](types-persistence.md) remains separate from command
+comparison and distinguishes format evolution from migration between frozen executables.
 
-## Transações implementadas em R07
+## Transactions implemented in R07
 
-`MULTI`, `EXEC`, `DISCARD`, `WATCH` e `UNWATCH` estão implementados para um shard,
-incluindo conflitos por expiração e erros individuais sem rollback. Os limites
-de fila e observações são próprios do Sider. O diferencial com Redis 8.10.1 passou
-em 91 comparações binárias, incluindo `WRONGTYPE`, coleções, inscrições dentro de
-`EXEC` e mensagens para a própria conexão. O
-[guia de transações](transactions.md) registra comandos, restrições, formato
-especial RESP2, persistência e reprodução das verificações.
+`MULTI`, `EXEC`, `DISCARD`, `WATCH`, and `UNWATCH` are implemented for one shard,
+including expiration conflicts and individual errors without rollback. Queue
+and watch limits are Sider-specific. The Redis 8.10.1 differential test passed
+91 binary comparisons, including `WRONGTYPE`, collections, subscriptions inside
+`EXEC`, and messages to the same connection. The
+[transactions guide](transactions.md) records commands, restrictions, special
+RESP2 framing, persistence, and verification reproduction.
 
-## Protocolo implementado
+## Implemented protocol
 
-`INFO [seção ...]` expõe um diagnóstico próprio do Sider por RESP2. As seções e
-os indicadores estão no [guia operacional](metrics.md); não há promessa de
-reproduzir todos os campos INFO do Redis. A consulta respeita o modo assinante
-e os limites de resposta, podendo ser enfileirada em `MULTI`.
+`INFO [section ...]` exposes Sider-specific diagnostics over RESP2. Sections and
+indicators are in the [operations guide](metrics.md); there is no promise to
+reproduce every Redis INFO field. The query respects subscriber mode and response
+limits and can be queued in `MULTI`.
 
-O Sider aceita requisições RESP2 formadas por arrays não vazios de bulk strings
-não nulas. Os nomes dos comandos são comparados sem distinguir maiúsculas de
-minúsculas ASCII. Chaves e valores são binários, sem exigir UTF-8.
+Sider accepts RESP2 requests consisting of nonempty arrays of non-null bulk
+strings. Command names are ASCII case-insensitive. Keys and values are binary,
+without requiring UTF-8.
 
-O codec representa os cinco tipos RESP2, mas isso não significa que todos os
-tipos são aceitos como argumentos de comandos. Valor nulo, valor vazio,
-array nulo e array vazio têm representações distintas.
+The codec represents all five RESP2 types, but that does not mean all types are
+accepted as command arguments. Null values, empty values, null arrays, and empty
+arrays have distinct representations.
 
-Frames fragmentados e comandos concatenados são tratados desde R01-04.
-Cada conexão processa os comandos em sequência, com um único pedido em voo.
+Fragmented frames and concatenated commands have been handled since R01-04.
+Each connection processes commands sequentially, with one request in flight.
 
-## Limitações e divergências atuais
+## Current limitations and differences
 
-| Área | Contrato do desenvolvimento atual |
+| Area | Current development contract |
 | --- | --- |
-| Opções de `SET` | NX, XX, EX, PX, GET e KEEPTTL; EXAT, PXAT e condições de valor não integram o subconjunto |
-| Comando desconhecido | Responder `ERR unknown command`, com texto simplificado que não reproduz os argumentos |
-| Aridade dos comandos suportados | Produzir resposta compatível com a versão de Redis selecionada, após verificação |
-| Formato de requisição inválido | Rejeitar e fechar a conexão; sem promessa de equivalência com Redis fora do subconjunto declarado |
-| Protocolo | RESP2; sem RESP3 e sem comandos inline |
-| Banco lógico | Somente o banco padrão; sem `SELECT` |
-| Handshake e autenticação | Sem `AUTH`, `HELLO`, `COMMAND` ou `CLIENT`; clientes que exigem esses comandos não estarão cobertos |
-| Tipos de dados | Strings, hashes, listas, sets e sorted sets no subconjunto documentado; todos usam payloads binários |
-| Expiração | EXPIRE e PEXPIRE básicos; sem NX, XX, GT ou LT; monotônico durante execução |
-| Persistência e replicação | AOF binário próprio e snapshots globais; replicação assíncrona Sider → Sider da mesma versão/configuração, sem replicação Redis ou Redis Cluster |
-| Memória do dataset | Quota lógica própria com rejeição atômica, sem eviction; não reproduz o maxmemory/RSS do Redis |
-| Uso operacional | Protótipo para desenvolvimento local e testes, com endereço padrão em loopback |
+| `SET` options | NX, XX, EX, PX, GET, and KEEPTTL; EXAT, PXAT, and value conditions are outside the subset |
+| Unknown command | Return `ERR unknown command`, with simplified text that does not repeat arguments |
+| Supported command arity | Produce a response compatible with the selected Redis version, after verification |
+| Invalid request format | Reject and close the connection; no Redis equivalence promise outside the declared subset |
+| Protocol | RESP2; no RESP3 or inline commands |
+| Logical database | Default database only; no `SELECT` |
+| Handshake and authentication | No `AUTH`, `HELLO`, `COMMAND`, or `CLIENT`; clients requiring them are not covered |
+| Data types | Strings, hashes, lists, sets, and sorted sets in the documented subset; all use binary payloads |
+| Expiration | Basic EXPIRE and PEXPIRE; no NX, XX, GT, or LT; monotonic during execution |
+| Persistence and replication | Custom binary AOF and global snapshots; asynchronous Sider → Sider replication with the same version/configuration, no Redis replication or Redis Cluster |
+| Dataset memory | Custom logical quota with atomic rejection, no eviction; does not reproduce Redis maxmemory/RSS |
+| Operational use | Prototype for local development and tests, with a loopback default address |
 
-Os limites de entrada e os prazos estão no [guia de rede](network.md). São limites
-próprios do Sider e não uma reprodução dos valores padrão do Redis.
+Input limits and deadlines are in the [networking guide](network.md).
+They are Sider-specific limits, not reproductions of Redis defaults.
 
-## Evidência necessária
+## Required evidence
 
-Para repetir a validação do núcleo sem rede:
+To repeat core validation without networking:
 
 ```sh
 cargo test --locked --lib command::
@@ -136,54 +137,52 @@ cargo test --locked --test tcp
 cargo test --locked --test cli
 ```
 
-`tests/commands.rs` também confere que opções inválidas de `SET`, comandos desconhecidos e
-formatos inválidos não chegam ao armazenamento. O parser move os `Bytes` para o
-comando; `GET` compartilha conteúdo imutável, sem uma cópia proporcional ao valor.
+`tests/commands.rs` also checks that invalid `SET` options, unknown commands, and
+invalid formats do not reach storage. The parser moves `Bytes` into the command;
+`GET` shares immutable content without a copy proportional to the value.
 
-Para declarar uma forma de comando verificada, registre o teste reproduzível e
-a versão de referência. A suíte diferencial compara respostas brutas e
-estado observado usando instâncias descartáveis. Sua leitura das respostas usa
-um leitor independente do codec sob teste.
+To declare a command form verified, record its reproducible test and reference
+version. The differential suite compares raw responses and observed state using
+disposable instances. Its response reader is independent of the codec under test.
 
-Inclua casos com bytes não UTF-8, chaves e valores vazios, chaves ausentes,
-sobrescrita e chaves repetidas em `DEL`. Verifique também caixa dos comandos,
-aridade, rejeição sem mutação e continuidade após erros recuperáveis.
+Include cases with non-UTF-8 bytes, empty keys and values, absent keys, overwrites,
+and repeated keys in `DEL`. Also check command casing, arity, rejection without
+mutation, and continuation after recoverable errors.
 
-O teste com `redis-cli` é uma evidência de integração separada: sua saída
-textual não substitui a comparação dos bytes no protocolo. Uma ferramenta ausente
-ou um teste ignorado deve permanecer registrado como pendente.
+The `redis-cli` test is separate integration evidence: its textual output does
+not replace protocol byte comparison. A missing tool or skipped test must remain
+recorded as pending.
 
-## Integração das capacidades
+## Capability integration
 
-Pub/Sub está implementado em R08: `SUBSCRIBE canal [canal ...]`,
-`UNSUBSCRIBE [canal ...]`, `PUBLISH canal mensagem` e `PING [mensagem]` no modo
-assinante. O diferencial específico contra Redis 8.10.1 registrou 245 comparações,
-64 mensagens e 16 reconexões com cleanup, além dos testes nativos de backpressure.
-O [guia Pub/Sub](pubsub.md) descreve entrega efêmera, limites, comandos permitidos
-e divergências. Transações e sua interação com Pub/Sub permanecem em R07.
+Pub/Sub is implemented in R08: `SUBSCRIBE channel [channel ...]`,
+`UNSUBSCRIBE [channel ...]`, `PUBLISH channel message`, and `PING [message]` in
+subscriber mode. The dedicated Redis 8.10.1 differential test recorded 245 comparisons,
+64 messages, and 16 reconnections with cleanup, alongside native backpressure tests.
+The [Pub/Sub guide](pubsub.md) describes ephemeral delivery, limits, permitted
+commands, and differences. Transactions and their interaction with Pub/Sub remain in R07.
 
-O [ROADMAP](../ROADMAP.md) é a sequência oficial. Strings, opções de `SET`, TTL e
-quota de R02 estão implementadas, assim como AOF e shards fixos duráveis (R03/R04).
-O formato AOF é próprio, sem compatibilidade de arquivo com Redis. Hashes, listas,
-sets e sorted sets estão implementados com TTL/quota e persistência tipada.
-Transações de um shard estão implementadas em R07; replicação Sider→Sider em
-R09; backup, métricas e distribuição possuem implementação e runners em R10.
-A baseline operacional completa e a candidata 1.0 continuam sujeitas aos gates.
+The [ROADMAP](../ROADMAP.md) is the official sequence. R02 strings, `SET` options,
+TTL, and quota are implemented, as are AOF and durable fixed shards (R03/R04).
+AOF is a custom format, without Redis file compatibility. Hashes, lists, sets,
+and sorted sets are implemented with TTL/quota and typed persistence.
+Single-shard transactions are implemented in R07; Sider→Sider replication in R09;
+backup, metrics, and distribution have implementations and runners in R10.
+The complete operational baseline and 1.0 candidate remain subject to gates.
 
-Com `SIDER_SHARDS` maior que um, operações multichave precisam do mesmo shard,
-com rejeição `CROSSSLOT` antes de qualquer efeito. Essa divergência intencional
-do Redis standalone é verificada em testes nativos/TCP; hash tags permitem
-colocalizar chaves, conforme o [guia de shards](sharding.md).
-Replicação R09 usa sincronização completa e incremental, réplicas somente leitura
-e promoção manual durável. Os testes com processos reais cobrem tipos, TTL, lotes,
-reconexão, perda de histórico, crash e promoção atrasada. O
-[guia de replicação](replication.md) detalha os limites e a possível perda assíncrona.
+With `SIDER_SHARDS` greater than one, multikey operations require the same shard,
+with `CROSSSLOT` rejection before any effect. This intentional difference from
+standalone Redis is verified in native/TCP tests; hash tags allow keys to be
+colocated, as described in the [sharding guide](sharding.md).
+R09 replication uses full and incremental synchronization, read-only replicas,
+and durable manual promotion. Tests with actual processes cover types, TTL,
+batches, reconnection, history loss, crashes, and delayed promotion.
+The [replication guide](replication.md) details limits and possible asynchronous loss.
 
-Para coleções sem ordem garantida, como `SMEMBERS`, a suíte compara conteúdo
-normalizado. Respostas ordenadas, como `LRANGE` e `ZRANGE`, preservam a ordem na
-comparação. Cada nova forma de comando só muda de planejada para verificada quando
-seu teste e sua referência estiverem registrados.
+For collections without guaranteed order, such as `SMEMBERS`, the suite compares
+normalized content. Ordered responses, such as `LRANGE` and `ZRANGE`, retain their
+order during comparison. Each new command form moves from planned to verified
+only when its test and reference are recorded.
 
-Os gates cumulativos e o fluxo de candidatas estão no
-[guia de releases](releases.md). O bootstrap não atende esses gates e não será
-publicado como versão funcional.
+Cumulative gates and the candidate workflow are in the [release guide](releases.md).
+The bootstrap does not satisfy these gates and will not be published as a functional version.

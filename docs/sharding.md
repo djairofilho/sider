@@ -1,57 +1,57 @@
-# Shards e roteamento
+# Shards and routing
 
-`SIDER_SHARDS` define de 1 a 256 workers proprietários, com padrão 1. A configuração
-é fixa durante a execução. Cada worker possui seu mapa, índice de TTL e fila
-limitada por `SIDER_WORKER_QUEUE_CAPACITY`; não há acesso concorrente direto ao mapa.
+`SIDER_SHARDS` sets from 1 to 256 owning workers, defaulting to 1. Configuration is
+fixed while running. Each worker owns its map, TTL index, and queue bounded by
+`SIDER_WORKER_QUEUE_CAPACITY`; there is no direct concurrent map access.
 
-## Distribuição estável
+## Stable distribution
 
-O roteador extrai o conteúdo entre a primeira abertura `{` e o próximo fechamento
-`}` quando esse conteúdo não é vazio. Primeiro par vazio, fechamento ausente ou
-ausência de abertura fazem usar a chave inteira. Aberturas aninhadas pertencem aos
-bytes da tag; `a{{tag}}` usa `{tag`. Não há conversão de UTF-8.
+The router extracts content between the first `{` and following `}` when that
+content is nonempty. An empty first pair, a missing closing brace, or no opening
+brace uses the entire key. Nested openings are tag bytes; `a{{tag}}` uses `{tag`.
+There is no UTF-8 conversion.
 
-Sobre esses bytes, FNV-1a de 64 bits começa em `0xcbf29ce484222325`; para cada
-byte aplica XOR e multiplica por `0x100000001b3`, módulo 2^64. O shard é o hash
-módulo a quantidade de workers. Os vetores em `storage::routing` fixam o resultado
-independentemente de plataforma ou do hasher aleatório usado dentro de cada mapa.
+Over those bytes, 64-bit FNV-1a starts at `0xcbf29ce484222325`; for each byte it
+applies XOR and multiplies by `0x100000001b3`, modulo 2^64. The shard is the hash
+modulo worker count. Vectors in `storage::routing` fix the result independently of
+platform or the randomized hasher used inside each map.
 
-Hash tags permitem colocalizar `cliente:{42}:nome` e `cliente:{42}:email`. Isso
-não implementa o protocolo Redis Cluster nem seus slots. Não há resharding online.
+Hash tags colocate `customer:{42}:name` and `customer:{42}:email`. This does not
+implement the Redis Cluster protocol or its slots. There is no online resharding.
 
-## Comandos multichave e progresso
+## Multi-key commands and progress
 
-`DEL`, `EXISTS`, `MGET` e `MSET` precisam ter todas as chaves no mesmo shard.
-O roteador confere o comando inteiro antes do envio e retorna
-`CROSSSLOT Keys in request don't hash to the same slot` se encontrar cruzamento.
-Nenhum worker recebe parte de uma operação rejeitada. Duplicatas, ordem das chaves
-e último valor de MSET continuam sob a semântica original. A conexão permanece
-utilizável após a rejeição.
+`DEL`, `EXISTS`, `MGET`, and `MSET` require all keys to be in one shard. The router
+checks the whole command before sending and returns
+`CROSSSLOT Keys in request don't hash to the same slot` when it finds a crossing.
+No worker receives part of a rejected operation. Duplicates, key ordering, and the
+last MSET value retain their original semantics. The connection remains usable
+after rejection.
 
-Comandos sem chave usam o worker zero. Cada conexão continua com um pedido em voo.
-Filas de shards distintos admitem progresso independente; clientes que disputam
-um shard quente compartilham a fila desse worker. Falha de um worker interrompe a
-admissão do servidor e inicia drenagem, evitando servir um dataset incompleto.
+Commands with no key use worker zero. Each connection still has one in-flight
+request. Queues for separate shards allow independent progress; clients contending
+for a hot shard share that worker's queue. A worker failure stops server admission
+and starts draining, avoiding service of an incomplete dataset.
 
-## Quota e expiração
+## Quota and expiration
 
-A quota total `SIDER_MAX_DATASET_BYTES` é dividida de forma fixa: cada shard recebe
-`total / shards`, e os primeiros `total % shards` recebem mais um byte. A soma
-nunca excede o total e cada partição precisa de ao menos um byte. Não há empréstimo
-de quota entre workers: um shard cheio pode rejeitar escrita mesmo com espaço em
-outro. O orçamento continua lógico, distinto do RSS e dos buffers de rede.
+The total `SIDER_MAX_DATASET_BYTES` quota is split deterministically: each shard
+receives `total / shards`, and the first `total % shards` receive one more byte.
+The sum never exceeds the total and each partition needs at least one byte. No quota
+is borrowed between workers: a full shard can reject a write despite room in another.
+The budget remains logical, distinct from RSS and network buffers.
 
-Cada worker mantém sua expiração passiva e limpa até 64 eventos por rodada de
-100 ms. Shutdown fecha a admissão de todos os workers e drena comandos aceitos
-dentro do prazo global. Cancelar o supervisor aborta as tarefas assíncronas.
-O escritor usa I/O bloqueante do sistema operacional; abortar ou esgotar a espera
-não interrompe um `write`/`sync` preso no kernel. O prazo limita a espera da API;
-encerrar um processo com I/O bloqueado depende do sistema operacional.
+Each worker maintains passive expiration and cleans up to 64 events per 100 ms
+round. Shutdown closes admission for every worker and drains accepted commands
+within the global deadline. Cancelling the supervisor aborts asynchronous tasks.
+The writer uses blocking operating-system I/O; aborting or exhausting a wait does
+not interrupt a `write`/`sync` stuck in the kernel. The deadline bounds API waiting;
+terminating a process with blocked I/O depends on the operating system.
 
-## Evidência e integração durável
+## Evidence and durable integration
 
-Testes verificam vetores binários e hash tags, rejeição antes de enqueue, fila
-saturada com progresso de outro worker, quota particionada e lotes via TCP:
+Tests verify binary vectors and hash tags, rejection before enqueue, a saturated
+queue while another worker progresses, partitioned quota, and TCP batches:
 
 ```sh
 cargo test --locked --lib storage::routing::
@@ -60,18 +60,18 @@ cargo test --locked --lib storage::worker::tests::saturated_shard
 cargo test --locked --test tcp shard
 ```
 
-R04-04 integra escritor AOF global, sequência, snapshot e recuperação entre shards.
-Cada pedido mantém uma admissão compartilhada desde o enqueue até apply/resposta.
-O snapshot adquire exclusão, aguarda pedidos aceitos e coleta os workers por canais
-próprios. A expiração apenas tenta admissão e pula a rodada quando há snapshot,
-evitando bloquear o worker que precisa responder à coleta.
+R04-04 integrates the global AOF writer, sequence, snapshot, and recovery across
+shards. Each request keeps shared admission from enqueue through apply/reply. The
+snapshot obtains exclusion, waits for accepted requests, and collects workers over
+their own channels. Expiration only attempts admission and skips a round during a
+snapshot, avoiding blockage of a worker that must respond to collection.
 
-A compactação enfileira o snapshot no escritor antes de liberar novas mutações;
-o AOF captura o delta até publicar a geração nova. A recuperação valida layout,
-sequência, integridade e quota de cada shard antes do bind. Trocar a quantidade de
-workers com dados existentes exige [migração offline](aof-migration.md).
-A API `Worker::with_aof` desabilita limiares de compactação local quando o worker
-pertence a um conjunto de vários shards; somente a coordenação global pode compactá-los.
+Compaction queues the snapshot in the writer before releasing new mutations; the AOF
+captures the delta until publishing the new generation. Recovery validates each
+shard's layout, sequence, integrity, and quota before binding. Changing worker
+count with existing data requires [offline migration](aof-migration.md). The
+`Worker::with_aof` API disables local compaction thresholds when a worker belongs
+to a multi-shard set; only global coordination can compact them.
 
 ```sh
 cargo test --locked --lib storage::snapshot
@@ -80,38 +80,39 @@ cargo test --locked --test persistence
 cargo test --locked --test aof_migration
 ```
 
-## Medição exploratória R04-05
+## R04-05 exploratory measurement
 
-O build release do SHA `626e1aef8c093b390527719eae49b451ff113edb` executou
-16 cenários e verificou o estado final de 32.768 operações INCR por TCP. O ensaio
-usou Windows x86_64, Intel i5-9300H (4 núcleos/8 threads), quatro clientes,
-seed `0x52404005`, 512 operações por cliente, 1/4 shards, pipeline 1/16 e chaves
-concentradas/distribuídas. Não havia builds ou outra carga de testes concorrente.
-Os [resultados brutos](evidence/R04-05-626e1ae-windows.json) incluem compiler,
-throughput, RTT de cada lote, percentis, RSS antes/depois e configuração completa.
+The release build at SHA `626e1aef8c093b390527719eae49b451ff113edb` ran 16
+scenarios and checked final state for 32,768 TCP INCR operations. The rehearsal
+used Windows x86_64, an Intel i5-9300H (4 cores/8 threads), four clients, seed
+`0x52404005`, 512 operations per client, 1/4 shards, pipeline 1/16, and
+concentrated/distributed keys. No builds or other test loads ran concurrently.
+[Raw results](evidence/R04-05-626e1ae-windows.json) include compiler, throughput,
+batch RTT, percentiles, before/after RSS, and complete configuration.
 
-Sem AOF, o ensaio mediu de 33.687 a 85.788 operações/s. Com AOF `always`, de 665 a
-945 operações/s. Quatro shards não mostraram ganho consistente nesta amostra;
-o sync do escritor global dominou o custo durável. O pipeline aumenta o lote
-observado pelo cliente, mas mantém sync por mutação, sem agrupar confirmações.
+Without AOF, the rehearsal measured 33,687 to 85,788 operations/s. With `always`
+AOF, it measured 665 to 945 operations/s. Four shards showed no consistent gain in
+this sample; global-writer sync dominated durable cost. Pipelining increases the
+batch observed by the client but retains sync per mutation, without grouping
+acknowledgments.
 
-São resultados exploratórios de loopback, sem aquecimento ou repetição estatística;
-clientes compartilham a máquina com o servidor. RSS é amostrado, não um pico.
-RTT é por lote, não a latência individual dos comandos de um pipeline. Não há
-comparação de velocidade com Redis ou promessa de desempenho em outro ambiente.
+These are exploratory loopback results, without warmup or statistical repetition;
+clients share the machine with the server. RSS is sampled, not a peak. RTT is per
+batch, not individual latency for pipelined commands. There is no speed comparison
+with Redis or performance promise in another environment.
 
-O comando histórico abaixo pertence ao SHA registrado acima. Para a candidata
-1.0, use o [gate de benchmarks do pacote](benchmarks.md), com aquecimento,
-três repetições e RSS observado durante a medição.
+The historical command below belongs to the SHA above. For the 1.0 candidate, use
+the [package benchmark gate](benchmarks.md), with warmup, three repetitions, and
+RSS observed during measurement.
 
-Para reproduzir o ensaio histórico no PowerShell, use um checkout separado
-daquele SHA, limpo e com destino novo:
+To reproduce the historical rehearsal in PowerShell, use a clean, separate checkout
+of that SHA and a new destination:
 
 ```powershell
 cargo test --locked --release --test shard_benchmark --no-run
-$env:SIDER_SHARD_BENCH_OUTPUT = Join-Path (Get-Location) 'target/R04-05-novo.json'
+$env:SIDER_SHARD_BENCH_OUTPUT = Join-Path (Get-Location) 'target/R04-05-new.json'
 cargo test --locked --release --test shard_benchmark -- --ignored --exact exploratory_shard_benchmark --nocapture
 ```
 
-Compile primeiro e execute a medição com a máquina livre de builds e outras cargas.
-Os marcos seguintes mantêm esta evidência vinculada ao SHA original.
+Build first and run measurement with the machine free of builds and other loads.
+Later milestones retain this evidence linked to the original SHA.

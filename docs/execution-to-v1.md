@@ -1,114 +1,114 @@
-# Execução acelerada até a v1.0
+# Accelerated execution through v1.0
 
-O escopo funcional da v1 permanece completo. Os marcos `R01` a `R10` são internos;
-somente `R11` publica candidata e final. A final promove exatamente o SHA e os
-arquivos aprovados na candidata. Fuzz permanece removido, e CI e publicação
-automática continuam desligadas.
+The full v1 functional scope remains intact. Milestones `R01` through `R10` are
+internal; only `R11` publishes a candidate and final release. The final release
+promotes exactly the SHA and files approved in the candidate. Fuzz remains removed,
+and CI and automatic publication remain disabled.
 
-Os IDs, dependências e critérios estão em [releases/plan.json](../releases/plan.json).
-O [ROADMAP](../ROADMAP.md) é gerado; as issues registram o estado operacional.
-O [guia de releases](releases.md) define os contratos de evidência e publicação.
+IDs, dependencies, and criteria are in [releases/plan.json](../releases/plan.json).
+The [ROADMAP](../ROADMAP.md) is generated; issues record operational status.
+The [release guide](releases.md) defines evidence and publication contracts.
 
-O PR de preparação identifica o pacote como `1.0.0`. A origem selecionada para
-a baseline interna R10 é o SHA `0021d875dde9da6cbbe9b5b84cd640681128e6ea`, ainda
-com pacote `0.1.0`. Seus arquivos, hashes e ensaios são registrados separadamente;
-a migração e os demais gates da candidata precisam executar no SHA do merge de
-preparação. O bump de versão não encerra esses critérios.
+The preparation PR identifies the package as `1.0.0`. The selected source for
+the internal R10 baseline is SHA `0021d875dde9da6cbbe9b5b84cd640681128e6ea`, still
+with package `0.1.0`. Its files, hashes, and tests are recorded separately;
+migration and the other candidate gates must run at the preparation merge SHA.
+The version bump does not close these criteria.
 
-## Checkpoints internos
+## Internal checkpoints
 
-- Preservar IDs, issues e milestones existentes. O campo `publication` distingue
-  marcos internos de releases publicáveis.
-- Fechar `R01-GATE` a `R10-GATE` após cumprir implementação e validação do marco,
-  sem candidata, empacotamento ou publicação como requisito do checkpoint.
-- Registrar resultados pelo ID da tarefa e SHA de origem. Não alterar a versão do
-  pacote a cada checkpoint nem atribuir resultados históricos a outro SHA.
-- Concluir `R01-GATE` com as entregas já verificadas. A candidata histórica
+- Preserve existing IDs, issues, and milestones. The `publication` field distinguishes
+  internal milestones from publishable releases.
+- Close `R01-GATE` through `R10-GATE` after completing milestone implementation and
+  validation, without requiring a candidate, packaging, or publication for the checkpoint.
+- Record results by task ID and source SHA. Do not change the package version at
+  each checkpoint or attribute historical results to another SHA.
+- Complete `R01-GATE` with the already verified deliverables. The historical
   [v0.1.0-rc.1](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1)
-  permanece intacta; não haverá outra candidata ou final da 0.1 neste fluxo.
-- Cada checkpoint depende das tarefas locais. `R11-GATE` depende de todos os
-  checkpoints internos e das tarefas finais.
+  candidate remains intact; this workflow will have no other 0.1 candidate or final release.
+- Each checkpoint depends on local tasks. `R11-GATE` depends on all internal
+  checkpoints and final tasks.
 
-## Execução por dependências técnicas
+## Execution by technical dependencies
 
-| Etapa | Trabalho | Condição de conclusão |
+| Stage | Work | Completion condition |
 | --- | --- | --- |
-| Fundação | R02: strings, opções de SET, TTL e quota | Semântica, overflow, expiração e rejeições sem mutação comprovados |
-| Frente A | R03: AOF; depois R04: shards e integração durável | Replay, compactação, falhas de escrita e operações entre shards verificados |
-| Frente B | R05: valores tipados e coleções; depois R06: sorted sets | Comandos, WRONGTYPE, TTL, quota e persistência integrados |
-| Frente C | R08: Pub/Sub; depois R07: transações | Clientes lentos isolados; WATCH e execução/persistência atômica dos lotes |
-| Integração final | R09: replicação, em paralelo com R10: operação e distribuição | Snapshot, retomada, promoção manual, backup/restauração e pacotes funcionais |
-| Estabilização | R11: auditoria, migração, carga e benchmarks | Escopo completo comprovado no build candidato |
+| Foundation | R02: strings, SET options, TTL, and quota | Verified semantics, overflow, expiration, and rejection without mutation |
+| Workstream A | R03: AOF; then R04: shards and durable integration | Verified replay, compaction, write failures, and cross-shard operations |
+| Workstream B | R05: typed values and collections; then R06: sorted sets | Integrated commands, WRONGTYPE, TTL, quota, and persistence |
+| Workstream C | R08: Pub/Sub; then R07: transactions | Isolated slow clients; WATCH and atomic batch execution/persistence |
+| Final integration | R09: replication, alongside R10: operations and distribution | Working snapshots, resumption, manual promotion, backup/restoration, and packages |
+| Stabilization | R11: audit, migration, load, and benchmarks | Full scope demonstrated in the candidate build |
 
-A ordem no JSON não cria dependências. O `xtask` valida referências e ciclos,
-mas só considera os vínculos técnicos explícitos; não injeta o gate anterior.
+JSON order does not create dependencies. `xtask` validates references and cycles,
+but considers only explicit technical links; it does not inject the previous gate.
 
-Um integrador coordena interfaces e merges; até três agentes trabalham em
-worktrees separados. Coleções começam após TTL/quota e sua integração durável
-espera o formato e replay do AOF. Pub/Sub pode usar a rede atual. Transações
-aguardam roteamento/execução por worker e, para concluir, lotes duráveis.
-Replicação precisa de sequência de mutações, snapshots e shards; sua aprovação
-cobre todos os tipos e transações.
+One integrator coordinates interfaces and merges; up to three agents work in
+separate worktrees. Collections start after TTL/quota and their durable integration
+waits for AOF format and replay. Pub/Sub can use the current networking layer.
+Transactions wait for routing/execution per worker and, to complete, durable batches.
+Replication needs mutation sequences, snapshots, and shards; its approval covers
+all types and transactions.
 
-Métricas e diagnóstico acompanham seus subsistemas. Backup depende de snapshot
-consistente; ensaios operacionais completos aguardam a integração. O integrador
-concentra contratos compartilhados: arrays/erros, entradas com TTL e contabilidade,
-mutações resolvidas, lotes e modos da conexão. Cada abstração tem consumidor real.
+Metrics and diagnostics accompany their subsystems. Backup depends on consistent
+snapshots; complete operational tests wait for integration. The integrator owns
+shared contracts: arrays/errors, entries with TTL and accounting, resolved
+mutations, batches, and connection modes. Every abstraction has a real consumer.
 
-Usar PRs por entrega coesa, podendo fechar várias issues relacionadas. Manter
-commits pequenos por responsabilidade com implementação e testes necessários
-juntos; integrar por merge commit após validação local.
+Use PRs for cohesive deliverables, potentially closing several related issues.
+Keep commits small by responsibility, with implementation and required tests
+together; integrate through a merge commit after local validation.
 
-## Validação proporcional
+## Proportionate validation
 
-| Momento | Validação |
+| When | Validation |
 | --- | --- |
-| Durante implementação | Testes focados no comportamento alterado |
-| Antes de integrar cada PR do banco | Uma execução de `cargo xtask check` sobre o diff final |
-| Ferramentas/plano | `cargo xtask check --tools` |
-| Novos comandos ou semântica | Diferenciais da família afetada contra a referência fixada |
-| Persistência, shards e transações | Falha, replay, migração e atomicidade afetados; Windows/Linux para filesystem |
-| Replicação e operação | Snapshot interrompido, sequências, reconexão, TTL, lotes, backup e restauração |
-| Candidata 1.0 | Matriz completa, pacotes extraídos, Docker, migração, soak de 3600 segundos e benchmarks |
+| During implementation | Focused tests for changed behavior |
+| Before integrating each database PR | One `cargo xtask check` run on the final diff |
+| Tools/plan | `cargo xtask check --tools` |
+| New commands or semantics | Affected-family differential tests against the pinned reference |
+| Persistence, shards, and transactions | Affected failure, replay, migration, and atomicity checks; Windows/Linux for filesystem behavior |
+| Replication and operations | Interrupted snapshots, sequences, reconnection, TTL, batches, backup, and restoration |
+| 1.0 candidate | Complete matrix, extracted packages, Docker, migration, 3600-second soak, and benchmarks |
 
-Executar uma bateria integrada ao concluir o núcleo durável com shards e
-transações. A próxima bateria completa será no build candidato da 1.0. Ensaios
-internos chamam as suítes diretamente e registram tarefa/SHA, sem exigir recibos
-ou pacotes de release. Implementar runners futuros junto das funcionalidades.
+Run an integrated suite when completing the durable core with shards and
+transactions. The next complete suite will run on the 1.0 candidate build.
+Internal tests call suites directly and record task/SHA, without requiring
+release receipts or packages. Implement future runners alongside their capabilities.
 
-Documentação isolada recebe revisão de texto, links e comandos. Interfaces e
-build também exigem `cargo doc --locked --no-deps` e
-`cargo build --locked --release`. Preservar caches e não repetir verificações
-aprovadas sem mudanças relevantes. Benchmarks rodam sem builds ou carga
-concorrentes na mesma máquina. Gate ausente, ignorado ou com falha fica pendente.
+Documentation-only changes receive text, link, and command review. Interfaces and
+build changes also require `cargo doc --locked --no-deps` and
+`cargo build --locked --release`. Preserve caches and do not repeat passed checks
+without relevant changes. Benchmarks run without concurrent builds or load on
+the same machine. A missing, skipped, or failed gate remains pending.
 
-## Baseline e publicação da 1.0
+## 1.0 baseline and publication
 
-1. Congelar uma baseline interna de R10 com executável, dados, configuração,
-   formato AOF, SHA e hashes. Ela substitui a exigência de uma 0.10 final publicada
-   no ensaio de migração para 1.0.
-2. Concluir documentação/notas, fixar o pacote em `1.0.0` e integrar o PR de
-   preparação. Construir e validar seu SHA exato.
-3. Produzir pacotes e recibos com versão `1.0.0`. O manifesto de artefatos v2 usa
-   `artifact_version: "1.0.0"`; tag e status no GitHub identificam `v1.0.0-rc.N`.
-4. Publicar a candidata privada, conferir downloads e registrar sua aprovação.
-5. Criar a tag final no mesmo SHA e publicar os mesmos arquivos, incluindo
-   manifesto, evidências e checksums. Não recompilar, reempacotar ou repetir o soak.
-6. Registrar a conferência da promoção fora do conjunto imutável. Qualquer mudança
-   nesse conjunto exige outra candidata.
+1. Freeze an internal R10 baseline with executable, data, configuration, AOF format,
+   SHA, and hashes. It replaces the requirement for a published 0.10 final release
+   in the migration test to 1.0.
+2. Complete documentation/notes, set the package to `1.0.0`, and integrate the
+   preparation PR. Build and validate its exact SHA.
+3. Produce packages and receipts with version `1.0.0`. Artifact manifest v2 uses
+   `artifact_version: "1.0.0"`; the GitHub tag and status identify `v1.0.0-rc.N`.
+4. Publish the private candidate, verify downloads, and record approval.
+5. Create the final tag at the same SHA and publish the same files, including
+   manifest, evidence, and checksums. Do not rebuild, repackage, or repeat the soak.
+6. Record promotion verification outside the immutable set. Any change to that
+   set requires another candidate.
 
-O verificador aceita RC e final para o mesmo build e rejeita divergências de
-versão, SHA e hashes. Conferir a origem dos bytes e a aprovação remota continua
-parte da publicação manual, não uma autorização inferida do verificador local.
+The verifier accepts RC and final release for the same build and rejects version,
+SHA, and hash mismatches. Checking byte provenance and remote approval remains
+part of manual publication, not authorization inferred from the local verifier.
 
-A execução termina quando todas as capacidades estiverem comprovadas, a final
-1.0 publicada e seus arquivos conferidos. Repositório e artefatos permanecem
-privados; `publish = false`, Rust, RESP2 binário, workers proprietários, canais
-limitados e suporte Linux/Windows permanecem obrigatórios.
+Execution ends when all capabilities are demonstrated, final 1.0 is published,
+and its files are verified. Repository and artifacts remain private;
+`publish = false`, Rust, binary RESP2, owning workers, bounded channels,
+and Linux/Windows support remain mandatory.
 
-## Fora do escopo até a 1.0
+## Out of scope through 1.0
 
-Redis Cluster, Sentinel, failover automático, resharding online, RESP3, Lua,
-operações bloqueantes, transações entre shards, TLS e ACL. A replicação é
-assíncrona entre instâncias Sider da mesma versão e configuração de shards,
-com promoção manual em ambiente controlado.
+Redis Cluster, Sentinel, automatic failover, online resharding, RESP3, Lua,
+blocking operations, cross-shard transactions, TLS, and ACL. Replication is
+asynchronous between Sider instances with the same version and shard configuration,
+with manual promotion in a controlled environment.

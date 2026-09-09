@@ -2,101 +2,101 @@
 
 ## [Unreleased]
 
-## [1.0.0] - Preparação da candidata
+## [1.0.0] - Candidate preparation
 
-O pacote identifica `1.0.0`; a candidata e a final usam o mesmo build e arquivos.
-As [notas da versão](releases/notes/v1.0.0.md) descrevem capacidades e limites.
-A aprovação depende dos gates do SHA exato e do conjunto de evidências produzido
-para ele; esta seção não declara publicação ou gates aprovados.
+The package identifies itself as `1.0.0`; the candidate and final release use the same build and files.
+The [release notes](releases/notes/v1.0.0.md) describe capabilities and limitations.
+Approval depends on gates for the exact SHA and the evidence set produced for it;
+this section does not declare publication or passing gates.
 
-- Transações de um shard com `MULTI`, `EXEC`, `DISCARD`, `WATCH` e `UNWATCH`;
-  validação antes de aplicar, um lote AOF por EXEC e erros individuais sem rollback.
-  Publicações em transações preservam a ordem após aplicar o lote confirmado
-  segundo a política AOF configurada.
-- Replicação assíncrona Sider → Sider com snapshot, histórico limitado,
-  reconexão por FULL/CONTINUE, réplica somente leitura e promoção manual durável.
-  O cabeçalho AOF v3 preserva papel e época; leitores atuais mantêm suporte a v1/v2.
-- `sider-backup` exporta snapshots consistentes durante tráfego, confere manifesto
-  e checksums e restaura em diretório novo, preservando tipos, lotes e TTL absoluto.
-- `INFO`, seções operacionais e `sider --diagnose` para métricas, filas, persistência,
-  replicação e validação da configuração sem iniciar listeners.
-- Pacotes Windows/Linux com quatro executáveis: servidor, migrador AOF,
-  backup e administração de réplica. Imagem Docker privada usa os binários do
-  pacote, usuário sem privilégio, persistência e ensaio real de exportação/load.
-- Matriz completa de compatibilidade e auditoria diferencial de sequências
-  entre tipos, TTL, transações e Pub/Sub, com seeds fixas e contagens próprias.
-- Runners de soak de 3600 segundos e benchmarks do pacote extraído, com amostras,
-  hashes e limites documentados. Aprovação depende da execução no build candidato.
-- Hashes, listas, sets e sorted sets binários, com WRONGTYPE, TTL e quota atômica;
-  AOF preserva postimages tipadas, scores e deadlines em replay/compactação.
-- Diferenciais de coleções e ordenação contra Redis; conversão de scores em Rust
-  seguro baseada no fpconv sob Boost 1.0, com avisos de licença preservados.
+- Single-shard transactions with `MULTI`, `EXEC`, `DISCARD`, `WATCH`, and `UNWATCH`;
+  validation before application, one AOF batch per EXEC, and individual errors without rollback.
+  Publications in transactions preserve order after applying the batch acknowledged
+  according to the configured AOF policy.
+- Asynchronous Sider → Sider replication with snapshots, bounded history,
+  FULL/CONTINUE reconnection, read-only replicas, and durable manual promotion.
+  The AOF v3 header preserves role and epoch; current readers retain v1/v2 support.
+- `sider-backup` exports consistent snapshots during traffic, checks the manifest
+  and checksums, and restores into a new directory, preserving types, batches, and absolute TTL.
+- `INFO`, operational sections, and `sider --diagnose` for metrics, queues, persistence,
+  replication, and configuration validation without starting listeners.
+- Windows/Linux packages with four executables: server, AOF migrator,
+  backup, and replica administration. The private Docker image uses the package binaries,
+  an unprivileged user, persistence, and an actual export/load test.
+- Complete compatibility matrix and differential audit of sequences across
+  types, TTL, transactions, and Pub/Sub, with fixed seeds and separate counts.
+- 3600-second soak and benchmark runners for the extracted package, with samples,
+  hashes, and documented limits. Approval depends on execution against the candidate build.
+- Binary hashes, lists, sets, and sorted sets, with WRONGTYPE, TTL, and atomic quota;
+  AOF preserves typed postimages, scores, and deadlines during replay/compaction.
+- Collection and ordering differential tests against Redis; safe Rust score conversion
+  based on fpconv under Boost 1.0, with license notices preserved.
 
-- AOF binário com checksum, lotes resolvidos, sync configurável, recuperação antes
-  do bind, compactação global e rejeição recuperável de registros excessivos.
-- Metadados de shards no formato AOF v2, leitor legado v1 e migração offline
-  explícita com `sider-aof-migrate`. Snapshots aguardam apply de pedidos aceitos.
-- Testes de crash/migração nas duas plataformas e medição exploratória TCP de R04.
+- Binary AOF with checksums, resolved batches, configurable sync, recovery before
+  binding, global compaction, and recoverable rejection of oversized records.
+- Shard metadata in AOF v2, a legacy v1 reader, and explicit offline migration
+  with `sider-aof-migrate`. Snapshots wait for accepted requests to be applied.
+- Crash/migration tests on both platforms and exploratory R04 TCP measurements.
 
-- SUBSCRIBE, UNSUBSCRIBE, PUBLISH e PING no modo assinante, com canais binários,
-  filas limitadas e cleanup em fila cheia, timeout, EOF, cancelamento e shutdown.
-  Mensagens efêmeras permanecem separadas do dataset e do AOF.
-- Shards fixos com workers e filas independentes, hash binário estável e hash tags.
-  Comandos multichave entre shards são rejeitados antes do enqueue; quota total
-  é dividida entre workers e conferida novamente durante a recuperação do AOF.
-- Strings adicionais (`EXISTS`, `INCR`, `DECR`, `MGET`, `MSET`) e SET com NX, XX,
-  EX, PX, GET e KEEPTTL, com overflow e rejeições sem alterações parciais.
-- EXPIRE, PEXPIRE, TTL, PTTL e PERSIST; relógio injetável e limpeza ativa limitada.
-- Quota lógica configurável do dataset, padrão 64 MiB, com contabilidade de lotes
-  pelo estado final e rejeição de crescimento sem eviction.
-- Diferenciais R02 contra Redis 8.10.1 e regressões de tempo, quota e limites TCP.
-- Ferramentas locais de planejamento, backlog, verificação e integridade de
-  artefatos em Rust, acessíveis por `cargo xtask` e isoladas do servidor.
-- Remoção dos helpers Python e workflows arquivados. Publicação continua manual;
-  CI permanece adiada para depois da 1.0.
-- Ciclo curto com testes focados e checks separados para banco e ferramentas,
-  sem executar gates externos a cada edição ou duplicar check e Clippy.
-- Remoção completa da estrutura, dependências e gate de fuzz. Permanecem os
-  testes nativos, de propriedades, diferenciais e de pacotes extraídos.
-- Marcos R01–R10 internos, checkpoints técnicos e dependências explícitas,
-  preservando IDs e escopo. Somente R11 publica candidata e final.
-- Manifesto de artefatos v2: o build já usa `1.0.0` na candidata, e a final promove
-  o mesmo SHA e arquivos. Divergências de identidade ou hashes são rejeitadas.
-- Contrato de migração para 1.0 a partir de baseline interna R10, sem publicação intermediária.
-- Congelamento e migração por pacotes extraídos, com proveniência observacional,
-  inventário imutável, cinco tipos, EXEC, TTL durante a parada, backup/restauração
-  e recriação de réplica da mesma versão. A baseline R10 mantém o pacote `0.1.0`.
+- SUBSCRIBE, UNSUBSCRIBE, PUBLISH, and PING in subscriber mode, with binary channels,
+  bounded queues, and cleanup on full queues, timeouts, EOF, cancellation, and shutdown.
+  Ephemeral messages remain separate from the dataset and AOF.
+- Fixed shards with independent workers and queues, stable binary hashing, and hash tags.
+  Multikey commands across shards are rejected before enqueue; the total quota
+  is divided among workers and checked again during AOF recovery.
+- Additional strings (`EXISTS`, `INCR`, `DECR`, `MGET`, `MSET`) and SET with NX, XX,
+  EX, PX, GET, and KEEPTTL, with overflow and rejection causing no partial changes.
+- EXPIRE, PEXPIRE, TTL, PTTL, and PERSIST; injectable clock and bounded active cleanup.
+- Configurable logical dataset quota, defaulting to 64 MiB, with batch accounting
+  based on final state and growth rejection without eviction.
+- R02 differential tests against Redis 8.10.1 and time, quota, and TCP limit regressions.
+- Local planning, backlog, validation, and artifact integrity tools in Rust,
+  accessible through `cargo xtask` and isolated from the server.
+- Removal of Python helpers and archived workflows. Publication remains manual;
+  CI remains deferred until after 1.0.
+- A short cycle with focused tests and separate database/tool checks,
+  without running external gates after every edit or duplicating check and Clippy.
+- Complete removal of the fuzz infrastructure, dependencies, and gate. Native,
+  property, differential, and extracted-package tests remain.
+- Internal R01–R10 milestones, technical checkpoints, and explicit dependencies,
+  preserving IDs and scope. Only R11 publishes a candidate and final release.
+- Artifact manifest v2: the build already uses `1.0.0` in the candidate, and the final
+  release promotes the same SHA and files. Identity or hash mismatches are rejected.
+- Migration contract for 1.0 from an internal R10 baseline, without intermediate publication.
+- Baseline freezing and migration using extracted packages, with observed provenance,
+  an immutable inventory, five types, EXEC, TTL during downtime, backup/restoration,
+  and recreation of a replica running the same version. The R10 baseline retains package `0.1.0`.
 
-## [0.1.0] - Preparação anterior, não publicada
+## [0.1.0] - Previous preparation, unpublished
 
-- A preparação anterior foi encerrada sem publicação. O marco 0.1 passa a ser
-  um checkpoint interno; a candidata anterior permanece como registro histórico.
-- [Rascunho das notas da final](releases/notes/v0.1.0.md), incluindo o requisito do runtime
-  Visual C++ v14 Redistributable x64 para o executável Windows.
+- The previous preparation closed without publication. Milestone 0.1 becomes
+  an internal checkpoint; the earlier candidate remains a historical record.
+- [Draft final release notes](releases/notes/v0.1.0.md), including the
+  Visual C++ v14 Redistributable x64 runtime requirement for the Windows executable.
 
 ## [0.1.0-rc.1] - 2026-09-08
 
-- Primeira candidata funcional, com pacotes Linux GNU e Windows MSVC validados
-  após extração, README de distribuição e avisos das dependências incluídos.
-- Suíte diferencial independente Sider/Redis, integração com `redis-cli`,
-  testes de reutilização de conexões e gates locais em Rust com recibos verificados.
-- Alvo isolado de fuzz com AddressSanitizer, corpus versionado e execução mínima
-  de 900 segundos; ambiente local Ubuntu reproduzível para testes.
-- Worker proprietário e servidor RESP2/TCP, com filas e conexões limitadas,
-  timeouts, prontidão atômica e encerramento supervisionado.
-- Bootstrap Rust com configuração validada e testes.
-- Parsing e armazenamento síncrono de `PING`, `ECHO`, `GET`, `SET` básico e
-  `DEL`, com rejeição sem mutação, dados binários e respostas verificadas nas fixtures.
-- Codec RESP2 incremental e encoder atômico, com limites, dados binários,
-  fixtures literais, fragmentação e testes de propriedades.
-- Fixtures binárias e infraestrutura descartável de Redis/CLI 8.10.1, testadas
-  em Rust sem dependência do futuro codec Sider.
-- Licença MIT, mantendo o repositório e os artefatos privados.
-- Planejamento versionado, backlog sincronizável e ferramentas opcionais de release.
-- Validação e publicação manuais até a 1.0 inclusive; CI e publicação automática
-  adiadas para depois da 1.0.
+- First functional candidate, with Linux GNU and Windows MSVC packages validated
+  after extraction, a distribution README, and dependency notices included.
+- Independent Sider/Redis differential suite, `redis-cli` integration,
+  connection reuse tests, and local Rust gates with verified receipts.
+- Isolated fuzz target with AddressSanitizer, a versioned corpus, and a minimum
+  900-second run; reproducible local Ubuntu test environment.
+- Owning worker and RESP2/TCP server, with bounded queues and connections,
+  timeouts, atomic readiness, and supervised shutdown.
+- Rust bootstrap with validated configuration and tests.
+- Parsing and synchronous storage for `PING`, `ECHO`, `GET`, basic `SET`, and
+  `DEL`, with rejection without mutation, binary data, and fixture-verified responses.
+- Incremental RESP2 codec and atomic encoder, with limits, binary data,
+  literal fixtures, fragmentation, and property tests.
+- Binary fixtures and disposable Redis/CLI 8.10.1 infrastructure, tested
+  in Rust without depending on the future Sider codec.
+- MIT license, keeping the repository and artifacts private.
+- Versioned planning, synchronizable backlog, and optional release tools.
+- Manual validation and publication through and including 1.0; CI and automatic
+  publication deferred until after 1.0.
 
-As [notas da candidata](releases/notes/v0.1.0-rc.1.md) descrevem o subconjunto e suas
-limitações e preservam a política de validação vigente naquela publicação.
-A RC foi publicada e aprovada sob a política daquela revisão. Sua evidência não
-aprova os SHAs posteriores; o fluxo atual publica somente a candidata e a final 1.0.
+The [candidate notes](releases/notes/v0.1.0-rc.1.md) describe the subset and its
+limitations and preserve the validation policy in effect at that publication.
+The RC was published and approved under that revision's policy. Its evidence does
+not approve later SHAs; the current workflow publishes only the 1.0 candidate and final release.

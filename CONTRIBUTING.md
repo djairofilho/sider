@@ -1,42 +1,42 @@
-# Como contribuir com o Sider
+# Contributing to Sider
 
-O desenvolvimento segue o [ROADMAP](ROADMAP.md), cujo manifesto é
-[releases/plan.json](releases/plan.json). Os contratos da 0.1 estão em
-[PLANO.md](PLANO.md). Cada entrega deve compilar, passar nas verificações
-disponíveis e documentar seu comportamento real. Uma etapa só termina quando
-seus critérios de saída forem verificados.
+Development follows the [ROADMAP](ROADMAP.md), backed by
+[releases/plan.json](releases/plan.json). The 0.1 contracts are in
+[PLANO.md](PLANO.md). Each deliverable must compile, pass the available checks,
+and document its actual behavior. A stage ends only when its exit criteria
+have been verified.
 
-## Preparar o ambiente
+## Preparing the environment
 
-Use `rustup` com a toolchain declarada em
-[rust-toolchain.toml](rust-toolchain.toml). Execute os comandos Cargo na raiz e
-preserve `Cargo.lock`, pois o projeto distribui um binário. Atualize dependências
-de forma deliberada e revise as mudanças no lockfile.
+Use `rustup` with the toolchain declared in
+[rust-toolchain.toml](rust-toolchain.toml). Run Cargo commands at the repository root and
+preserve `Cargo.lock`, since the project distributes a binary. Update dependencies
+deliberately and review lockfile changes.
 
-Os testes nativos não exigem Redis, Docker ou um serviço externo em execução.
-Os diferenciais têm instruções próprias e execução explícita.
+Native tests do not require Redis, Docker, or a running external service.
+Differential tests have separate instructions and must be run explicitly.
 
-O desenvolvimento, os testes e as ferramentas próprias usam Rust. O utilitário
-`xtask/` tem seu próprio manifesto e lockfile, sem dependências no servidor.
-Operações no GitHub usam `gh` autenticado na conta com acesso ao repositório privado.
+Development, tests, and project tools use Rust. The `xtask/` utility has its own
+manifest and lockfile, without adding dependencies to the server.
+GitHub operations use `gh` authenticated with an account that can access the private repository.
 
-CI e publicação automática ficam adiadas para depois da 1.0. Os workflows e helpers
-Python foram removidos. Uma futura CI deverá chamar os comandos Rust existentes.
+CI and automatic publication are deferred until after 1.0. The workflows and Python
+helpers were removed. Future CI must call the existing Rust commands.
 
-## Fluxo de trabalho
+## Workflow
 
-1. Selecione uma issue desbloqueada pelas dependências técnicas, atualize a branch
-   `main` e abra uma branch com uma responsabilidade clara, como
-   `feat/resp2-decoder` ou `docs/compatibility-matrix`.
-2. Implemente uma parte revisável da etapa, com os testes necessários para provar
-   o comportamento. Crie módulos conforme surgirem consumidores reais.
-3. Execute as verificações locais e confira o diff, incluindo arquivos novos.
-4. Organize commits atômicos. Cada commit deve deixar o projeto compilando e com
-   as verificações disponíveis passando.
-5. Abra um pull request para `main` vinculado à issue, descrevendo o problema, o
-   comportamento resultante, os testes executados e eventuais limites conhecidos.
-6. Integre por merge commit após validação local, sem aguardar CI. Atualize a matriz
-   de compatibilidade e as notas conforme cada capacidade for comprovada.
+1. Select an issue unblocked by its technical dependencies, update `main`, and create
+   a branch with a clear responsibility, such as `feat/resp2-decoder` or
+   `docs/compatibility-matrix`.
+2. Implement a reviewable part of the stage, with the tests needed to establish
+   its behavior. Create modules as real consumers arise.
+3. Run local checks and inspect the diff, including new files.
+4. Organize atomic commits. Each commit must leave the project compiling and
+   passing the available checks.
+5. Open a pull request to `main` linked to the issue, describing the problem,
+   resulting behavior, tests run, and any known limitations.
+6. Integrate with a merge commit after local validation, without waiting for CI.
+   Update the compatibility matrix and notes as each capability is demonstrated.
 
 Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
 
@@ -46,96 +46,96 @@ test(resp): cover fragmented bulk strings
 docs(compatibility): record supported command forms
 ```
 
-Separe responsabilidades independentes quando cada parte puder ser revisada e
-revertida sozinha. Mantenha o código junto de seus testes e artefatos gerados
-necessários. A integração de pull requests usa merge commit por padrão.
+Separate independent responsibilities when each part can be reviewed and reverted
+on its own. Keep code together with its tests and required generated artifacts.
+Pull requests use merge commits by default.
 
-## Verificações locais
+## Local checks
 
-Durante a implementação, use o teste afetado; antes de integrar, rode o check local:
+During implementation, use the affected test; before integrating, run the local check:
 
 ```sh
-cargo test --locked <filtro>
+cargo test --locked <filter>
 cargo xtask check
 ```
 
-`check` executa fmt, Clippy, build do binário real e testes nativos, interrompendo
-na primeira falha. Clippy já verifica os targets, sem outro `cargo check` redundante.
-Não inicia Docker ou publicação. Preserve caches Cargo; não limpe `target/`
-como parte normal de cada tarefa. Amplie a validação conforme a responsabilidade:
+`check` runs fmt, Clippy, the actual binary build, and native tests, stopping at
+the first failure. Clippy already checks the targets, without another redundant
+`cargo check`. It does not start Docker or publish anything. Preserve Cargo caches;
+do not clear `target/` as a routine part of each task. Extend validation according to scope:
 
 ```sh
-# Interfaces, documentação de API ou configuração de build
+# Interfaces, API documentation, or build configuration
 cargo doc --locked --no-deps
 cargo build --locked --release
 
-# Somente ao alterar o manifesto ou as ferramentas de backlog/releases
+# Only when changing the manifest or backlog/release tools
 cargo xtask check --tools
 ```
 
-`check --tools` testa apenas o utilitário e valida o plano e o roadmap; não repete
-a suíte do banco. Documentação isolada pede revisão de texto, links e comandos,
-não uma nova rodada de todos os testes sem mudança no código.
+`check --tools` tests only the utility and validates the plan and roadmap; it does
+not repeat the database suite. Documentation-only changes require reviewing text,
+links, and commands, without rerunning all tests when code has not changed.
 
-Não há execução automática em Linux ou Windows nesta fase. Antes de publicar uma
-release, execute manualmente todos os gates exigidos nas plataformas do manifesto.
-Uma aprovação em uma plataforma não substitui a outra. Registre comandos, SHA,
-ambiente, resultados e testes pendentes no PR ou na issue de publicação.
-Ferramenta ausente e teste não executado não contam como aprovação.
+There is no automatic Linux or Windows execution at this stage. Before publishing
+a release, manually run every required gate on the platforms in the manifest.
+A pass on one platform does not replace the other. Record commands, SHA,
+environment, results, and pending tests in the PR or publication issue.
+A missing tool or an unexecuted test does not count as a pass.
 
-## Testes e fronteiras
+## Tests and boundaries
 
-Teste primeiro a menor unidade que expõe o comportamento: configuração sem rede,
-codec sem armazenamento e armazenamento sem runtime. Use fixtures literais quando
-for necessário conferir os bytes do protocolo.
+Start with the smallest unit that exposes the behavior: configuration without
+networking, codec without storage, and storage without a runtime. Use literal
+fixtures when checking protocol bytes.
 
-Nos testes de configuração, passe valores explicitamente para o parser ou execute
-o binário em um processo filho com ambiente próprio. Não altere o ambiente global
-do processo de testes com `std::env::set_var` ou `std::env::remove_var`: isso
-introduz interferência entre testes paralelos e exige `unsafe` na Edition 2024.
+In configuration tests, pass values explicitly to the parser or run the binary in
+a child process with its own environment. Do not modify the test process's global
+environment with `std::env::set_var` or `std::env::remove_var`: this interferes
+with parallel tests and requires `unsafe` in Edition 2024.
 
-Nos testes de TCP, use portas efêmeras e sincronização explícita.
-Não dependa de uma porta fixa disponível ou de pausas arbitrárias para coordenar
-tarefas. Comparações com Redis devem usar instâncias descartáveis e uma versão de
-referência registrada na matriz de compatibilidade.
+In TCP tests, use ephemeral ports and explicit synchronization. Do not depend on
+a fixed port being available or arbitrary sleeps to coordinate tasks.
+Redis comparisons must use disposable instances and a reference version recorded
+in the compatibility matrix.
 
-## Código e documentação
+## Code and documentation
 
-O código próprio proíbe `unsafe`. Trate entradas inválidas com erros tipados e
-evite panics no caminho de dados do cliente. Introduza dependências quando houver
-uso concreto e mantenha suas funcionalidades habilitadas no mínimo necessário.
+Project code forbids `unsafe`. Handle invalid input with typed errors and avoid
+panics in the client data path. Introduce dependencies when they have concrete
+uses and enable only the required features.
 
-Escreva a documentação em português brasileiro com acentos corretos. Preserve
-identificadores, caminhos e comandos. Antes de enviar uma alteração, confira se
-o texto não contém caracteres corrompidos por codificação.
+Write documentation in English with correct spelling and punctuation. Preserve
+identifiers, paths, and commands. Before submitting a change, check the text for
+characters corrupted by encoding errors.
 
-Atualize [docs/architecture.md](docs/architecture.md) quando uma fronteira mudar e
-[docs/compatibility.md](docs/compatibility.md) quando houver evidência nova de
-comportamento compatível. Registre funcionalidades planejadas como planejadas;
-não marque uma etapa inteira como concluída por ter implementado apenas parte dela.
+Update [docs/architecture.md](docs/architecture.md) when a boundary changes and
+[docs/compatibility.md](docs/compatibility.md) when there is new evidence of
+compatible behavior. Label planned functionality as planned; do not mark an entire
+stage complete after implementing only part of it.
 
-## Backlog e releases
+## Backlog and releases
 
-Edite o manifesto e regenere sua projeção com `cargo xtask roadmap --write`.
-IDs como `R01-01` são estáveis e não devem ser reutilizados. Datas de milestones
-não são obrigatórias. R01–R10 são marcos internos, com checkpoints técnicos e
-evidências por tarefa/SHA. Somente R11 publica candidata e final neste fluxo.
+Edit the manifest and regenerate its projection with `cargo xtask roadmap --write`.
+IDs such as `R01-01` are stable and must not be reused. Milestone dates are optional.
+R01–R10 are internal milestones with technical checkpoints and evidence by task/SHA.
+Only R11 publishes a candidate and final release in this workflow.
 
-O modo padrão apresenta a sincronização planejada; `--apply` grava no GitHub:
+The default mode displays the planned synchronization; `--apply` writes to GitHub:
 
 ```sh
 cargo xtask sync
 cargo xtask sync --apply
 ```
 
-Quando todas as tarefas funcionais estiverem concluídas, prepare as notas UTF-8
-e a candidata 1.0 conforme o [guia de releases](docs/releases.md). O merge do PR
-`chore/release-v1.0.0`, com label `type:release`, não publica nada. O pacote já usa
-`1.0.0` na candidata. A final promove o mesmo SHA e os mesmos arquivos aprovados,
-sem recompilar, reempacotar ou repetir gates. Mudança no conjunto exige nova RC.
+When all functional tasks are complete, prepare the UTF-8 notes and 1.0 candidate
+according to the [release guide](docs/releases.md). Merging the `chore/release-v1.0.0`
+PR, labeled `type:release`, publishes nothing. The package already uses `1.0.0`
+in the candidate. The final release promotes the same SHA and approved files,
+without rebuilding, repackaging, or rerunning gates. A bundle change requires a new RC.
 
-Teste obrigatório ausente, ignorado, cancelado ou sem evidência bloqueia a release.
-Nenhuma release funcional é criada para o bootstrap. Marcos internos encerram após
-validar seus critérios técnicos. O milestone 1.0 encerra após conferir a publicação
-final, pacotes privados Linux/Windows e imagem Docker exportada. Publicação da
-crate permanece desabilitada.
+A required test that is missing, skipped, canceled, or lacks evidence blocks the release.
+No functional release is created for the bootstrap. Internal milestones close after
+their technical criteria have been validated. The 1.0 milestone closes after verifying
+the final publication, private Linux/Windows packages, and exported Docker image.
+Crate publication remains disabled.

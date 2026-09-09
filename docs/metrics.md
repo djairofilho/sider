@@ -1,16 +1,16 @@
-# Métricas e diagnóstico operacional
+# Metrics and operational diagnostics
 
-O Sider expõe indicadores da instância pelo comando `INFO` e imprime a
-configuração efetiva com `sider --diagnose`. Não há listener HTTP, exporter,
-arquivo periódico de métricas nem rótulos derivados de chaves ou canais.
+Sider exposes instance indicators through `INFO` and prints effective
+configuration with `sider --diagnose`. There is no HTTP listener, exporter,
+periodic metrics file, or labels derived from keys or channels.
 
-- [Consultar a instância](#consultar-a-instância)
-- [Validar a configuração sem iniciar o banco](#validar-a-configuração-sem-iniciar-o-banco)
-- [Contrato dos indicadores](#contrato-dos-indicadores)
-- [Procedimentos de diagnóstico](#procedimentos-de-diagnóstico)
-- [Verificação reproduzível](#verificação-reproduzível)
+- [Querying the instance](#querying-the-instance)
+- [Validating configuration without starting the database](#validating-configuration-without-starting-the-database)
+- [Indicator contract](#indicator-contract)
+- [Diagnostic procedures](#diagnostic-procedures)
+- [Reproducible verification](#reproducible-verification)
 
-## Consultar a instância
+## Querying the instance
 
 ```sh
 redis-cli -h 127.0.0.1 -p 6379 INFO
@@ -20,265 +20,263 @@ redis-cli -h 127.0.0.1 -p 6379 INFO replication persistence
 redis-cli -h 127.0.0.1 -p 6379 INFO config
 ```
 
-A resposta é uma bulk string RESP2, com títulos `# Section` e linhas
-`nome:valor` terminadas em CRLF. As seções disponíveis são `server`, `clients`,
-`stats`, `memory`, `persistence`, `replication` e `config`. Os nomes não distinguem caixa ASCII;
-repetições não duplicam a saída. Sem argumentos, ou com `all`, `default` ou
-`everything`, todas as seções são selecionadas. Nomes desconhecidos são
-ignorados; uma seleção inteiramente desconhecida produz uma string vazia.
+The response is a RESP2 bulk string, with `# Section` headings and
+`name:value` lines terminated by CRLF. Available sections are `server`, `clients`,
+`stats`, `memory`, `persistence`, `replication`, and `config`. Names are ASCII
+case-insensitive; repetitions do not duplicate output. Without arguments, or with
+`all`, `default`, or `everything`, all sections are selected. Unknown names
+are ignored; an entirely unknown selection produces an empty string.
 
-A sintaxe de seleção segue a [interface INFO do Redis](https://redis.io/docs/latest/commands/info/).
-O conteúdo é um contrato próprio do Sider, identificado por
-`metrics_schema_version:1`; não reproduz todos os campos ou seções do Redis.
-Ferramentas que exigem campos Redis específicos precisam de adaptação.
+Selection syntax follows the [Redis INFO interface](https://redis.io/docs/latest/commands/info/).
+Content is a Sider-specific contract, identified by `metrics_schema_version:1`;
+it does not reproduce all Redis fields or sections.
+Tools requiring specific Redis fields need adaptation.
 
-`INFO` não entra na fila do worker em uma conexão normal. Uma conexão já
-admitida pode consultá-lo durante saturação da fila. O comando continua sujeito
-ao limite de conexões, às restrições do modo assinante e aos limites de resposta
-e escrita do [contrato de rede](network.md). Se a resposta inteira não couber,
-a conexão fecha sem escrever um prefixo parcial. Se apenas uma seção interessar,
-selecione-a para reduzir o tamanho da resposta.
+`INFO` does not enter the worker queue on a normal connection. An already admitted
+connection can query it during queue saturation. The command remains subject to
+connection limits, subscriber mode restrictions, and response/write limits from
+the [network contract](network.md). If the whole response does not fit, the
+connection closes without writing a partial prefix. If only one section matters,
+select it to reduce response size.
 
-Dentro de `MULTI`, `INFO` é enfileirado e executado com `EXEC`. O diagnóstico
-descreve o estado confirmado quando o worker monta as respostas do lote, após
-aplicar suas mutações. Não é uma fotografia do ponto intermediário de cada
-comando da fila. A consulta não acrescenta um registro AOF. As regras de
-[transações](transactions.md), inclusive limites do agregado RESP2, permanecem.
+Inside `MULTI`, `INFO` is queued and executed with `EXEC`. Diagnostics describe
+the committed state when the worker assembles batch responses, after applying
+its mutations. It is not a snapshot of each queued command's intermediate point.
+The query adds no AOF record. [Transaction](transactions.md) rules, including
+aggregate RESP2 limits, still apply.
 
-O servidor ainda não oferece autorização administrativa para esse comando.
-Use a exposição existente da instância apenas no ambiente controlado previsto
-para o projeto. A saída não contém chaves, valores, nomes de canais, caminhos de
-arquivos ou valores inválidos de configuração.
+The server does not yet provide administrative authorization for this command.
+Use the instance's existing exposure only in the project's intended controlled
+environment. Output contains no keys, values, channel names, file paths, or
+invalid configuration values.
 
-## Validar a configuração sem iniciar o banco
+## Validating configuration without starting the database
 
 ```sh
 cargo run --locked -- --diagnose
 ```
 
-O binário carrega e valida as mesmas variáveis `SIDER_*` da inicialização,
-imprime versão, endereço configurado, limites e política AOF, e termina com
-código zero. Uma configuração inválida termina com código diferente de zero e
-identifica a opção ou restrição, sem repetir o valor recebido.
+The binary loads and validates the same `SIDER_*` variables as startup, prints
+the version, configured address, limits, and AOF policy, and exits with code zero.
+Invalid configuration exits with a nonzero code and identifies the option or
+constraint without repeating the supplied value.
 
-O campo `diagnostic_scope:configuration_only` delimita essa verificação:
-nenhum runtime, listener, arquivo de prontidão ou diretório AOF é criado.
-Não há recuperação, truncamento, leitura de dados persistidos ou teste de
-conectividade. Por isso, uma porta ocupada ou diretório sem permissão pode
-coexistir com um diagnóstico de configuração válido. O comando não atesta
-prontidão, integridade da AOF, espaço em disco ou saúde de uma réplica.
+The `diagnostic_scope:configuration_only` field defines the check's scope:
+no runtime, listener, readiness file, or AOF directory is created.
+There is no recovery, truncation, persisted-data reading, or connectivity test.
+An occupied port or inaccessible directory can therefore coexist with a valid
+configuration diagnosis. The command does not attest to readiness, AOF integrity,
+disk space, or replica health.
 
 `ready_file_enabled`, `aof_configured`, `replication_configured`,
-`replication_upstream_configured` e `replication_ready_file_enabled` indicam
-presença das opções, sem imprimir caminhos nem endpoints de replicação. Os
-limites numéricos da replicação também são impressos quando configurados. Isso
-não determina o papel persistido da instância: uma promoção durável prevalece
-sobre a configuração de upstream. Em uma instância em execução, `tcp_port` informa a porta efetiva;
-no diagnóstico offline, `bind_addr` informa o endereço solicitado, inclusive
-porta zero quando configurada.
+`replication_upstream_configured`, and `replication_ready_file_enabled` indicate
+option presence without printing paths or replication endpoints.
+Numeric replication limits are also printed when configured. This does not
+determine the instance's persisted role: durable promotion takes precedence over
+upstream configuration. On a running instance, `tcp_port` gives the actual port;
+in offline diagnostics, `bind_addr` gives the requested address, including port
+zero when configured.
 
-## Contrato dos indicadores
+## Indicator contract
 
-Os nomes são fixos. Não existem labels por cliente, shard, chave ou canal.
-Os vetores internos têm o número configurado de shards, limitado a 256; não
-crescem com o dataset. Os contadores usam incrementos atômicos saturados em
-`u64::MAX` e reiniciam quando a instância é recriada. As sequências e a geração
-AOF vêm do escritor real e podem ser restauradas de uma execução anterior.
+Names are fixed. There are no per-client, shard, key, or channel labels.
+Internal vectors have the configured shard count, limited to 256; they do not
+grow with the dataset. Counters use atomic increments saturating at `u64::MAX`
+and reset when the instance is recreated. AOF sequences and generation come from
+the actual writer and may be restored from a previous run.
 
-Cada subsistema fornece uma observação curta, sem I/O de arquivos ou sockets.
-A leitura inteira não é uma barreira global: comandos concorrentes podem mudar
-o estado entre campos ou shards. Gauges de dataset são publicados após `apply`;
-preparar uma operação ou rejeitá-la por quota/AOF não publica um estado futuro.
-As filas são medidas em pedidos, sem incluir o pedido já retirado para execução.
-Uma transação aceita ocupa um pedido, mesmo contendo vários comandos.
+Each subsystem provides a short observation, without file or socket I/O.
+The entire read is not a global barrier: concurrent commands can change state
+between fields or shards. Dataset gauges are published after `apply`;
+preparing an operation or rejecting it for quota/AOF does not publish future state.
+Queues are measured in requests, excluding the request already removed for execution.
+An accepted transaction occupies one request, even when it contains multiple commands.
 
-### Servidor, conexões e comandos
+### Server, connections, and commands
 
-| Campo | Unidade e definição |
+| Field | Unit and definition |
 | --- | --- |
-| `sider_version` | Versão Cargo do binário; não identifica aprovação de release |
-| `metrics_schema_version` | Versão do contrato de métricas, atualmente `1` |
-| `uptime_seconds` | Segundos monotônicos desde a criação do coletor da instância |
-| `tcp_port` | Porta efetiva do listener |
-| `connected_clients` | Tarefas de conexão ativas; drop, cancelamento e EOF liberam o gauge |
-| `total_connections_received` | Conexões admitidas que iniciaram sua tarefa de atendimento |
-| `rejected_connections` | Conexões recusadas pelo limite simultâneo |
-| `commands_received_total` | Frames completos entregues ao parser, inclusive comandos inválidos e controles transacionais |
-| `command_error_replies_total` | Frames de erro de comando produzidos para resposta; inclui erros individuais de EXEC, mas não confirma entrega ao cliente |
-| `protocol_errors_total` | Conexões encerradas por codec, formato inválido, EOF truncado, buffer de entrada ou prazo de formação do frame |
-| `connection_failures_total` | Falhas que encerram atendimento, mais falhas ao configurar o socket; parada normal e cancelamento externo não contam |
-| `client_write_timeouts_total` | Conexões encerradas pelo prazo de escrita |
-| `response_encoding_failures_total` | Conexões encerradas porque a resposta não pôde ser codificada nos limites |
+| `sider_version` | Binary Cargo version; does not identify release approval |
+| `metrics_schema_version` | Metrics contract version, currently `1` |
+| `uptime_seconds` | Monotonic seconds since instance collector creation |
+| `tcp_port` | Actual listener port |
+| `connected_clients` | Active connection tasks; drop, cancellation, and EOF release the gauge |
+| `total_connections_received` | Admitted connections that started their serving task |
+| `rejected_connections` | Connections rejected by the simultaneous limit |
+| `commands_received_total` | Complete frames delivered to the parser, including invalid commands and transaction controls |
+| `command_error_replies_total` | Command-error frames produced for replies; includes individual EXEC errors but does not confirm client delivery |
+| `protocol_errors_total` | Connections closed for codec errors, invalid format, truncated EOF, input buffer limits, or frame assembly deadlines |
+| `connection_failures_total` | Failures ending service, plus socket configuration failures; normal shutdown and external cancellation do not count |
+| `client_write_timeouts_total` | Connections closed by the write deadline |
+| `response_encoding_failures_total` | Connections closed because the response could not be encoded within limits |
 
-Um comando recebido dentro de `MULTI` conta uma vez ao chegar, mesmo que seja
-descartado depois. `EXEC` conta como outra requisição; os comandos da fila não
-são contados novamente ao executar. Um frame recusado pelo codec antes de
-ficar completo não incrementa `commands_received_total`. O erro genérico de
-protocolo é classificado em `protocol_errors_total`, sem ser confundido com
-erro de execução de comando.
+A command received inside `MULTI` counts once upon arrival, even if later discarded.
+`EXEC` counts as another request; queued commands are not counted again during execution.
+A frame rejected by the codec before completion does not increment
+`commands_received_total`. Generic protocol errors are classified in
+`protocol_errors_total`, distinct from command execution errors.
 
-### Filas, dataset, expiração e Pub/Sub
+### Queues, dataset, expiration, and Pub/Sub
 
-| Campo | Unidade e definição |
+| Field | Unit and definition |
 | --- | --- |
-| `worker_requests_accepted_total` | Envios concluídos às filas de workers, inclusive lotes e WATCH |
-| `worker_timeouts_total` | Pedidos cujo chamador observou o prazo total excedido, antes ou depois da aceitação |
-| `worker_failures_total` | Pedidos cujo chamador observou `Unavailable` |
-| `worker_queue_used` | Soma observada dos pedidos aguardando nos canais |
-| `worker_queue_capacity` | Soma das capacidades fixas desses canais |
-| `dataset_keys` | Entradas físicas, inclusive expiradas ainda não retiradas |
-| `dataset_expiring_keys` | Eventos presentes nos índices de expiração |
-| `dataset_logical_bytes` | Soma do consumo lógico contabilizado pelo Store |
-| `dataset_quota_bytes` | Soma das quotas lógicas atribuídas aos Stores |
-| `expiration_batches_total` | Lotes não vazios de origem `Expiration` aplicados |
-| `expiration_batch_keys_removed_total` | Tombstones aplicados nesses lotes de expiração |
-| `pubsub_channels` | Canais com pelo menos uma inscrição |
-| `pubsub_subscribers` | Conexões com pelo menos uma inscrição |
-| `pubsub_subscriptions` | Pares únicos conexão/canal ativos |
-| `pubsub_deliveries_total` | Filas de assinantes que aceitaram notificações |
-| `pubsub_evictions_total` | Assinantes removidos quando `try_send` recusou uma notificação |
+| `worker_requests_accepted_total` | Completed sends to worker queues, including batches and WATCH |
+| `worker_timeouts_total` | Requests whose caller observed the total deadline exceeded, before or after acceptance |
+| `worker_failures_total` | Requests whose caller observed `Unavailable` |
+| `worker_queue_used` | Observed sum of requests waiting in channels |
+| `worker_queue_capacity` | Sum of those channels' fixed capacities |
+| `dataset_keys` | Physical entries, including expired entries not yet removed |
+| `dataset_expiring_keys` | Events present in expiration indexes |
+| `dataset_logical_bytes` | Sum of logical usage accounted for by Store |
+| `dataset_quota_bytes` | Sum of logical quotas assigned to Stores |
+| `expiration_batches_total` | Applied nonempty batches originating from `Expiration` |
+| `expiration_batch_keys_removed_total` | Tombstones applied in those expiration batches |
+| `pubsub_channels` | Channels with at least one subscription |
+| `pubsub_subscribers` | Connections with at least one subscription |
+| `pubsub_subscriptions` | Unique active connection/channel pairs |
+| `pubsub_deliveries_total` | Subscriber queues that accepted notifications |
+| `pubsub_evictions_total` | Subscribers removed when `try_send` rejected a notification |
 
-`dataset_logical_bytes` e `dataset_quota_bytes` não são RSS: não incluem todo o
-custo de sockets, buffers, filas, runtime, alocador ou estruturas temporárias.
-Um erro de quota preserva o consumo anterior. As contagens de expiração cobrem
-lotes cuja origem resolvida é `Expiration`; não classificam como expiração
-toda remoção feita por comandos ou por um lote misto de `EXEC`.
+`dataset_logical_bytes` and `dataset_quota_bytes` are not RSS: they do not include
+the full cost of sockets, buffers, queues, runtime, allocator, or temporary structures.
+A quota error preserves previous usage. Expiration counts cover batches whose
+resolved origin is `Expiration`; they do not classify every removal by a command
+or mixed `EXEC` batch as expiration.
 
-`worker_timeouts_total` não permite inferir que o comando deixou de executar.
-Após aceitação, o worker mantém a operação mesmo quando o chamador desiste.
-`pubsub_deliveries_total` confirma entrada na fila, não escrita no socket nem
-leitura pelo cliente. As regras de desligamento do assinante estão no
-[guia de Pub/Sub](pubsub.md).
+`worker_timeouts_total` does not imply that the command did not execute.
+After acceptance, the worker retains the operation even when the caller gives up.
+`pubsub_deliveries_total` confirms queue entry, not socket writing or client receipt.
+Subscriber disconnection rules are in the [Pub/Sub guide](pubsub.md).
 
-### Persistência
+### Persistence
 
-`aof_enabled` informa se há um escritor anexado aos workers. Os demais campos
-dessa seção só existem quando esse consumidor real está presente.
+`aof_enabled` indicates whether a writer is attached to the workers. Other fields
+in this section exist only when that actual consumer is present.
 
-| Campo | Unidade e definição |
+| Field | Unit and definition |
 | --- | --- |
-| `aof_running`, `aof_failed` | Estado do escritor, representado por `0` ou `1` |
-| `aof_written_sequence` | Última sequência cujo registro concluiu a escrita no arquivo ativo |
-| `aof_synced_sequence` | Última sequência coberta por sincronização confirmada do escritor |
-| `aof_generation` | Geração ativa do arquivo |
-| `aof_bytes_since_compaction` | Bytes contabilizados pelo escritor desde a última compactação |
-| `aof_dirty`, `aof_compacting` | Escrita pendente de sincronização e compactação em andamento, em `0`/`1` |
-| `aof_queue_used`, `aof_queue_capacity` | Pedidos na fila e capacidade fixa do escritor |
-| `aof_records_written_total` | Registros de append escritos nesta execução |
-| `aof_active_file_syncs_total` | Sincronizações confirmadas do arquivo ativo; não soma fsyncs auxiliares do produtor de snapshots |
-| `aof_fatal_failures_total` | Encerramentos do escritor com erro |
-| `aof_record_rejections_total` | Appends recusados pelo limite de formato antes de escrever |
-| `aof_compactions_total` | Compactações concluídas |
-| `aof_compaction_failures_total` | Compactações iniciadas e abortadas ou concluídas com erro |
-| `aof_last_error` | Última categoria estática de erro, ou `none`; não é apagada por um sucesso posterior |
+| `aof_running`, `aof_failed` | Writer state, represented by `0` or `1` |
+| `aof_written_sequence` | Last sequence whose record completed writing to the active file |
+| `aof_synced_sequence` | Last sequence covered by confirmed writer synchronization |
+| `aof_generation` | Active file generation |
+| `aof_bytes_since_compaction` | Bytes accounted for by the writer since the last compaction |
+| `aof_dirty`, `aof_compacting` | Writes awaiting sync and compaction in progress, as `0`/`1` |
+| `aof_queue_used`, `aof_queue_capacity` | Queued requests and the writer's fixed capacity |
+| `aof_records_written_total` | Append records written in this run |
+| `aof_active_file_syncs_total` | Confirmed active-file syncs; excludes auxiliary snapshot-producer fsyncs |
+| `aof_fatal_failures_total` | Writer terminations with error |
+| `aof_record_rejections_total` | Appends rejected by the format limit before writing |
+| `aof_compactions_total` | Completed compactions |
+| `aof_compaction_failures_total` | Compactions started and aborted or completed with error |
+| `aof_last_error` | Last static error category, or `none`; not cleared by later success |
 
-As categorias incluem `io`, `record_limit`, `format`, `configuration`, `replay`,
+Categories include `io`, `record_limit`, `format`, `configuration`, `replay`,
 `directory_locked`, `unavailable`, `sequence`, `compaction_busy`,
-`compaction_delta_limit`, `layout_mismatch`, `cross_shard`, `shard_quota` e
-`migration`. Elas não retêm o texto original do erro nem caminhos.
-O gauge de fila fica em zero quando o observador já não encontra um canal ativo.
+`compaction_delta_limit`, `layout_mismatch`, `cross_shard`, `shard_quota`, and
+`migration`. They retain neither original error text nor paths.
+The queue gauge is zero when the observer can no longer find an active channel.
 
-Escrita na AOF e aplicação no Store são fronteiras diferentes. Uma falha antes
-da sincronização pode deixar `written_sequence > synced_sequence` e impedir a
-aplicação da mutação ao dataset. Em política periódica, essa diferença também
-pode representar a janela normal entre sincronizações. Leia ambos os campos
-junto de `aof_failed`, `aof_dirty`, política e logs; uma sequência isolada não
-prova confirmação ao cliente.
+AOF writing and Store application are different boundaries. A failure before
+synchronization may leave `written_sequence > synced_sequence` and prevent
+applying the mutation to the dataset. With periodic policy, this difference may
+also represent the normal window between syncs. Read both fields alongside
+`aof_failed`, `aof_dirty`, policy, and logs; a sequence alone does not prove
+client acknowledgment.
 
-### Replicação
+### Replication
 
-`INFO replication` observa o runtime usado pelas sessões e pelo escritor AOF.
-Sem replicação configurada, a seção contém apenas `replication_enabled:0`.
-As demais linhas existem somente com o observador real anexado. A leitura não
-envia pedidos aos workers, não consulta o upstream e não mantém canais do banco
-ou do escritor abertos após shutdown.
+`INFO replication` observes the runtime used by sessions and the AOF writer.
+Without replication configured, the section contains only `replication_enabled:0`.
+Other lines exist only when the actual observer is attached. Reading does not
+send requests to workers, query the upstream, or keep database/writer channels
+open after shutdown.
 
-| Campo | Unidade e definição |
+| Field | Unit and definition |
 | --- | --- |
-| `replication_enabled` | Presença do runtime de replicação, em `0`/`1` |
-| `replication_role` | Papel efetivo `primary` ou `replica`, incluindo promoção persistida |
-| `replication_connected` | Sessão de upstream estabelecida, em `0`/`1`; no primário é `0` e não conta conexões de réplicas |
-| `replication_epoch_known` | Cursor pertence a uma época inicializada, em `0`/`1` |
-| `replication_epoch` | Identificador fixo de 32 dígitos hexadecimais, presente quando a época é conhecida |
-| `replication_head_sequence` | Somente primário: último lote publicado no journal após append; pode preceder apply no Store |
-| `replication_applied_sequence` | Somente réplica: última posição confirmada após instalação de snapshot ou flush e apply do lote |
-| `replication_upstream_sequence` | Somente réplica: última sequência informada pelo upstream; pode estar desatualizada após desconexão |
-| `replication_lag_known` | Há sessão conectada, época conhecida e upstream observado maior ou igual ao aplicado, em `0`/`1` |
-| `replication_lag_batches` | Diferença upstream menos aplicado, em lotes; só existe quando `replication_lag_known:1` |
-| `replication_full_syncs_total` | Sincronizações completas que estabeleceram sessão nesta execução |
-| `replication_partial_syncs_total` | Continuações aceitas que estabeleceram sessão nesta execução |
-| `replication_reconnects_total` | Tentativas de sessão nesta execução, incluindo a primeira |
-| `replication_backlog_bytes`, `replication_backlog_batches` | Bytes e lotes retidos no journal ativo do primário |
-| `replication_oldest_sequence` | Primeira sequência retida; ausente quando o journal está vazio |
+| `replication_enabled` | Presence of the replication runtime, as `0`/`1` |
+| `replication_role` | Effective `primary` or `replica` role, including persisted promotion |
+| `replication_connected` | Established upstream session, as `0`/`1`; on a primary it is `0` and does not count replica connections |
+| `replication_epoch_known` | Cursor belongs to an initialized epoch, as `0`/`1` |
+| `replication_epoch` | Fixed 32-hex-digit identifier, present when the epoch is known |
+| `replication_head_sequence` | Primary only: last batch published to the journal after append; may precede Store apply |
+| `replication_applied_sequence` | Replica only: last confirmed position after snapshot installation or batch flush and apply |
+| `replication_upstream_sequence` | Replica only: last sequence reported by upstream; may be stale after disconnection |
+| `replication_lag_known` | Session is connected, epoch is known, and observed upstream is at least the applied position, as `0`/`1` |
+| `replication_lag_batches` | Upstream minus applied, in batches; present only when `replication_lag_known:1` |
+| `replication_full_syncs_total` | Full synchronizations that established a session in this run |
+| `replication_partial_syncs_total` | Accepted continuations that established a session in this run |
+| `replication_reconnects_total` | Session attempts in this run, including the first |
+| `replication_backlog_bytes`, `replication_backlog_batches` | Bytes and batches retained in the primary's active journal |
+| `replication_oldest_sequence` | First retained sequence; absent when the journal is empty |
 
-Campos de sequência aplicada/head são omitidos até a época ser conhecida.
-Durante sincronização inicial, desconexão ou observação de upstream anterior
-ao cursor local, o atraso fica desconhecido. Sua ausência não representa zero.
-Mesmo um atraso conhecido igual a zero compara com a última observação do
-upstream; não promete igualdade instantânea com escritas concorrentes. A unidade
-é lote, não comando, byte ou segundo. Uma transação pode conter vários comandos
-em uma sequência. Compare sequências entre processos apenas na mesma época.
+Applied/head sequence fields are omitted until the epoch is known.
+During initial synchronization, disconnection, or observation of an upstream
+position before the local cursor, lag is unknown. Its absence does not mean zero.
+Even known zero lag compares against the last upstream observation; it does not
+promise instantaneous equality with concurrent writes. The unit is batches,
+not commands, bytes, or seconds. A transaction may contain multiple commands
+in one sequence. Compare sequences across processes only within the same epoch.
 
-Gauges de dataset são atualizados após os controles de instalação e aplicação
-da replicação. Os contadores de sessão reiniciam com o processo; papel, época
-e cursor podem vir do estado durável. Uma sessão antiga não pode sobrescrever
-o estado da sessão nova ou desfazer uma promoção. As observações do journal e
-do runtime são curtas e podem refletir instantes próximos, sem barreira global.
+Dataset gauges are updated after replication installation and application controls.
+Session counters restart with the process; role, epoch, and cursor may come from
+durable state. An old session cannot overwrite a new session's state or undo
+promotion. Journal and runtime observations are short and may reflect nearby
+instants, without a global barrier.
 
-### Configuração
+### Configuration
 
-A seção `config` imprime limites numéricos do codec, buffers, conexões, filas,
-shards, dataset, Pub/Sub, transações, WATCH e prazos em milissegundos. Quando
-AOF está configurado, também imprime capacidade de fila, limites de registros,
-mutações e delta, limiar de compactação e política de sincronização. Opções
-de arquivo são expostas somente por flags de presença.
+The `config` section prints numeric limits for the codec, buffers, connections,
+queues, shards, dataset, Pub/Sub, transactions, WATCH, and deadlines in milliseconds.
+When AOF is configured, it also prints queue capacity, record/mutation/delta limits,
+compaction threshold, and synchronization policy. File options are exposed only
+through presence flags.
 
-Com replicação configurada, aparecem `replication_backlog_limit_bytes`,
-`replication_backlog_limit_batches`, `replication_max_connections` e os prazos
+With replication configured, output includes `replication_backlog_limit_bytes`,
+`replication_backlog_limit_batches`, `replication_max_connections`, and deadlines
 `replication_frame_timeout_ms`, `replication_sync_timeout_ms`,
-`replication_reconnect_min_ms` e `replication_reconnect_max_ms`. Esses campos
-descrevem limites configurados; os gauges da seção `replication` medem o uso.
+`replication_reconnect_min_ms`, and `replication_reconnect_max_ms`.
+These fields describe configured limits; gauges in the `replication` section measure usage.
 
-`worker_queue_capacity_per_shard` é a capacidade configurada de cada canal;
-`worker_queue_capacity`, na seção `stats`, é a soma observada de todos eles.
-Os nomes permanecem únicos mesmo quando todas as seções são selecionadas.
+`worker_queue_capacity_per_shard` is the configured capacity of each channel;
+`worker_queue_capacity`, in `stats`, is their observed sum.
+Names remain unique even when all sections are selected.
 
-## Procedimentos de diagnóstico
+## Diagnostic procedures
 
-| Situação | Evidência e ação |
+| Situation | Evidence and action |
 | --- | --- |
-| Fila cheia | Leia `INFO stats config` por uma conexão já admitida. Compare uso/capacidade e variação de timeouts; reduza concorrência de produtores e confira os prazos. Não repita automaticamente uma escrita com resultado desconhecido. Aumentar a fila exige considerar memória e tempo de espera. |
-| Limite de conexões | Compare `connected_clients`, `rejected_connections` e `max_connections`; feche conexões ociosas no cliente. Não há vaga administrativa reservada. |
-| Disco indisponível | Consulte `INFO persistence` enquanto a instância ainda atende e preserve os logs de falha do AOF. Um erro fatal encerra o escritor e a supervisão, então INFO pode deixar de estar acessível. Corrija espaço/permissão/dispositivo e faça a recuperação normal em um procedimento controlado; `--diagnose` não valida nem repara o disco. |
-| Registro grande | `aof_record_rejections_total` cresce e `aof_failed` permanece zero. Reduza o lote ou revise o limite de registro dentro dos limites suportados. A rejeição ocorre antes de aplicar o lote. |
-| Cliente lento | Veja `client_write_timeouts_total`, `pubsub_evictions_total` e logs de prazo de escrita/assinante encerrado. Faça o consumidor drenar respostas e notificações; reconecte e refaça inscrições após encerramento. Uma fila maior só amplia a tolerância temporária. |
-| Resposta acima do limite | `response_encoding_failures_total` aumenta. Reduza o tamanho solicitado, selecione menos seções de INFO ou ajuste limites coerentes. O comando pode já ter produzido efeitos antes da falha da resposta. |
-| Quota lógica | Compare consumo e quota em `INFO memory`; confira erros de quota. Remova dados ou aumente o orçamento de forma controlada, sem tratar quota lógica como memória do processo. |
-| Réplica conectada com atraso | Consulte `INFO replication persistence` nos dois lados. Compare épocas, head do primário, aplicado e último upstream da réplica em observações sucessivas. Verifique fila/disco da réplica e crescimento do backlog. Zero observado não comprova recebimento de uma escrita posterior. |
-| Réplica desconectada | `replication_connected:0` e `replication_lag_known:0` tornam o atraso desconhecido. Confira processos, prontidão interna, rede e logs estáticos; corrija a causa. A sessão tenta reconectar dentro dos prazos configurados. O aumento de `replication_reconnects_total` mostra tentativas, não sucesso. |
-| Repetição de sincronização completa | Observe crescimento de `replication_full_syncs_total`, retenção por bytes/lotes e capacidade de aplicar no destino. Se o cursor sair da retenção, a retomada exige FULL. Corrija a lentidão ou dimensione o backlog dentro do orçamento de memória; apenas aumentar timeout não preserva histórico descartado. |
-| Falha de AOF na réplica | Compare os indicadores AOF locais e preserve os logs. Não interprete append sem flush/apply como posição aplicada. Corrija o armazenamento antes da recuperação; `--diagnose` não inspeciona o arquivo e não o repara. |
-| Promoção deliberada | Confira a posição aplicada e a época antes da decisão operacional. Isole o antigo primário e redirecione os clientes em procedimento controlado. `sider-replica --addr IP:PORT --promote`, no listener interno de loopback, persiste novo papel/época e cancela a sessão antiga. Confirme `replication_role:primary` e a nova época. Não há failover automático nem reconciliação de escritas divergentes. |
+| Full queue | Read `INFO stats config` through an already admitted connection. Compare usage/capacity and timeout changes; reduce producer concurrency and check deadlines. Do not automatically retry a write with an unknown outcome. Increasing the queue requires considering memory and waiting time. |
+| Connection limit | Compare `connected_clients`, `rejected_connections`, and `max_connections`; close idle client connections. There is no reserved administrative slot. |
+| Disk unavailable | Query `INFO persistence` while the instance is still serving and preserve AOF failure logs. A fatal error terminates the writer and supervision, so INFO may become inaccessible. Correct space/permissions/device issues and perform normal recovery in a controlled procedure; `--diagnose` does not validate or repair the disk. |
+| Large record | `aof_record_rejections_total` rises while `aof_failed` stays zero. Reduce the batch or review the record limit within supported bounds. Rejection occurs before batch application. |
+| Slow client | Check `client_write_timeouts_total`, `pubsub_evictions_total`, and write-deadline/subscriber-disconnection logs. Have the consumer drain replies and notifications; reconnect and resubscribe after disconnection. A larger queue only increases temporary tolerance. |
+| Response exceeds limit | `response_encoding_failures_total` increases. Reduce the requested size, select fewer INFO sections, or adjust consistent limits. The command may already have produced effects before response failure. |
+| Logical quota | Compare usage and quota in `INFO memory`; check quota errors. Remove data or increase the budget in a controlled manner, without treating logical quota as process memory. |
+| Connected replica with lag | Query `INFO replication persistence` on both sides. Compare epochs, primary head, replica applied position, and last upstream position over successive observations. Check replica queue/disk and backlog growth. Observed zero does not prove receipt of a later write. |
+| Disconnected replica | `replication_connected:0` and `replication_lag_known:0` make lag unknown. Check processes, internal readiness, network, and static logs; correct the cause. The session attempts reconnection within configured deadlines. Rising `replication_reconnects_total` shows attempts, not success. |
+| Repeated full synchronization | Observe rising `replication_full_syncs_total`, byte/batch retention, and destination apply capacity. If the cursor leaves retention, resumption requires FULL. Correct slowness or size the backlog within the memory budget; merely increasing timeout does not preserve discarded history. |
+| Replica AOF failure | Compare local AOF indicators and preserve logs. Do not interpret append without flush/apply as an applied position. Correct storage before recovery; `--diagnose` neither inspects nor repairs the file. |
+| Deliberate promotion | Check applied position and epoch before the operational decision. Isolate the old primary and redirect clients through a controlled procedure. `sider-replica --addr IP:PORT --promote`, on the internal loopback listener, persists a new role/epoch and cancels the old session. Confirm `replication_role:primary` and the new epoch. There is no automatic failover or reconciliation of divergent writes. |
 
-Para consultar o protocolo administrativo existente, use
-`sider-replica --addr IP:PORT --status` no endpoint interno. Esse endpoint é
-diferente da porta RESP usada por `redis-cli`. A prontidão interna publicada
-por `SIDER_REPLICATION_READY_FILE` identifica o listener da instância; sua
-presença não comprova que a réplica terminou de sincronizar. Não remova o papel
-persistido nem a AOF para forçar uma reconexão depois de promover: a recuperação
-de topologia exige decidir qual história será preservada.
+To query the existing administrative protocol, use
+`sider-replica --addr IP:PORT --status` on the internal endpoint. This differs
+from the RESP port used by `redis-cli`. Internal readiness published through
+`SIDER_REPLICATION_READY_FILE` identifies the instance listener; its presence
+does not establish that a replica has finished synchronizing. Do not remove the
+persisted role or AOF to force reconnection after promotion: topology recovery
+requires deciding which history to preserve.
 
-Os eventos existentes registram início/parada, recusa de conexões, falhas de
-atendimento, falhas de append/sync e conclusão/aborto de compactação automática.
-Os indicadores identificam categorias e volumes sem acrescentar payloads aos
-logs. Não existe comando de redefinição dos contadores nesta entrega.
+Existing events record startup/shutdown, rejected connections, serving failures,
+append/sync failures, and automatic compaction completion/abortion.
+Indicators identify categories and volumes without adding payloads to logs.
+This delivery has no counter reset command.
 
-## Verificação reproduzível
+## Reproducible verification
 
-O [ensaio operacional do pacote extraído](operational-package.md) exercita
-diagnóstico, quota, limite de conexões, cliente lento e erro real de abertura
-da AOF com as CLIs distribuídas. Sua execução é explícita e registra JSON;
-não transforma um teste ignorado em aprovação de release.
+The [extracted-package operational test](operational-package.md) exercises
+diagnostics, quota, connection limits, a slow client, and an actual AOF open error
+with the distributed CLIs. Execution is explicit and records JSON; it does not
+turn an ignored test into release approval.
 
 ```sh
 cargo test --locked --lib metrics_ -- --nocapture
@@ -288,23 +286,22 @@ cargo test --locked --test replication_network metrics_replication -- --nocaptur
 cargo clippy --locked --lib --test metrics --test cli --test replication_network -- -D warnings
 ```
 
-Os testes nativos cobrem concorrência sem perda de incrementos, nomes
-fixos, seções desconhecidas/binárias, Pub/Sub lento/rápido, cancelamento,
-contagens de EXEC, fila saturada, timeout, quota, expiração e limites de saída.
-Um deles usa quatro shards: mantém um pedido aceito sem executar, consulta INFO
-enquanto o snapshot global aguarda esse pedido e confere os gauges após apply.
-Quatro testes de integração conferem dois cenários TCP com quatro shards e o diagnóstico AOF em
-append, compactação, falha fatal de disco e rejeição recuperável por tamanho.
-Dois testes CLI verificam código de saída, ocultação de valores inválidos e
-ausência de efeitos em listener, diretório AOF e arquivo de prontidão.
-O teste de replicação por TCP inicia processos reais com quatro shards, confere
-FULL e delta, consulta INFO dentro de EXEC, encerra o primário e verifica que
-o atraso vira desconhecido; depois promove a réplica e confere papel, época e
-head. O teste de estado cobre uma sessão antiga tentando atualizar a nova,
-retomada parcial, cursor ainda desconhecido e upstream temporariamente anterior
-ao aplicado. O teste offline usa também uma porta interna ocupada e confirma
-ausência de criação de AOF e prontidão.
+Native tests cover concurrency without lost increments, fixed names, unknown/binary
+sections, slow/fast Pub/Sub, cancellation, EXEC counts, saturated queues, timeouts,
+quota, expiration, and output limits. One uses four shards: it holds an accepted
+request without execution, queries INFO while the global snapshot waits for that
+request, and checks gauges after apply. Four integration tests check two TCP
+scenarios with four shards and AOF diagnostics for append, compaction, fatal disk
+failure, and recoverable size rejection. Two CLI tests check exit codes, hiding
+invalid values, and absence of effects on the listener, AOF directory, and readiness file.
+The TCP replication test starts actual processes with four shards, checks FULL
+and delta, queries INFO inside EXEC, stops the primary, and verifies that lag
+becomes unknown; it then promotes the replica and checks role, epoch, and head.
+The state test covers an old session trying to update a new one, partial resumption,
+a still-unknown cursor, and an upstream temporarily behind the applied position.
+The offline test also uses an occupied internal port and confirms no AOF or
+readiness creation.
 
-Esses resultados conferem o contrato funcional no Windows. Não constituem
-benchmark do custo da instrumentação nem gate Docker/Linux. A validação integrada do milestone deve repetir apenas os
-caminhos exigidos pelas mudanças compostas e registrar o SHA efetivo.
+These results check the functional contract on Windows. They are neither a benchmark
+of instrumentation cost nor a Docker/Linux gate. Integrated milestone validation
+should repeat only the paths required by the combined changes and record the actual SHA.

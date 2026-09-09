@@ -1,72 +1,70 @@
 # Sorted sets
 
-Sorted sets associam cada membro binário a um score IEEE-754 de 64 bits. Os
-resultados seguem score crescente e, em empate, os bytes do membro. A ordem
-independe de UTF-8, locale ou plataforma.
+Sorted sets associate each binary member with a 64-bit IEEE-754 score. Results
+follow ascending score and, on ties, member bytes. Ordering is independent of
+UTF-8, locale, or platform.
 
-## Comandos
+## Commands
 
-| Forma | Contrato |
+| Form | Contract |
 | --- | --- |
-| `ZADD key score member [score member ...]` | Retorna o número de membros novos. Atualizar score não aumenta a contagem; o último par de um membro prevalece. |
-| `ZREM key member [member ...]` | Retorna membros removidos, sem contar duplicatas; a última remoção elimina a entrada. |
-| `ZCARD key` | Retorna a cardinalidade ou zero se ausente. |
-| `ZSCORE key member` | Retorna score como bulk string ou nulo se membro/chave ausente. |
-| `ZRANGE key start stop [WITHSCORES]` | Retorna membros no intervalo inclusivo. `WITHSCORES` intercala membro e score no array RESP2. |
+| `ZADD key score member [score member ...]` | Returns the number of new members. Updating a score does not increase the count; the last pair for a member wins. |
+| `ZREM key member [member ...]` | Returns removed members, without counting duplicates; the final removal eliminates the entry. |
+| `ZCARD key` | Returns cardinality, or zero when absent. |
+| `ZSCORE key member` | Returns the score as a bulk string, or null when the member/key is absent. |
+| `ZRANGE key start stop [WITHSCORES]` | Returns members in the inclusive range. `WITHSCORES` interleaves member and score in the RESP2 array. |
 
-Índices negativos contam a partir do fim. Intervalos invertidos ou fora do
-conjunto retornam array vazio, com as mesmas regras de [listas](collections.md).
-Um comando sobre outro tipo retorna `WRONGTYPE` sem alterar os dados.
+Negative indexes count from the end. Inverted or out-of-range intervals return an
+empty array, following the same rules as [lists](collections.md). A command on
+another type returns `WRONGTYPE` without changing data.
 
-`ZADD` aceita somente pares básicos. `NX`, `XX`, `GT`, `LT`, `CH` e `INCR` ficam
-fora do subconjunto. `ZRANGE` não aceita `BYSCORE`, `BYLEX`, `REV` ou `LIMIT`.
-Essas formas são rejeitadas antes da execução; o texto da rejeição de opções
-não suportadas não representa uma promessa de equivalência com Redis.
+`ZADD` accepts only basic pairs. `NX`, `XX`, `GT`, `LT`, `CH`, and `INCR` are
+outside the subset. `ZRANGE` does not accept `BYSCORE`, `BYLEX`, `REV`, or
+`LIMIT`. These forms are rejected before execution; rejection text for unsupported
+options does not promise equivalence with Redis.
 
 ## Scores
 
-O parser aceita decimais, notação exponencial, valores hexadecimais e infinitos
-conforme os casos verificados em Redis 8.10.1. `inf`, `+inf` e `-inf` são válidos;
-as grafias `Infinity` e variantes de caixa também são aceitas. Zero negativo
-é normalizado para zero. Espaços, `NaN`, overflow finito e underflow de valor
-não zero até zero são inválidos. Subnormais representáveis são válidos.
+The parser accepts decimal, exponential notation, hexadecimal values, and infinities
+according to cases verified in Redis 8.10.1. `inf`, `+inf`, and `-inf` are valid;
+`Infinity` spellings and case variants are also accepted. Negative zero is
+normalized to zero. Spaces, `NaN`, finite overflow, and underflow of a nonzero
+value to zero are invalid. Representable subnormals are valid.
 
-Todos os scores de `ZADD` são validados antes de consultar ou alterar a entrada.
-Um score inválido no último par impede também os pares anteriores. O erro
-`ERR value is not a valid float` permite continuar usando a conexão.
+Every `ZADD` score is validated before querying or changing the entry. An invalid
+score in the final pair also prevents preceding pairs. `ERR value is not a valid
+float` allows continued use of the connection.
 
-`ZSCORE` e `WITHSCORES` usam o mesmo conversor. Por exemplo, `1e-7` produz
-`1e-7`, `1e-6` produz `0.000001` e `1e20` produz `1e+20`. A representação de
-`1e23` é `99999999999999990000000`, conforme o arredondamento da referência.
-O conversor em Rust seguro adapta o gerador
-[fpconv de Redis 8.10.1](https://github.com/redis/redis/tree/8.10.1/deps/fpconv),
-com os avisos e a licença Boost 1.0 preservados no módulo. Não há dependência
-de código C nem alteração nas dependências Cargo para essa conversão.
+`ZSCORE` and `WITHSCORES` use the same converter. For example, `1e-7` produces
+`1e-7`, `1e-6` produces `0.000001`, and `1e20` produces `1e+20`. The rendering
+of `1e23` is `99999999999999990000000`, matching reference rounding. The safe Rust
+converter adapts Redis 8.10.1 [fpconv](https://github.com/redis/redis/tree/8.10.1/deps/fpconv),
+with its notices and Boost 1.0 license preserved in the module. This conversion
+adds no C-code dependency or Cargo-dependency change.
 
-## Índices, TTL, quota e AOF
+## Indexes, TTL, quota, and AOF
 
-Um índice por membro e outro por `(score, member)` são atualizados juntos.
-Os payloads de snapshot são compartilhados por `Arc`, e alterações produzem
-uma nova pós-imagem antes do apply. A leitura por membro usa `HashMap`; a ordem
-usa `BTreeSet`. A obtenção de um range por rank percorre o prefixo até `start`.
-Não há promessa de equivalência de desempenho com Redis.
+A per-member index and a `(score, member)` index are updated together. Snapshot
+payloads are shared through `Arc`, and changes produce a new post-image before
+apply. Member lookup uses `HashMap`; ordering uses `BTreeSet`. Rank-range retrieval
+walks the prefix to `start`. No performance equivalence with Redis is promised.
 
-A quota contabiliza `128 + key.len()` por entrada e `member.len() + 96` por
-membro, cobrindo logicamente ambos os índices e o score. Esse valor não mede
-RSS. Um lote que excede a quota é recusado inteiro, incluindo atualizações de
-scores de membros que já existiam. Escritas aceitas preservam TTL; última
-remoção e expiração liberam entrada, índice de expiração e quota.
+Quota accounts for `128 + key.len()` per entry and `member.len() + 96` per member,
+logically covering both indexes and the score. This value does not measure RSS. A
+batch exceeding quota is wholly rejected, including score updates for existing
+members. Accepted writes preserve TTL; final removal and expiration free the entry,
+expiration index, and quota.
 
-AOF v1 usa tag `6` para a pós-imagem de sorted set. O score é armazenado pelos
-bits IEEE-754, sem reconversão decimal durante replay. O decoder rejeita NaN,
-conjuntos vazios e membros duplicados mesmo quando o checksum é válido. Os
-tipos anteriores mantêm suas tags e representações.
+AOF v1 uses tag `6` for the sorted-set post-image. Scores are stored as IEEE-754
+bits, without decimal reconversion during replay. The decoder rejects NaN, empty
+sets, and duplicate members even with a valid checksum. Earlier types retain their
+tags and representations.
 
-Respostas obedecem aos limites RESP e de saída descritos no [guia de rede](network.md).
-Se `ZRANGE` exceder o limite, a conexão fecha sem enviar um array parcial e sem
-alterar o conjunto. `WITHSCORES` consome dois nós de resposta por membro.
+Responses obey RESP and output limits described in the [network guide](network.md).
+If `ZRANGE` exceeds the limit, the connection closes without sending a partial
+array or changing the set. `WITHSCORES` consumes two response nodes per member.
 
-## Verificação reproduzível
+## Reproducible verification
 
 ```powershell
 cargo test --locked --test sorted_sets
@@ -74,18 +72,18 @@ cargo test --locked --test tcp r06_
 cargo test --locked --test collections_differential -- --ignored --exact sorted_sets_match_redis --nocapture
 ```
 
-Os sete testes nativos incluem 4.096 alterações geradas dos índices e 28.658
-combinações de expoente, mantissa e sinal para roundtrip da conversão. Também
-verificam quota, TTL, aridade, rejeições, ordem binária, limites numéricos e AOF.
+The seven native tests include 4,096 generated index changes and 28,658 combinations
+of exponent, mantissa, and sign for converter round trips. They also verify quota,
+TTL, arity, rejections, binary order, numeric limits, and AOF.
 
-O diferencial passou com Sider Windows e a imagem Redis/CLI 8.10.1 fixada em
-`releases/plan.json`: 8.561 respostas comparadas byte a byte. Além das fixtures,
-são quatro seeds com 512 operações cada e 32 lotes com até 400 scores derivados
-de padrões IEEE-754. Nos lotes, padrões NaN/inf são filtrados para manter o lote
-válido; fixtures separadas verificam infinitos e rejeição de NaN. Scores, pares
-e ordenação nunca são normalizados pelo comparador.
+The differential passed with Sider on Windows and the Redis/CLI 8.10.1 image pinned
+in `releases/plan.json`: 8,561 byte-for-byte responses compared. Beyond fixtures,
+it uses four seeds with 512 operations each and 32 batches with up to 400 scores
+derived from IEEE-754 patterns. In batches, NaN/inf patterns are filtered to keep
+the batch valid; separate fixtures verify infinities and NaN rejection. Scores,
+pairs, and ordering are never normalized by the comparator.
 
-Os [testes do writer AOF completo](types-persistence.md) também verificam crash,
-compactação, recuperação dos scores e evolução da fixture de strings. A evidência
-separa a migração do formato da migração entre executáveis de baselines internas;
-não comprova execução nativa Linux ou aprovação de pacote de release.
+The [complete AOF-writer tests](types-persistence.md) also verify crashes,
+compaction, score recovery, and evolution of the strings fixture. Evidence separates
+format migration from migration between internal-baseline executables; it does not
+demonstrate native Linux execution or release-package approval.

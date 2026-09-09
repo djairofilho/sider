@@ -1,13 +1,13 @@
-# Persistência AOF
+# AOF persistence
 
-O AOF registra o estado final de cada comando em lotes indivisíveis. Está disponível
-no marco interno R03. O formato tem sua própria versão, independente da versão do
-binário. Sem `SIDER_AOF_DIR`, o servidor continua operando somente em memória.
+The AOF records each command's final state in indivisible batches. It is available
+from internal milestone R03. The format has its own version, independent of the
+binary version. Without `SIDER_AOF_DIR`, the server continues to run in memory only.
 
-## Executar
+## Running
 
 ```powershell
-$env:SIDER_AOF_DIR = 'C:\dados\sider'
+$env:SIDER_AOF_DIR = 'C:\data\sider'
 $env:SIDER_AOF_SYNC = 'always'
 cargo run --locked
 ```
@@ -16,196 +16,195 @@ cargo run --locked
 SIDER_AOF_DIR=./data SIDER_AOF_SYNC=always cargo run --locked
 ```
 
-Use o mesmo diretório ao reiniciar. Um lock exclusivo do sistema operacional
-impede dois escritores de abrirem esse diretório. A recuperação ocorre antes do
-bind e da criação do arquivo de prontidão. Na API que recebe um listener já
-aberto, `serve` recupera antes de aceitar conexões. `server::prepare` permite
-recuperar explicitamente antes de abrir o listener.
+Use the same directory when restarting. An exclusive operating system lock prevents
+two writers from opening that directory. Recovery occurs before binding and creating
+the readiness file. In the API that receives an already open listener, `serve`
+recovers before accepting connections. `server::prepare` supports explicit recovery
+before opening the listener.
 
-O cabeçalho registra a quantidade de shards e a versão do roteamento. Divergência
-impede a recuperação antes de qualquer reparo da cauda. O AOF legado v1 significa
-um shard. Alterar o particionamento exige a [migração offline](aof-migration.md).
+The header records the shard count and routing version. A mismatch prevents recovery
+before any tail repair. Legacy AOF v1 implies one shard. Changing the partitioning
+requires [offline migration](aof-migration.md).
 
-| Variável | Padrão | Contrato |
+| Variable | Default | Contract |
 | --- | --- | --- |
-| `SIDER_AOF_DIR` | Ausente | Diretório nativo; ativa a persistência |
-| `SIDER_AOF_SYNC` | `always` | `always` ou `everysec` |
-| `SIDER_AOF_QUEUE_CAPACITY` | `32` | Número máximo de pedidos aguardando o escritor |
-| `SIDER_AOF_MAX_RECORD_BYTES` | `67108864` | Payload de um registro; entre 64 bytes e 64 MiB |
-| `SIDER_AOF_MAX_DELTA_BYTES` | `16777216` | Bytes de registros capturados durante a compactação |
-| `SIDER_AOF_COMPACT_AFTER_BYTES` | `67108864` | Append acumulado que solicita compactação; `0` desativa a automática |
+| `SIDER_AOF_DIR` | Unset | Native directory path; enables persistence |
+| `SIDER_AOF_SYNC` | `always` | `always` or `everysec` |
+| `SIDER_AOF_QUEUE_CAPACITY` | `32` | Maximum number of requests waiting for the writer |
+| `SIDER_AOF_MAX_RECORD_BYTES` | `67108864` | Record payload; between 64 bytes and 64 MiB |
+| `SIDER_AOF_MAX_DELTA_BYTES` | `16777216` | Bytes of records captured during compaction |
+| `SIDER_AOF_COMPACT_AFTER_BYTES` | `67108864` | Accumulated append bytes that request compaction; `0` disables automatic compaction |
 
-As opções AOF são interpretadas quando o diretório está configurado. O limite de
-registro deve comportar uma mutação completa e seu framing interno. Reduzir esse
-limite pode impedir a leitura de um AOF existente ou a gravação de um valor que
-antes cabia. Uma escrita que excede o limite recebe `ERR AOF record limit exceeded`,
-sem append ou aplicação, mantendo a conexão disponível. O teto de 64 MiB continua
-valendo para configurações com dataset maior.
-O limite padrão de 100 mil mutações por lote também é conferido antes da alocação.
+AOF options are parsed when the directory is configured. The record limit must fit
+a complete mutation and its internal framing. Reducing this limit may prevent reading
+an existing AOF or writing a value that previously fit. A write exceeding the limit
+receives `ERR AOF record limit exceeded`, without append or application, while the
+connection remains available. The 64 MiB ceiling still applies to configurations
+with larger datasets.
+The default limit of 100,000 mutations per batch is also checked before allocation.
 
-## Confirmação e falha
+## Acknowledgment and failure
 
-O worker prepara apenas as chaves tocadas pelo comando, compartilhando os bytes
-imutáveis. Resolve condições de `SET`, incrementos, TTL e quota com uma leitura
-consistente do relógio. Depois envia um `ResolvedBatch` ao escritor global, que
-atribui uma sequência crescente. O worker aplica o estado preparado e responde
-somente depois da confirmação desse escritor. O replay nunca reexecuta condições
-como `NX`, `XX` ou incrementos.
+The worker prepares only the keys touched by the command, sharing immutable bytes.
+It resolves `SET` conditions, increments, TTL, and quota using a consistent clock
+reading. It then sends a `ResolvedBatch` to the global writer, which assigns an
+increasing sequence. The worker applies the prepared state and responds only after
+the writer acknowledges it. Replay never reexecutes conditions such as `NX`, `XX`,
+or increments.
 
-| Política | O que a confirmação assegura | Perda possível |
+| Policy | What acknowledgment guarantees | Possible loss |
 | --- | --- | --- |
-| `always` | `write_all` e `sync_all` terminaram antes da aplicação e resposta | A suíte de crash de processo exige recuperar todos os lotes confirmados; integridade física depende do filesystem e dispositivo |
-| `everysec` | `write_all` terminou; o próximo sync é periódico | Tudo que ainda não alcançou um `sync_all` bem-sucedido pode ser perdido em falha do sistema |
+| `always` | `write_all` and `sync_all` completed before application and response | The process crash suite requires recovery of all acknowledged batches; physical integrity depends on the filesystem and device |
+| `everysec` | `write_all` completed; the next sync is periodic | Anything that has not reached a successful `sync_all` may be lost in a system failure |
 
-`everysec` solicita sincronização a cada segundo, inclusive sem nova escrita. O
-período não é um limite rígido de perda: atrasos de I/O e agendamento podem ampliar
-a janela. Uma parada normal drena pedidos aceitos e sincroniza o escritor. O prazo
-de drenagem não torna chamadas de filesystem canceláveis.
+`everysec` requests synchronization every second, including when there are no new
+writes. This interval is not a strict loss bound: I/O and scheduling delays can
+extend the window. Normal shutdown drains accepted requests and synchronizes the
+writer. The drain deadline does not make filesystem calls cancelable.
 
-Na replicação, a réplica sincroniza o lote aplicado antes de enviar ACK, inclusive
-com `everysec`. Esse ACK não altera a política de confirmação do primário nem
-faz suas respostas aguardarem réplicas; veja [replicação](replication.md).
+In replication, the replica synchronizes the applied batch before sending an ACK,
+including with `everysec`. This ACK does not change the primary's acknowledgment
+policy or make its responses wait for replicas; see [replication](replication.md).
 
-Falha de append ou sync impede uma resposta de sucesso e encerra a admissão do
-worker. Um lote completamente escrito pode reaparecer no reinício mesmo que a
-resposta tenha sido perdida. Timeout ou desconexão depois da aceitação não provam
-ausência de efeitos e não autorizam repetição automática de um incremento.
+Append or sync failure prevents a success response and closes worker admission.
+A completely written batch may reappear on restart even if the response was lost.
+A timeout or disconnection after acceptance does not prove the absence of effects
+and does not justify automatically retrying an increment.
 
-Expiração ativa usa o mesmo caminho durável, com origem `Expiration`. Leituras que
-encontram uma entrada vencida também produzem tombstones com essa origem no primário.
-Réplicas ocultam entradas vencidas nas leituras, mas recebem os tombstones do
-primário; não executam expiração ativa nem geram remoções locais.
+Active expiration uses the same durable path, with origin `Expiration`. Reads that
+find an expired entry also produce tombstones with this origin on the primary.
+Replicas hide expired entries from reads but receive tombstones from the primary;
+they neither run active expiration nor generate local removals.
 
-## Formatos de cabeçalho v1, v2 e v3
+## Header formats v1, v2, and v3
 
-Todos os inteiros usam little endian. Chaves e valores são bytes, sem exigência de
-UTF-8. CRC-32/ISO-HDLC detecta corrupção acidental; não autentica os arquivos.
+All integers use little endian. Keys and values are bytes, with no UTF-8 requirement.
+CRC-32/ISO-HDLC detects accidental corruption; it does not authenticate files.
 
-Arquivos e compactações sem metadados de replicação usam o cabeçalho v2, com 32 bytes:
+Files and compactions without replication metadata use the 32-byte v2 header:
 
-| Offset | Tamanho | Campo |
+| Offset | Size | Field |
 | --- | --- | --- |
-| 0 | 8 | Magic ASCII `SIDERAOF` |
-| 8 | 4 | Versão do formato, `2` |
-| 12 | 8 | Sequência representada pelo snapshot inicial |
-| 20 | 4 | Quantidade de shards, entre 1 e 256 |
-| 24 | 4 | Versão do roteamento, `1` |
-| 28 | 4 | CRC dos primeiros 28 bytes |
+| 0 | 8 | ASCII magic `SIDERAOF` |
+| 8 | 4 | Format version, `2` |
+| 12 | 8 | Sequence represented by the initial snapshot |
+| 20 | 4 | Shard count, between 1 and 256 |
+| 24 | 4 | Routing version, `1` |
+| 28 | 4 | CRC of the first 28 bytes |
 
-Com papel e época duráveis de replicação, o writer usa o cabeçalho v3 de 52 bytes.
-Os primeiros 28 bytes têm os mesmos campos, com versão `3` no offset 8. Depois:
+With durable replication role and epoch metadata, the writer uses the 52-byte v3
+header. The first 28 bytes contain the same fields, with version `3` at offset 8.
+They are followed by:
 
-| Offset | Tamanho | Campo |
+| Offset | Size | Field |
 | --- | --- | --- |
-| 28 | 1 | Papel: `1` primário ou `2` réplica |
-| 29 | 3 | Reservados, obrigatoriamente zero |
-| 32 | 16 | Época do fluxo de replicação |
-| 48 | 4 | CRC dos primeiros 48 bytes |
+| 28 | 1 | Role: `1` primary or `2` replica |
+| 29 | 3 | Reserved; must be zero |
+| 32 | 16 | Replication stream epoch |
+| 48 | 4 | CRC of the first 48 bytes |
 
-Dataset, sequência, papel e época pertencem à mesma geração publicada. A
-compactação preserva esses metadados. Backup/restauração grava v2 sem herdar
-o papel da origem; iniciar uma instância replicada estabelece seus metadados
-duráveis conforme o [contrato de replicação](replication.md).
+The dataset, sequence, role, and epoch belong to the same published generation.
+Compaction preserves this metadata. Backup/restore writes v2 without inheriting
+the source role; starting a replicated instance establishes its durable metadata
+according to the [replication contract](replication.md).
 
-O leitor também aceita o cabeçalho v1, com 24 bytes: mesmo magic, versão `1`,
-sequência e CRC dos primeiros 20 bytes no offset 20. Sua configuração implícita é
-um shard com roteamento v1. A versão de roteamento 1 identifica FNV-1a64 sobre as
-hash tags de `storage::routing`; versões desconhecidas são recusadas. Registros e
-mutações preservam a mesma codificação nas três versões do cabeçalho. A versão
-dos registros continua `1`, independente da versão de cabeçalho. Binários
-antigos que não conhecem v3 devem recusá-lo, sem editar o arquivo.
+The reader also accepts the 24-byte v1 header: the same magic, version `1`, sequence,
+and CRC of the first 20 bytes at offset 20. Its implicit configuration is one shard
+with routing v1. Routing version 1 identifies FNV-1a64 over the hash tags in
+`storage::routing`; unknown versions are rejected. Records and mutations retain the
+same encoding across all three header versions. The record version remains `1`,
+independent of the header version. Older binaries that do not recognize v3 must
+reject it without editing the file.
 
-Cada registro tem comprimento de payload `u32`, seu complemento binário `u32`,
-CRC do payload `u32` e o payload. Comprimento e complemento são conferidos antes
-da alocação; checksum é conferido antes do decode. Campos internos precisam caber
-inteiramente no registro. Tipos, origens e bytes extras desconhecidos são erros.
+Each record contains a `u32` payload length, its `u32` bitwise complement, a `u32`
+payload CRC, and the payload. Length and complement are checked before allocation;
+the checksum is checked before decoding. Internal fields must fit entirely within
+the record. Unknown types, origins, and extra bytes are errors.
 
-| Tag | Payload depois da tag |
+| Tag | Payload after the tag |
 | --- | --- |
-| `1`, snapshot | Uma mutação `Put` |
-| `2`, selo | Sequência `u64`, quantidade de entradas `u64`, digest `u32` |
-| `3`, lote | Sequência `u64`, origem `u8`, quantidade `u32`, mutações |
+| `1`, snapshot | One `Put` mutation |
+| `2`, seal | `u64` sequence, `u64` entry count, `u32` digest |
+| `3`, batch | `u64` sequence, `u8` origin, `u32` count, mutations |
 
-As entradas de snapshot estão em ordem binária crescente, sem duplicatas. O digest
-encadeia os CRCs dos registros completos com `snapshot_digest` e começa em zero.
-Contagem e digest do selo detectam também a retirada de um registro completo. Um
-arquivo só é recuperável depois de um selo válido. Os lotes seguintes precisam ter
-sequências consecutivas a partir do snapshot.
+Snapshot entries are in ascending binary order, without duplicates. The digest
+chains the CRCs of complete records using `snapshot_digest` and starts at zero.
+The seal's count and digest also detect removal of a complete record. A file is
+recoverable only after a valid seal. Subsequent batches must have consecutive
+sequences starting from the snapshot.
 
-Mutações iniciais usam tag `1` para `Put` de string e `2` para `Delete`. Ambas têm
-comprimento de chave `u32` e chave. `Put` acrescenta comprimento de valor `u32`,
-valor, indicador de TTL `u8` e deadline Unix em milissegundos `i64`. Sem TTL, ambos
-os últimos campos são zero. Origem `1` indica cliente; `2`, expiração.
+The initial mutations use tag `1` for string `Put` and `2` for `Delete`. Both contain
+a `u32` key length and the key. `Put` adds a `u32` value length, the value, a `u8` TTL
+flag, and an `i64` Unix deadline in milliseconds. Without TTL, both final fields are
+zero. Origin `1` indicates a client; `2` indicates expiration.
 
-R05/R06 acrescentam postimages completas: tag `3` para hash, `4` para lista,
-`5` para set e `6` para sorted set. Coleções não podem estar vazias no arquivo;
-chaves/campos/membros continuam binários. Scores preservam os bits IEEE e recusam
-NaN mesmo com checksum válido. O [contrato de persistência tipada](types-persistence.md)
-descreve ordem, quota, TTL e ensaios de crash dessas famílias.
+R05/R06 add complete postimages: tag `3` for hash, `4` for list, `5` for set, and `6`
+for sorted set. Collections cannot be empty in the file; keys/fields/members remain
+binary. Scores preserve IEEE bits and reject NaN even with a valid checksum. The
+[typed persistence contract](types-persistence.md) describes ordering, quota, TTL,
+and crash tests for these families.
 
-O parser e o armazenamento pré-validam o lote inteiro. Chaves duplicadas no mesmo
-lote, quota excedida ou deadline não representável impedem sua aplicação. Na
-recuperação, um `Put` já vencido remove o valor anterior e não volta a ser persistente.
-A quota lógica e o índice de expiração são reconstruídos.
+The parser and storage prevalidate the entire batch. Duplicate keys within a batch,
+exceeded quota, or an unrepresentable deadline prevent application. During recovery,
+an already expired `Put` removes the previous value and does not become persistent
+again. The logical quota and expiration index are rebuilt.
 
-Cada lote precisa pertencer a um único shard na configuração gravada. A quota
-total é dividida pelo número de shards, distribuindo o resto pelos primeiros
-índices. A recuperação acompanha o uso de cada shard e recusa excesso local mesmo
-quando o total global ainda cabe. Metadados recuperados ficam disponíveis antes
-de iniciar o escritor.
+Each batch must belong to a single shard under the recorded configuration. The total
+quota is divided by the shard count, distributing the remainder among the first
+indices. Recovery tracks each shard's usage and rejects local excess even when the
+global total still fits. Recovered metadata is available before the writer starts.
 
-## Recuperação e compactação
+## Recovery and compaction
 
-Os arquivos publicados têm nomes `generation-NNNNNNNNNNNNNNNNNNNN.aof`. O servidor
-abre a maior geração. Corrupção nessa geração interrompe a inicialização; não há
-fallback silencioso para uma geração antiga que possa perder escritas confirmadas.
+Published files are named `generation-NNNNNNNNNNNNNNNNNNNN.aof`. The server opens
+the highest generation. Corruption in that generation stops startup; there is no
+silent fallback to an older generation that could lose acknowledged writes.
 
-Uma cauda com registro incompleto depois do selo válido é recuperável. Antes de
-truncá-la, o servidor copia e sincroniza o original em `tail-*.bak`. Header inválido,
-checksum incorreto, versão desconhecida ou corrupção interna preservam o AOF e
-encerram a inicialização com erro. Para diagnóstico, trabalhe sobre uma cópia do
-diretório com o servidor parado. Não renomeie uma geração antiga como atual sem
-avaliar a perda de dados correspondente.
+A tail containing an incomplete record after a valid seal is recoverable. Before
+truncating it, the server copies and synchronizes the original to `tail-*.bak`.
+An invalid header, incorrect checksum, unknown version, or internal corruption
+preserves the AOF and ends startup with an error. For diagnosis, work on a copy of
+the directory with the server stopped. Do not rename an older generation as current
+without assessing the corresponding data loss.
 
-A compactação captura um snapshot consistente, escreve seus registros e selo em
-um arquivo temporário e mantém os appends no arquivo atual. O escritor acumula um
-delta limitado, incluindo expirações. Ao concluir o snapshot, grava o delta,
-sincroniza o arquivo novo e publica uma geração com nome ainda não utilizado. Só
-então muda o destino dos appends. O arquivo anterior permanece completo; a geração
-que antecede esse backup é retirada na próxima compactação bem-sucedida.
+Compaction captures a consistent snapshot, writes its records and seal to a temporary
+file, and continues appending to the current file. The writer accumulates a bounded
+delta, including expirations. Once the snapshot is complete, it writes the delta,
+synchronizes the new file, and publishes a generation under an unused name. Only
+then does it switch the append destination. The previous file remains complete;
+the generation preceding this backup is removed at the next successful compaction.
 
-Se o delta exceder o orçamento, a compactação é abortada e o arquivo atual continua
-válido. O produtor termina antes de permitir outro snapshot, limitando a quantidade
-de trabalho simultâneo. Falha antes da publicação também preserva o escritor atual.
-Falha depois da publicação é fatal, impedindo que novas escritas continuem apenas
-na geração antiga. Temporários interrompidos nunca são escolhidos para replay e
-podem ser removidos com o servidor parado após conferir a geração atual.
+If the delta exceeds its budget, compaction aborts and the current file remains
+valid. The producer finishes before another snapshot is allowed, bounding concurrent
+work. Failure before publication also preserves the current writer. Failure after
+publication is fatal, preventing new writes from continuing only in the old
+generation. Interrupted temporary files are never selected for replay and may be
+removed with the server stopped after checking the current generation.
 
-Valores imutáveis são compartilhados pelo snapshot; os metadados do snapshot e o
-delta consomem memória adicional. Quota lógica do dataset não é limite do RSS.
-Com múltiplos workers, o integrador deve coordenar uma barreira global antes de
-enfileirar `begin_compaction`; um snapshot isolado de um shard não representa o AOF
-global.
+Immutable values are shared by the snapshot; snapshot metadata and the delta consume
+additional memory. The dataset's logical quota is not an RSS limit. With multiple
+workers, the integrator must coordinate a global barrier before enqueueing
+`begin_compaction`; an isolated snapshot of one shard does not represent the global AOF.
 
-## Garantias por plataforma
+## Platform guarantees
 
-O lock usa `File::try_lock`, aberto para leitura e escrita, compatível com os
-requisitos de locking do Windows. `sync_all` solicita a persistência do conteúdo e
-dos metadados do arquivo. São os contratos da
-[biblioteca padrão de Rust](https://doc.rust-lang.org/std/fs/struct.File.html).
-O guard libera o lock explicitamente antes de fechar o arquivo. Em Linux, isso
-evita que descritores duplicados por `fork`/`dup` prolonguem a propriedade depois
-da parada do escritor, conforme a semântica de
-[`flock`](https://man7.org/linux/man-pages/man2/flock.2.html).
+The lock uses `File::try_lock`, opened for reading and writing, compatible with
+Windows locking requirements. `sync_all` requests persistence of file contents and
+metadata. These are the contracts of the
+[Rust standard library](https://doc.rust-lang.org/std/fs/struct.File.html).
+The guard explicitly releases the lock before closing the file. On Linux, this
+prevents descriptors duplicated by `fork`/`dup` from extending ownership after the
+writer stops, according to
+[`flock` semantics](https://man7.org/linux/man-pages/man2/flock.2.html).
 
-No Linux, a publicação também sincroniza o diretório depois do rename. No Windows,
-Rust não oferece essa sincronização de diretório de forma portátil. A implementação
-publica em um nome novo, mantém a geração anterior e foi testada com término abrupto
-de processos nas fases de troca. Isso não demonstra atomicidade contra queda de
-energia. `rename` tem comportamento dependente do sistema, conforme sua
-[documentação](https://doc.rust-lang.org/std/fs/fn.rename.html).
+On Linux, publication also synchronizes the directory after rename. On Windows,
+Rust does not provide this directory synchronization portably. The implementation
+publishes under a new name, retains the previous generation, and was tested with
+abrupt process termination during the switch phases. This does not demonstrate
+atomicity against power failure. `rename` behavior depends on the system, as
+described in its [documentation](https://doc.rust-lang.org/std/fs/fn.rename.html).
 
-## Verificar
+## Verification
 
 ```sh
 cargo test --locked --lib persistence
@@ -214,23 +213,24 @@ cargo test --locked --test persistence
 cargo test --locked --test aof_migration
 ```
 
-A suíte interna independe de contexto de release e executa arquivos reais em
-diretórios temporários. O pai inicia filhos da própria suíte e os termina somente
-depois de um sinal explícito nos pontos de falha. Não encerra processos alheios.
+The internal suite is independent of release context and uses real files in temporary
+directories. The parent starts children from the suite itself and terminates them
+only after an explicit signal at the failure points. It does not terminate unrelated
+processes.
 
-Os runners `release_crash_gate`, `release_recovery_gate` e `release_migration_gate`
-estão registrados em `releases/gates.json`. Eles exigem `GateContext`, repetem os
-casos efetivos e publicam recibos somente após validar SHA, plataforma e contexto
-do bundle. Os quatro testes ignorados da execução interna são esses três wrappers
-e o helper de processo filho; sua ausência não conta como gate aprovado.
+The `release_crash_gate`, `release_recovery_gate`, and `release_migration_gate` runners
+are registered in `releases/gates.json`. They require `GateContext`, repeat the actual
+cases, and publish receipts only after validating the SHA, platform, and bundle
+context. The four ignored tests in the internal run are these three wrappers and
+the child process helper; their absence does not count as a passed gate.
 
-O gate inicial de migração lê a fixture fixa `tests/fixtures/aof-v1.hex`, compacta,
-reabre e compara seu estado. Também recusa uma versão desconhecida preservando os
-bytes. A fixture representa o primeiro formato AOF, sem alegar migração de uma
-versão anterior publicada com persistência.
+The initial migration gate reads the fixed fixture `tests/fixtures/aof-v1.hex`,
+compacts it, reopens it, and compares its state. It also rejects an unknown version
+while preserving the bytes. The fixture represents the first AOF format, without
+claiming migration from an earlier published version with persistence.
 
-Validação de desenvolvimento do R03: a suíte `persistence` executou 20 testes com
-sucesso no Windows e no Ubuntu via WSL, incluindo nove pontos de crash de processo.
-Os arquivos dos ensaios Linux ficam em `/tmp`, no filesystem Linux. Esses resultados
-são verificação funcional local; os recibos do bundle final exigem nova execução no
-SHA congelado conforme o [guia de releases](releases.md).
+R03 development validation: the `persistence` suite passed 20 tests on Windows and
+Ubuntu via WSL, including nine process crash points. Linux test files reside in
+`/tmp`, on the Linux filesystem. These results are local functional verification;
+final bundle receipts require a new run on the frozen SHA according to the
+[release guide](releases.md).

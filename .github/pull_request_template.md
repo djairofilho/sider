@@ -1,10 +1,10 @@
-## Mudança
+## Change
 
-<!-- Explique o problema e o comportamento resultante. Cite a issue ou etapa do PLANO.md, quando houver. -->
+<!-- Explain the problem and resulting behavior. Reference the issue or PLANO.md step, when applicable. -->
 
-## Validação
+## Validation
 
-<!-- CI adiada até depois da 1.0. Liste os comandos locais executados, os resultados
-e qualquer limitação que afete a revisão. Use testes focados na implementação e
-cargo xtask check antes de integrar código; check --tools valida o utilitário.
-Execute testes adicionais proporcionais ao comportamento alterado. -->
+<!-- CI is deferred until after 1.0. List the local commands run, their results,
+and any limitations affecting review. Use focused tests during implementation and
+cargo xtask check before integrating code; check --tools validates the utility.
+Run additional tests proportionate to the behavior changed. -->

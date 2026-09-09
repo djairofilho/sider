@@ -1,166 +1,166 @@
-# Baseline interna R10 e migração para a 1.0
+# Internal R10 baseline and migration to 1.0
 
-A baseline R10 é um conjunto privado congelado por SHA e hashes, com pacote
-`0.1.0`, dados e backups reais. O congelamento ocorre depois da integração do
-runner, em checkout limpo, antes de alterar a versão para `1.0.0`. Não cria tag,
-release ou recibo de publicação. Prepare um conjunto por plataforma suportada:
-Windows MSVC x86_64 e Linux GNU x86_64.
+The R10 baseline is a private set frozen by SHA and hashes, with package `0.1.0`,
+real data, and backups. Freezing occurs after runner integration, in a clean checkout,
+before changing the version to `1.0.0`. It creates no tag, release, or publication
+receipt. Prepare one set per supported platform: Windows MSVC x86_64 and Linux GNU x86_64.
 
-A origem selecionada é `0021d875dde9da6cbbe9b5b84cd640681128e6ea`. Execute o
-congelamento em uma worktree limpa desse SHA, que ainda identifica `0.1.0`.
-O checkout candidato identifica `1.0.0` e consome o conjunto congelado na etapa
-de migração. Os hashes são obtidos dos arquivos realmente produzidos e guardados
-com a evidência; não são inferidos a partir do SHA da origem.
+The selected source is `0021d875dde9da6cbbe9b5b84cd640681128e6ea`. Run the freeze in
+a clean worktree at that SHA, which still identifies itself as `0.1.0`.
+The candidate checkout identifies itself as `1.0.0` and consumes the frozen set
+during migration. Hashes come from the files actually produced and are kept with
+the evidence; they are not inferred from the source SHA.
 
-## Preparar o pacote e registrar o build
+## Preparing the package and recording the build
 
-No SHA que será congelado, execute `cargo build --locked --release --bins` e
-empacote os quatro executáveis com README, licença e avisos, conforme o
-[contrato dos pacotes](packages.md). Guarde a saída real do build, seu código de
-término e os hashes observados. O runner de testes deve ser compilado no perfil
-normal; não sobrescreva os quatro arquivos de `target/release` durante a coleta.
+At the SHA to be frozen, run `cargo build --locked --release --bins` and package
+all four executables with README, license, and notices, according to the
+[package contract](packages.md). Keep actual build output, exit code, and observed
+hashes. Compile the test runner in the normal profile; do not overwrite the four
+`target/release` files during collection.
 
-Imediatamente depois do build e do empacotamento, produza um sidecar JSON UTF-8.
-Este contrato também serve ao pacote candidato, com sua versão e SHA próprios:
+Immediately after building and packaging, produce a UTF-8 JSON sidecar.
+This contract also applies to the candidate package, with its own version and SHA:
 
-| Campo | Valor exigido |
+| Field | Required value |
 | --- | --- |
 | `schema_version` | `1` |
-| `source_sha` | SHA completo, 40 hexadecimais minúsculos, do checkout limpo |
-| `target` | `x86_64-pc-windows-msvc` ou `x86_64-unknown-linux-gnu` |
-| `version` | `0.1.0` na origem; versão da candidata na migração |
-| `compiler` | stdout completo de `rustc --version --verbose`, incluindo LF final |
+| `source_sha` | Full SHA, 40 lowercase hexadecimal characters, from the clean checkout |
+| `target` | `x86_64-pc-windows-msvc` or `x86_64-unknown-linux-gnu` |
+| `version` | `0.1.0` at the source; candidate version during migration |
+| `compiler` | Complete stdout from `rustc --version --verbose`, including final LF |
 | `command` | `cargo` |
 | `args` | `["build","--locked","--release","--bins"]` |
-| `exit_code` | `0`, observado no build |
-| `source_clean_before`, `source_clean_after` | `true`, observado antes e depois do build |
-| `binaries` | Quatro objetos `{ "path", "bytes", "sha256" }`, ordenados por `path` |
-| `archive` | Objeto `{ "bytes", "sha256" }` do ZIP ou tar.gz produzido |
+| `exit_code` | `0`, observed during the build |
+| `source_clean_before`, `source_clean_after` | `true`, observed before and after the build |
+| `binaries` | Four `{ "path", "bytes", "sha256" }` objects, sorted by `path` |
+| `archive` | `{ "bytes", "sha256" }` object for the produced ZIP or tar.gz |
 
-Os nomes em `binaries` são `sider-aof-migrate`, `sider-backup`, `sider-replica`
-e `sider`, com `.exe` no Windows. Cada hash tem 64 hexadecimais minúsculos e
-cada tamanho é medido em bytes. `args` também aceita `"--target", "TARGET"`
-ao final, quando o build real usou esse argumento. Não há campos extras.
+Names in `binaries` are `sider-aof-migrate`, `sider-backup`, `sider-replica`,
+and `sider`, with `.exe` on Windows. Each hash has 64 lowercase hexadecimal
+characters and each size is measured in bytes. `args` also accepts
+`"--target", "TARGET"` at the end when the actual build used that argument.
+There are no extra fields.
 
-O sidecar é um registro observacional do operador. Ele vincula as declarações
-aos arquivos conferidos; não autentica quem produziu o build. Preserve os logs
-e o hash externo de `baseline.json` fora do diretório congelado.
+The sidecar is an operator observation record. It links declarations to checked
+files; it does not authenticate who produced the build. Preserve logs and the
+external hash of `baseline.json` outside the frozen directory.
 
-## Congelar sem reabrir os dados originais
+## Freezing without reopening original data
 
-Defina caminhos absolutos. O diretório de saída deve ser novo e ter pai existente:
+Set absolute paths. The output directory must be new and have an existing parent:
 
-| Variável | Entrada |
+| Variable | Input |
 | --- | --- |
-| `SIDER_BASELINE_PACKAGE` | Arquivo ZIP ou tar.gz realmente produzido |
-| `SIDER_BASELINE_BUILD_DIR` | Diretório com os quatro executáveis originais do build |
-| `SIDER_BASELINE_PROVENANCE` | Sidecar de build descrito acima |
-| `SIDER_INTERNAL_BASELINE_DIR` | Diretório novo para o conjunto congelado |
-| `SIDER_BASELINE_LONG_TTL_MS` | Opcional: 604800000 ms, sete dias, por padrão |
+| `SIDER_BASELINE_PACKAGE` | ZIP or tar.gz archive actually produced |
+| `SIDER_BASELINE_BUILD_DIR` | Directory with the four original build executables |
+| `SIDER_BASELINE_PROVENANCE` | Build sidecar described above |
+| `SIDER_INTERNAL_BASELINE_DIR` | New directory for the frozen set |
+| `SIDER_BASELINE_LONG_TTL_MS` | Optional: defaults to 604800000 ms, seven days |
 
-O TTL longo aceita de um a 365 dias. Escolha um prazo que ainda esteja vivo na
-validação da candidata. O TTL curto é de 60 segundos e precisa continuar vivo
-ao concluir a parada do processo.
+Long TTL accepts one to 365 days. Choose a deadline that will still be live during
+candidate validation. Short TTL is 60 seconds and must still be live when process
+shutdown completes.
 
 ```sh
 cargo test --locked --test persistence -- --ignored --exact freeze_internal_baseline --nocapture
 ```
 
-O runner verifica checkout, toolchain, sidecar, pacote e hashes dos quatro
-binários originais e extraídos. A extração limita nomes, inventário e bytes,
-grava cada membro em um arquivo novo e não materializa links do arquivo
-compactado. Cada servidor e cada CLI usado no ensaio vem desse pacote extraído.
+The runner checks the checkout, toolchain, sidecar, package, and hashes of the
+four original and extracted binaries. Extraction limits names, inventory, and bytes,
+writes each member to a new file, and does not materialize archive links.
+Every server and CLI used in the test comes from that extracted package.
 
-Os cenários usam um e quatro shards, roteamento versão 1, quota total de 4 MiB,
-registros AOF de até 65536 bytes, `always` e compactação automática desligada.
-Cada shard recebe strings, hashes, listas, sets e sorted sets com bytes binários.
-EXEC contém uma operação com WRONGTYPE e confirma a escrita posterior do lote.
-São conferidos dados, ordem, membros e representação de scores extremos.
+Scenarios use one and four shards, routing version 1, a total 4 MiB quota,
+AOF records up to 65536 bytes, `always`, and automatic compaction disabled.
+Each shard receives strings, hashes, lists, sets, and sorted sets with binary bytes.
+EXEC contains a WRONGTYPE operation and confirms the subsequent batch write.
+Data, order, members, and extreme-score representation are checked.
 
-Depois dessas comparações, o runner semeia o TTL curto, exporta o backup, confere
-os vencimentos absolutos e para o processo. No Linux, envia SIGTERM ao filho e
-exige saída bem-sucedida e remoção dos arquivos de prontidão. No Windows, registra
-explicitamente o término forçado do filho após o flush do backup e a política
-`always`; isso não representa parada cooperativa por sinal do console.
+After these comparisons, the runner seeds short TTL, exports the backup, checks
+absolute expiration times, and stops the process. On Linux, it sends SIGTERM to
+the child and requires successful exit and readiness file removal. On Windows,
+it explicitly records forced child termination after backup flush under the
+`always` policy; this does not represent cooperative console-signal shutdown.
 
-O backup é verificado e restaurado em outro diretório, aberto por outro processo
-do pacote R10. Os dados originais parados não voltam a ser abertos pelo servidor.
-O manifesto só é salvo depois dessas verificações e da nova conferência da
-identidade do checkout e dos arquivos do build.
+The backup is verified and restored into another directory, opened by another
+process from the R10 package. The stopped original data is not reopened by the server.
+The manifest is saved only after these checks and a fresh verification of checkout
+and build file identity.
 
-O JSON de sucesso informa o caminho, o SHA da origem e `manifest_sha256`.
-Guarde esse hash externamente. O conjunto contém:
+Success JSON reports the path, source SHA, and `manifest_sha256`.
+Store this hash externally. The set contains:
 
-- `baseline.json`, schema 1, task `R10`, identidade e inventário completo;
-- `build-provenance.json`, arquivo do pacote e seus quatro executáveis extraídos;
-- `datasets/shards-1` e `datasets/shards-4`, fechados na origem;
-- `backups/shards-1` e `backups/shards-4`, produzidos pela CLI real.
+- `baseline.json`, schema 1, task `R10`, identity, and complete inventory;
+- `build-provenance.json`, the package archive, and its four extracted executables;
+- `datasets/shards-1` and `datasets/shards-4`, closed at the source;
+- `backups/shards-1` and `backups/shards-4`, produced by the actual CLI.
 
-Cada cenário registra configuração, tags por shard, digest das respostas,
-vencimentos Unix, formato AOF, papel, época, sequência, método e horário da
-parada. Arquivos extras, ausentes, alterados, links e caminhos não portáteis
-fazem a validação falhar. Uma execução interrompida pode deixar um diretório
-parcial; ele não é uma baseline concluída sem manifesto e hash externo válidos.
+Each scenario records configuration, tags by shard, response digest, Unix expiration
+times, AOF format, role, epoch, sequence, and shutdown method/time.
+Extra, missing, or changed files, links, and nonportable paths fail validation.
+An interrupted run may leave a partial directory; it is not a completed baseline
+without a valid manifest and external hash.
 
-## Atualizar usando cópias e conferir a candidata
+## Upgrading through copies and checking the candidate
 
-O gate usa a baseline da mesma plataforma, com TTL curto já expirado e TTL longo
-ainda vivo. Preserve o conjunto original. Defina:
+The gate uses the same-platform baseline, with short TTL already expired and long
+TTL still live. Preserve the original set. Set:
 
-| Variável | Entrada |
+| Variable | Input |
 | --- | --- |
-| `SIDER_INTERNAL_BASELINE_DIR` | Conjunto R10 congelado |
-| `SIDER_INTERNAL_BASELINE_SHA256` | Hash externo de `baseline.json` |
-| `SIDER_MIGRATION_PACKAGE` | Arquivo realmente empacotado da candidata |
-| `SIDER_MIGRATION_BUILD_DIR` | Quatro executáveis originais do build candidato |
-| `SIDER_MIGRATION_PROVENANCE` | Sidecar desse build candidato |
-| `SIDER_MIGRATION_OUTPUT_DIR` | Diretório novo, fora da baseline, para o ensaio |
+| `SIDER_INTERNAL_BASELINE_DIR` | Frozen R10 set |
+| `SIDER_INTERNAL_BASELINE_SHA256` | External hash of `baseline.json` |
+| `SIDER_MIGRATION_PACKAGE` | Actual packaged candidate archive |
+| `SIDER_MIGRATION_BUILD_DIR` | Four original candidate build executables |
+| `SIDER_MIGRATION_PROVENANCE` | Sidecar for this candidate build |
+| `SIDER_MIGRATION_OUTPUT_DIR` | New directory outside the baseline for the test |
 
-Com o contexto `GateContext(migration)` do [build candidato](releases.md):
+With the [candidate build](releases.md) `GateContext(migration)` context:
 
 ```sh
 cargo test --locked --test persistence -- --ignored --exact release_migration_gate --nocapture
 ```
 
-O gate chama diretamente os casos existentes de formato inicial, versão
-desconhecida e migração tipada, além dos dois cenários R10. Só publica recibo
-após sucesso completo e validação do contexto de publicação.
+The gate directly calls the existing initial-format, unknown-version, and typed
+migration cases, plus both R10 scenarios. It publishes a receipt only after
+complete success and publication context validation.
 
-Para cada layout, o runner abre uma cópia dos dados com o executável novo e
-compara os cinco tipos, os efeitos de EXEC, o TTL longo absoluto e a ausência
-do TTL curto vencido durante a parada. Inicia uma réplica vazia da mesma versão
-nova, confere snapshot, delta e recusa de escrita. Também produz e restaura um
-backup da candidata. Cópias separadas com corrupção ou quantidade incompatível
-de shards precisam ser recusadas sem prontidão nem alteração dos arquivos.
+For each layout, the runner opens a data copy with the new executable and compares
+all five types, EXEC effects, absolute long TTL, and the absence of short TTL that
+expired during downtime. It starts an empty replica of the same new version,
+checks snapshot, delta, and write rejection. It also produces and restores a
+candidate backup. Separate copies with corruption or incompatible shard counts
+must be rejected without readiness or file changes.
 
-A rota de restauração do backup antigo usa a **CLI congelada 0.1.0** para criar
-um diretório novo. Só depois esse diretório é aberto pelo **servidor candidato**.
-`sider-backup` exige a mesma versão do manifesto do backup; não use a CLI nova
-diretamente sobre o backup antigo. Essa regra preserva o contrato da ferramenta.
-Se for preciso voltar à origem, restaure outra cópia com a CLI e o servidor
-antigos, mantenha o mesmo layout e confira os dados antes de redirecionar clientes.
-Escritas posteriores ao ponto do backup não fazem parte dessa recuperação.
+Restoring the old backup uses the **frozen 0.1.0 CLI** to create a new directory.
+Only then does the **candidate server** open that directory.
+`sider-backup` requires the same version as the backup manifest; do not use the new
+CLI directly on the old backup. This rule preserves the tool's contract.
+To return to the source, restore another copy with the old CLI and server, keep
+the same layout, and check data before redirecting clients.
+Writes after the backup point are not part of this recovery.
 
-Ao final, o runner verifica novamente todo o inventário congelado e registra os
-hashes do pacote e da proveniência da candidata. Não testa nem promete replicação
-entre versões distintas. Estes casos usam pacotes e processos reais, mas não
-substituem os demais [ensaios operacionais](metrics.md) ou o gate de soak.
+At completion, the runner checks the entire frozen inventory again and records
+candidate package and provenance hashes. It neither tests nor promises replication
+across different versions. These cases use real packages and processes, but do
+not replace the other [operational tests](metrics.md) or the soak gate.
 
-## Ensaiar o runner antes do congelamento oficial
+## Rehearsing the runner before the official freeze
 
-Com pacote, build e proveniência `0.1.0` do checkout limpo, defina as três entradas
-`SIDER_BASELINE_PACKAGE`, `SIDER_BASELINE_BUILD_DIR` e `SIDER_BASELINE_PROVENANCE`:
+With the `0.1.0` package, build, and provenance from a clean checkout, set the three
+inputs `SIDER_BASELINE_PACKAGE`, `SIDER_BASELINE_BUILD_DIR`, and `SIDER_BASELINE_PROVENANCE`:
 
 ```sh
 cargo test --locked --test persistence -- --ignored --exact rehearse_internal_baseline_migration --nocapture
 ```
 
-Esse ensaio cria dados temporários com TTL curto de 30 segundos e longo de uma
-hora, espera o vencimento real e executa a migração para a mesma versão do pacote.
-O relatório identifica `same_version_short_rehearsal_not_frozen_baseline`.
-Não emite recibo, não guarda uma baseline oficial e não prova atualização para
-1.0. A evidência 0.1.0 para 1.0 vem da execução posterior do gate candidato.
+This rehearsal creates temporary data with a short TTL of 30 seconds and a long
+TTL of one hour, waits for actual expiration, and migrates to the same package version.
+The report identifies `same_version_short_rehearsal_not_frozen_baseline`.
+It issues no receipt, saves no official baseline, and does not prove an upgrade
+to 1.0. Evidence for 0.1.0 to 1.0 comes from the later candidate gate execution.
 
-Os testes nativos do inventário e da proveniência usam arquivos declarados como
-fixtures artificiais; eles validam recusa de contratos e nunca são contados como
-evidência de execução de pacotes reais.
+Native inventory and provenance tests use files explicitly declared as artificial
+fixtures; they validate contract rejection and are never counted as evidence
+of running real packages.

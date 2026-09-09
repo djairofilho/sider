@@ -1,186 +1,187 @@
-# Plano inicial do Sider: registro da versão 0.1
+# Initial Sider plan: version 0.1 record
 
-Este documento preserva o desenho inicial de setembro de 2026 para o núcleo
-RESP2 da versão 0.1. O futuro verbal, o worker único e as limitações nas seções
-abaixo pertencem àquele escopo histórico; não descrevem todas as capacidades
-do checkout atual. As etapas R01-01 a R01-05 foram implementadas e sua evidência
-permanece vinculada aos SHAs registrados no [guia de testes](docs/testing.md).
+This document preserves the initial September 2026 design for the version 0.1
+RESP2 core. Future-tense wording, the single worker, and the limitations in the
+sections below belong to that historical scope; they do not describe every
+capability of the current checkout. Stages R01-01 through R01-05 were implemented,
+and their evidence remains tied to the SHAs recorded in the [testing guide](docs/testing.md).
 
-O [README](README.md) e a [matriz de compatibilidade](docs/compatibility-matrix.md)
-descrevem a implementação atual, incluindo coleções, TTL, persistência, shards,
-transações, replicação e backup. O [ROADMAP](ROADMAP.md) e seu
-[manifesto versionado](releases/plan.json) definem tarefas, dependências e critérios
-até a 1.0. O [guia de releases](docs/releases.md) governa os checkpoints internos
-e a publicação; este registro inicial não substitui esses contratos.
+The [README](README.md) and [compatibility matrix](docs/compatibility-matrix.md)
+describe the current implementation, including collections, TTL, persistence,
+shards, transactions, replication, and backup. The [ROADMAP](ROADMAP.md) and its
+[versioned manifest](releases/plan.json) define tasks, dependencies, and criteria
+through 1.0. The [release guide](docs/releases.md) governs internal checkpoints
+and publication; this initial record does not replace those contracts.
 
-CI e publicação automática foram adiadas para depois da 1.0. Até a 1.0 inclusive,
-as etapas avançam com testes locais proporcionais. Os marcos 0.1–0.10 não exigem
-publicação. A 1.0 terá candidata e final promovidas manualmente com o mesmo SHA e
-os mesmos arquivos, preservando os critérios funcionais e as evidências reais.
+CI and automatic publication were deferred until after 1.0. Through and including
+1.0, stages advance with proportionate local tests. Milestones 0.1–0.10 do not
+require publication. The 1.0 candidate and final release will be promoted manually
+with the same SHA and files, preserving functional criteria and actual evidence.
 
-## Índice
+## Contents
 
-- [Ponto de partida](#ponto-de-partida)
-- [Escopo da versão 0.1](#escopo-da-versão-01)
-- [Arquitetura e decisões de Rust](#arquitetura-e-decisões-de-rust)
-- [Estrutura inicial](#estrutura-inicial)
-- [Contratos principais](#contratos-principais)
-- [Limites e ciclo de vida](#limites-e-ciclo-de-vida)
-- [Checklist incremental](#checklist-incremental)
-- [Critérios de conclusão](#critérios-de-conclusão)
-- [Riscos e evolução](#riscos-e-evolução)
+- [Starting point](#starting-point)
+- [Version 0.1 scope](#version-01-scope)
+- [Architecture and Rust decisions](#architecture-and-rust-decisions)
+- [Initial structure](#initial-structure)
+- [Core contracts](#core-contracts)
+- [Limits and lifecycle](#limits-and-lifecycle)
+- [Incremental checklist](#incremental-checklist)
+- [Completion criteria](#completion-criteria)
+- [Risks and evolution](#risks-and-evolution)
 
-## Ponto de partida
+## Starting point
 
-Inspeção inicial em 7 de setembro de 2026, antes do bootstrap:
+Initial inspection on September 7, 2026, before the bootstrap:
 
-- A pasta `NovoRedis` está vazia, sem código e sem repositório Git inicializado.
-- Rust e Cargo 1.97.1 estão disponíveis, com toolchain estável Windows MSVC.
-- O executável Docker está instalado. O funcionamento do daemon não foi verificado.
-- `redis-cli` não foi encontrado no `PATH`.
+- The `NovoRedis` folder is empty, without code or an initialized Git repository.
+- Rust and Cargo 1.97.1 are available, with the stable Windows MSVC toolchain.
+- The Docker executable is installed. Daemon operation has not been verified.
+- `redis-cli` was not found in `PATH`.
 
-A implementação usa pacote e binário chamados `sider`, versão `0.1.0` e Edition
-2024. A pasta atual mantém seu nome sem afetar o nome do programa. O bootstrap
-inclui o repositório privado `djairofilho/sider`, solicitado após o planejamento.
-A publicação da crate está desabilitada com `publish = false`.
+The implementation uses a package and binary named `sider`, version `0.1.0`,
+and Edition 2024. The current folder keeps its name without affecting the program
+name. The bootstrap includes the private `djairofilho/sider` repository, requested
+after planning. Crate publication is disabled with `publish = false`.
 
-## Escopo da versão 0.1
+## Version 0.1 scope
 
-O resultado esperado é executar `sider`, conectar com `redis-cli` em RESP2 e testar
-operações sobre chaves e valores binários, com um único worker de armazenamento.
+The expected result is to run `sider`, connect with `redis-cli` over RESP2, and
+test operations on binary keys and values with a single storage worker.
 
-| Comando | Contrato inicial | Evidência esperada |
+| Command | Initial contract | Expected evidence |
 | --- | --- | --- |
-| `PING` | Responder `+PONG\r\n` | Comparação dos bytes com Redis |
-| `PING mensagem` | Devolver a mensagem como bulk string | Testar vazio e bytes não UTF-8 |
-| `ECHO mensagem` | Devolver exatamente os bytes recebidos | Testar CRLF dentro do conteúdo |
-| `GET chave` | Bulk string ou `$-1\r\n` quando ausente | Distinguir ausência de valor vazio |
-| `SET chave valor` | Criar ou substituir; responder `+OK\r\n` | Verificar o estado com `GET` |
-| `DEL chave [chave ...]` | Contar as chaves efetivamente removidas | Testar ausentes e repetidas |
+| `PING` | Return `+PONG\r\n` | Byte comparison with Redis |
+| `PING message` | Return the message as a bulk string | Test empty and non-UTF-8 bytes |
+| `ECHO message` | Return the exact bytes received | Test CRLF within content |
+| `GET key` | Bulk string or `$-1\r\n` when absent | Distinguish absence from an empty value |
+| `SET key value` | Create or replace; return `+OK\r\n` | Check state with `GET` |
+| `DEL key [key ...]` | Count keys actually removed | Test absent and repeated keys |
 
-Referências de comportamento: [PING](https://redis.io/docs/latest/commands/ping/),
+Behavior references: [PING](https://redis.io/docs/latest/commands/ping/),
 [ECHO](https://redis.io/docs/latest/commands/echo/),
 [GET](https://redis.io/docs/latest/commands/get/),
-[SET](https://redis.io/docs/latest/commands/set/) e
+[SET](https://redis.io/docs/latest/commands/set/), and
 [DEL](https://redis.io/docs/latest/commands/del/).
-O tipo exato de `PONG` também foi conferido no
-[código oficial do Redis](https://github.com/redis/redis/blob/unstable/src/server.c),
-nas definições de `shared.pong` e `pingCommand`.
+The exact type of `PONG` was also checked in the
+[official Redis source](https://github.com/redis/redis/blob/unstable/src/server.c),
+in the `shared.pong` and `pingCommand` definitions.
 
-As seguintes regras fecham as ambiguidades do escopo:
+The following rules resolve scope ambiguities:
 
-- Nomes de comandos serão comparados sem distinguir maiúsculas de minúsculas ASCII.
-  Chaves e valores manterão todos os bytes, inclusive `NUL` e sequências não UTF-8.
-- `SET` aceitará apenas sua forma básica. Argumentos adicionais produzirão
-  `ERR unsupported SET options`, sem alteração de estado. Essa é uma divergência
-  intencional para opções válidas no Redis e estará na matriz de compatibilidade.
-- Aridade incorreta dos comandos suportados terá resposta compatível com Redis.
-  Comando desconhecido produzirá `ERR unknown command`. O texto simplificado desse
-  erro será uma divergência documentada; não reproduzirá argumentos do cliente.
-- Será oferecido apenas o banco lógico padrão. Não haverá `SELECT`, `AUTH`, `HELLO`,
-  `COMMAND`, `CLIENT`, RESP3 ou formato de comandos inline.
-- O codec representará os cinco tipos RESP2. As requisições executáveis precisarão
-  ser arrays não vazios de bulk strings não nulas.
-- Arrays raiz vazios/nulos e argumentos de tipos diferentes serão rejeitados como
-  formato de requisição inválido. O tratamento não será anunciado como idêntico ao
-  Redis para entradas fora do subconjunto declarado.
-- `EXISTS` fica para a 0.2: embora apareça na lista geral de comandos iniciais, o
-  recorte específico da 0.1 enumera somente os cinco comandos acima.
+- Command names will be compared case-insensitively in ASCII.
+  Keys and values will retain every byte, including `NUL` and non-UTF-8 sequences.
+- `SET` will accept only its basic form. Additional arguments will produce
+  `ERR unsupported SET options` without changing state. This is an intentional
+  difference for options valid in Redis and will be in the compatibility matrix.
+- Incorrect arity for supported commands will receive a Redis-compatible response.
+  Unknown commands will produce `ERR unknown command`. This simplified error
+  text will be a documented difference; it will not repeat client arguments.
+- Only the default logical database will be provided. There will be no `SELECT`,
+  `AUTH`, `HELLO`, `COMMAND`, `CLIENT`, RESP3, or inline command format.
+- The codec will represent all five RESP2 types. Executable requests must be
+  nonempty arrays of non-null bulk strings.
+- Empty/null root arrays and arguments of other types will be rejected as invalid
+  request formats. Handling will not be advertised as identical to Redis for
+  inputs outside the declared subset.
+- `EXISTS` is deferred to 0.2: although listed among the general initial commands,
+  the specific 0.1 scope enumerates only the five commands above.
 
-A forma das requisições e os tipos são definidos na
-[especificação RESP](https://redis.io/docs/latest/develop/reference/protocol-spec/).
-A distinção entre erros de framing e comandos é apoiada pelo
-[processamento de requisições do Redis](https://github.com/redis/redis/blob/unstable/src/networking.c).
+Request forms and types are defined in the
+[RESP specification](https://redis.io/docs/latest/develop/reference/protocol-spec/).
+The distinction between framing and command errors is supported by
+[Redis request processing](https://github.com/redis/redis/blob/unstable/src/networking.c).
 
-Haverá múltiplas conexões e tratamento sequencial de comandos concatenados desde a
-0.1. TCP entrega um fluxo de bytes: uma leitura pode conter parte de um comando ou
-vários comandos. Isso antecipa a correção básica de pipeline, mas não inclui batching,
-vários comandos em execução por conexão ou otimizações de throughput.
+Multiple connections and sequential handling of concatenated commands will be
+available from 0.1. TCP delivers a byte stream: one read may contain part of a
+command or several commands. This provides basic pipeline correctness early,
+but does not include batching, multiple executing commands per connection,
+or throughput optimizations.
 
-Limites de entrada, backpressure e encerramento básico também entram nesta versão.
-São necessários para controlar recursos e executar testes confiáveis. TTL, limite do
-dataset, AOF, shards, replicação, novos tipos e benchmarks comparativos ficam depois.
+Input limits, backpressure, and basic shutdown are also part of this version.
+They are needed to control resources and run reliable tests. TTL, dataset limits,
+AOF, shards, replication, new types, and comparative benchmarks come later.
 
-## Arquitetura e decisões de Rust
+## Architecture and Rust decisions
 
-Uma única crate terá uma biblioteca testável e um binário pequeno. A separação em
-várias crates será considerada quando houver consumidores ou ciclos de evolução
-independentes. No início, módulos oferecem fronteiras suficientes.
+One crate will provide a testable library and a small binary. Splitting into
+multiple crates will be considered when there are independent consumers or
+evolution cycles. Initially, modules provide sufficient boundaries.
 
 ```text
-listener TCP
+TCP listener
     |
-    +-- conexão A: buffer -> decoder -> parser de comando --+
+    +-- connection A: buffer -> decoder -> command parser --+
     |                                                      |
-    +-- conexão B: buffer -> decoder -> parser de comando --+--> mpsc limitado
+    +-- connection B: buffer -> decoder -> command parser --+--> bounded mpsc
                                                                   |
-                                                           worker único
-                                                           dono do HashMap
+                                                           single worker
+                                                           owns HashMap
                                                                   |
-                                                oneshot para a conexão de origem
+                                                oneshot to the originating connection
                                                                   |
                                                          encoder -> socket
 ```
 
-### Ownership do armazenamento
+### Storage ownership
 
-O worker possuirá `HashMap<Bytes, Bytes>`. Apenas essa tarefa acessará o mapa.
-Cada comando será aplicado de forma síncrona, sem `await` durante a alteração do
-estado. `DEL` com várias chaves terminará antes do próximo comando começar.
+The worker will own `HashMap<Bytes, Bytes>`. Only that task will access the map.
+Each command will be applied synchronously, without `await` while changing state.
+A multikey `DEL` will finish before the next command starts.
 
-O worker será uma tarefa Tokio, não uma thread dedicada ou fixada em um núcleo.
-O runtime poderá executar tarefas de rede em paralelo, mas as operações do mapa
-serão serializadas. Criar mais tarefas não torna o armazenamento paralelo.
+The worker will be a Tokio task, not a dedicated or core-pinned thread.
+The runtime may execute networking tasks in parallel, but map operations will
+be serialized. Creating more tasks does not make storage parallel.
 
-Manteremos o hasher padrão do `HashMap` inicialmente. Trocar o algoritmo exige
-medição e análise da resistência a entradas adversariais.
+We will initially retain the default `HashMap` hasher. Changing the algorithm
+requires measurement and analysis of resistance to adversarial input.
 
-### Canais e ordenação
+### Channels and ordering
 
-Cada conexão terá um handle clonável contendo um `mpsc::Sender<Request>`.
-O envelope carregará um comando e um canal `oneshot` de resposta. O enum de comandos
-permanecerá independente dos canais, para poder ser testado e reutilizado no replay
-futuro. O padrão de tarefa proprietária e troca de mensagens é documentado no
-[tutorial de canais do Tokio](https://tokio.rs/tokio/tutorial/channels).
+Each connection will have a cloneable handle containing an `mpsc::Sender<Request>`.
+The envelope will carry a command and a `oneshot` response channel.
+The command enum will remain independent of channels so it can be tested and
+reused in future replay. The owning-task/message-passing pattern is documented
+in the [Tokio channels tutorial](https://tokio.rs/tokio/tutorial/channels).
 
-Todos os comandos válidos, inclusive `PING` e `ECHO`, passarão pelo worker na 0.1.
-Isso simplifica o fluxo. O custo dos canais será avaliado posteriormente.
+All valid commands, including `PING` and `ECHO`, will pass through the worker in 0.1.
+This simplifies the flow. Channel cost will be evaluated later.
 
-Cada conexão aguardará a execução e a escrita de uma resposta antes de despachar
-seu próximo comando. Assim, preservaremos a ordem por conexão e limitaremos a um
-pedido em voo por cliente. Entre conexões, valerá a ordem recebida pelo worker;
-não haverá promessa de ordem por instante de chegada ao socket ou justiça estrita.
+Each connection will wait for execution and response writing before dispatching
+its next command. This preserves per-connection ordering and limits each client
+to one in-flight request. Across connections, worker receive order applies;
+there is no promise of socket-arrival ordering or strict fairness.
 
-### Buffers e dados binários
+### Buffers and binary data
 
-A conexão possuirá seu `BytesMut`. O decoder guardará índices e estado de parsing,
-sem referências emprestadas que atravessem leituras ou realocações do buffer.
+The connection will own its `BytesMut`. The decoder will store indexes and parsing
+state, without borrowed references spanning reads or buffer reallocations.
 
-Na primeira implementação, os payloads de um frame completo serão copiados para
-`Bytes` independentes antes de liberar o prefixo do buffer. O parser de comandos
-moverá esses valores para o comando, sem uma segunda cópia do conteúdo.
+In the first implementation, complete-frame payloads will be copied into independent
+`Bytes` before releasing the buffer prefix. The command parser will move those
+values into the command without a second content copy.
 
-Essa cópia deliberada evita que uma chave pequena mantenha vivo um grande buffer
-de rede. A retenção é uma consequência possível do compartilhamento de armazenamento
-descrito na [documentação de Bytes](https://docs.rs/bytes/latest/bytes/struct.Bytes.html).
-`GET` poderá clonar o `Bytes` já armazenado para a resposta, compartilhando conteúdo
-imutável. Zero-copy na entrada será uma otimização posterior, acompanhada de medidas.
+This deliberate copy prevents a small key from keeping a large network buffer
+alive. Retention is a possible consequence of shared storage described in the
+[Bytes documentation](https://docs.rs/bytes/latest/bytes/struct.Bytes.html).
+`GET` may clone the stored `Bytes` for its response, sharing immutable content.
+Zero-copy input will be a later optimization, accompanied by measurements.
 
-### Fronteiras e dependências
+### Boundaries and dependencies
 
-O codec não conhecerá sockets nem armazenamento. O parser de comandos não alterará
-estado. O mapa não conhecerá RESP. A conexão coordenará essas partes.
+The codec will not know about sockets or storage. The command parser will not
+change state. The map will not know about RESP. The connection will coordinate these parts.
 
-Dependências de produção: `tokio`, `bytes`, `thiserror`, `tracing` e
-`tracing-subscriber`. Ativar apenas as funcionalidades Tokio necessárias para rede,
-I/O, runtime multithread, canais, timers e sinais. Nos testes, usar `proptest` e as
-utilidades de controle de tempo do Tokio.
+Production dependencies: `tokio`, `bytes`, `thiserror`, `tracing`, and
+`tracing-subscriber`. Enable only the Tokio features needed for networking,
+I/O, the multithread runtime, channels, timers, and signals. Tests will use
+`proptest` and Tokio's time-control utilities.
 
-O código próprio começará com `#![forbid(unsafe_code)]`. Isso não afirma que todas
-as dependências transitivas sejam livres de `unsafe`. O projeto não usará panics
-como forma de tratar dados enviados pelo cliente.
+Project code will start with `#![forbid(unsafe_code)]`. This does not claim that
+all transitive dependencies are free of `unsafe`. The project will not use panics
+to handle client-supplied data.
 
-## Estrutura inicial
+## Initial structure
 
 ```text
 sider/
@@ -220,19 +221,19 @@ sider/
     └── compatibility.md
 ```
 
-Os arquivos serão criados quando sua etapa começar. Testes unitários ficarão junto
-dos módulos. `store.rs` conterá a execução síncrona dos cinco comandos; não haverá
-um arquivo por comando enquanto essas implementações forem pequenas.
+Files will be created when their stage begins. Unit tests will stay alongside
+modules. `store.rs` will contain synchronous execution of the five commands;
+there will not be one file per command while these implementations remain small.
 
-Não criaremos módulos vazios de expiração, persistência, replicação ou roteamento.
-O handle do worker será a fronteira a preservar quando o roteador surgir na 0.4.
+We will not create empty expiration, persistence, replication, or routing modules.
+The worker handle will be the boundary to preserve when the router arrives in 0.4.
 
-## Contratos principais
+## Core contracts
 
-Os trechos abaixo são esboços de interface, não arquivos de implementação completos.
-Todos os tipos de erro citados serão definidos com `thiserror` em sua etapa.
+The snippets below are interface sketches, not complete implementation files.
+Every referenced error type will be defined with `thiserror` in its respective stage.
 
-### Codec RESP2
+### RESP2 codec
 
 ```rust
 use bytes::{Bytes, BytesMut};
@@ -255,32 +256,32 @@ pub fn encode(frame: &Frame, dst: &mut BytesMut, limits: RespLimits)
     -> Result<(), EncodeError>;
 ```
 
-Usaremos `Bytes` também em simple strings e erros para não exigir UTF-8 no codec.
-Esses tipos continuarão proibindo CR e LF no conteúdo, conforme RESP. Respostas
-internas usarão mensagens ASCII controladas.
+We will also use `Bytes` for simple strings and errors to avoid requiring UTF-8
+in the codec. Those types will continue to prohibit CR and LF in content, as
+required by RESP. Internal replies will use controlled ASCII messages.
 
-Invariantes do decoder:
+Decoder invariants:
 
-1. `Ok(None)` significa frame incompleto. O conteúdo de `src` fica intacto; somente
-   o estado interno de varredura avança. O chamador pode acrescentar bytes ao final.
-2. `Ok(Some(frame))` consome exatamente um frame, mantém o restante de `src` e
-   reinicializa o estado para o próximo. Cada conexão terá seu próprio decoder.
-3. `Err` significa formato inválido ou limite excedido. A conexão será encerrada;
-   não tentaremos recuperar sincronização depois de framing inválido.
-4. O scanner preservará cursor, pilha de arrays e metadados dos elementos já lidos.
-   Bytes e elementos anteriores não serão reprocessados a cada fragmento recebido.
-5. Comprimentos e offsets usarão operações verificadas. Não haverá reserva de
-   memória proporcional ao tamanho declarado antes de validar os limites.
-6. O limite agregado incluirá os bytes de framing. O contador de nós incluirá arrays
-   e seus elementos, inclusive o nó raiz. Profundidade e quantidade serão independentes.
-7. Somente após validar o frame completo, o decoder materializará a árvore e copiará
-   os payloads. Metadados parciais também terão crescimento limitado.
+1. `Ok(None)` means an incomplete frame. The content of `src` remains intact;
+   only the internal scan state advances. The caller can append bytes at the end.
+2. `Ok(Some(frame))` consumes exactly one frame, retains the rest of `src`, and
+   resets state for the next frame. Each connection will have its own decoder.
+3. `Err` means invalid format or an exceeded limit. The connection will close;
+   we will not attempt resynchronization after invalid framing.
+4. The scanner will preserve its cursor, array stack, and metadata for previously
+   read elements. Earlier bytes and elements will not be reprocessed for each fragment.
+5. Lengths and offsets will use checked operations. No memory proportional to
+   the declared size will be reserved before validating limits.
+6. The aggregate limit will include framing bytes. The node count will include
+   arrays and their elements, including the root node. Depth and count will be independent.
+7. Only after validating the complete frame will the decoder materialize the tree
+   and copy payloads. Partial metadata growth will also be bounded.
 
-O encoder validará o tamanho total e o conteúdo dos tipos simples antes de alterar
-`dst`. Em erro, não deixará resposta parcial no buffer. Round trips só serão exigidos
-para frames válidos dentro dos limites; codificações equivalentes podem ser normalizadas.
+The encoder will validate total size and simple-type content before changing `dst`.
+On error, it will leave no partial response in the buffer. Round trips will be
+required only for valid frames within limits; equivalent encodings may be normalized.
 
-### Comando e resposta
+### Command and reply
 
 ```rust
 pub enum Command {
@@ -301,14 +302,14 @@ pub enum Reply {
 pub fn parse(frame: Frame) -> Result<Command, RequestError>;
 ```
 
-`RequestError` distinguirá estrutura inválida de requisição, que fecha a conexão,
-de erro de comando, que permite continuar. Aridade será validada antes do envio ao
-worker. `Reply` será convertido para `Frame` na camada de protocolo.
+`RequestError` will distinguish invalid request structure, which closes the
+connection, from command errors, which allow continuation. Arity will be validated
+before sending to the worker. `Reply` will be converted to `Frame` in the protocol layer.
 
-O parser preservará a lista de `DEL`, inclusive duplicatas. O store contará apenas
-remoções bem-sucedidas. Não é necessário deduplicar a entrada para obter esse resultado.
+The parser will preserve the `DEL` list, including duplicates. The store will count
+only successful removals. Input deduplication is not needed to obtain this result.
 
-### Worker e servidor
+### Worker and server
 
 ```rust
 pub struct Request {
@@ -331,302 +332,301 @@ pub async fn serve(
 ) -> Result<(), ServerError>;
 ```
 
-`serve` criará o worker e supervisionará as tarefas. Receber um listener já aberto
-permitirá testes com `127.0.0.1:0`, sem disputar portas fixas. O binário carregará
-configuração, iniciará logs, abrirá o listener e fornecerá o sinal de encerramento.
+`serve` will create the worker and supervise tasks. Accepting an already open
+listener will allow tests with `127.0.0.1:0` without competing for fixed ports.
+The binary will load configuration, initialize logging, open the listener,
+and provide the shutdown signal.
 
-`Store::execute` será testável sem runtime. O `Result` do envelope e do handle
-separará indisponibilidade do worker de uma resposta normal com chave ausente.
-Nenhum contrato promete recuperar falta de memória do processo.
+`Store::execute` will be testable without a runtime. The envelope and handle
+`Result` will distinguish worker unavailability from a normal missing-key reply.
+No contract promises recovery from process out-of-memory conditions.
 
-## Limites e ciclo de vida
+## Limits and lifecycle
 
-Defaults propostos para desenvolvimento local, ajustáveis em configuração:
+Proposed defaults for local development, adjustable through configuration:
 
-| Parâmetro | Valor inicial | Regra |
+| Parameter | Initial value | Rule |
 | --- | --- | --- |
-| Endereço | `127.0.0.1:6379` | Alterável por `SIDER_ADDR` |
-| Conexões ativas | 32 | Excedentes são fechadas sem criar tarefa persistente |
-| Fila do worker | 32 mensagens | Envio aguarda capacidade disponível |
-| Pedidos em voo por conexão | 1 | Abrange espera na fila, execução e resposta |
-| Frame de entrada | 4 MiB | Inclui cabeçalhos, payloads e CRLF |
-| Bulk string | 1 MiB | Vale individualmente para chaves e valores |
-| Buffer de entrada | 4 MiB | Limitar antes de cada leitura |
-| Linha simples/cabeçalho | 1 KiB | Evitar busca ilimitada por CRLF |
-| Nós por frame | 1.024 | Inclui raiz; até 1.023 argumentos em requisição plana |
-| Profundidade de arrays | 16 | Array raiz conta como nível 1 |
-| Buffer de resposta | 4 MiB | No máximo uma resposta sendo escrita |
-| Formação de frame incompleto | 10 s | Desde o primeiro byte, sem renovar a cada fragmento |
-| Espera por envio e resposta do worker | 5 s | Prazo total para a chamada `execute` |
-| Escrita de resposta | 5 s | Timeout fecha a conexão |
-| Encerramento | 5 s | Drenagem limitada, seguida de término forçado |
+| Address | `127.0.0.1:6379` | Configurable through `SIDER_ADDR` |
+| Active connections | 32 | Excess connections close without creating a persistent task |
+| Worker queue | 32 messages | Sending waits for available capacity |
+| In-flight requests per connection | 1 | Covers queue wait, execution, and response |
+| Input frame | 4 MiB | Includes headers, payloads, and CRLF |
+| Bulk string | 1 MiB | Applies individually to keys and values |
+| Input buffer | 4 MiB | Limit before each read |
+| Simple line/header | 1 KiB | Avoid unbounded CRLF searches |
+| Nodes per frame | 1,024 | Includes root; up to 1,023 arguments in a flat request |
+| Array depth | 16 | Root array counts as level 1 |
+| Response buffer | 4 MiB | At most one response being written |
+| Incomplete frame assembly | 10 s | From the first byte, without renewing for each fragment |
+| Worker send and response wait | 5 s | Total deadline for the `execute` call |
+| Response writing | 5 s | Timeout closes the connection |
+| Shutdown | 5 s | Bounded drain, followed by forced termination |
 
-`ServerConfig` agrupará esses limites; `RespLimits` conterá a parte do codec.
-Parâmetros serão expostos por variáveis `SIDER_*` documentadas, com parse estrito.
-Limites, capacidades e timeouts iguais a zero, relações incoerentes e overflow
-serão rejeitados antes de abrir o servidor. A porta `0` é uma exceção intencional:
-permitirá que o sistema escolha uma porta efêmera nos testes de rede. Os testes
-usarão limites menores para exercitar as fronteiras.
+`ServerConfig` will group these limits; `RespLimits` will contain the codec portion.
+Parameters will be exposed through documented `SIDER_*` variables with strict parsing.
+Zero limits, capacities, and timeouts, inconsistent relationships, and overflow
+will be rejected before starting the server. Port `0` is an intentional exception:
+it allows the system to choose an ephemeral port in network tests.
+Tests will use smaller limits to exercise boundaries.
 
-Uma fila limitada conta mensagens, não bytes. O limite por frame, o número de
-conexões e um único pedido em voo devem ser analisados juntos. Como orçamento
-conservador, considerar `conexões × (buffer + pedido + resposta)`, mais
-`capacidade_fila × pedido` e um pedido em execução no worker, além de metadados e
-capacidade das alocações. Essa conta pode duplicar pedidos de clientes ainda ativos,
-mas cobre comandos que permanecem aceitos depois de uma desconexão, quando a vaga
-do cliente já pode ter sido reutilizada. O
-[contrato de mpsc do Tokio](https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html)
-documenta capacidade e backpressure, mas não estabelece quota de memória do processo.
+A bounded queue counts messages, not bytes. The per-frame limit, connection count,
+and single in-flight request must be analyzed together. As a conservative budget,
+consider `connections × (buffer + request + response)`, plus
+`queue_capacity × request` and one request executing in the worker, in addition
+to metadata and allocation capacity. This may double-count requests from still-active
+clients, but covers commands that remain accepted after disconnection, when the
+client slot may already have been reused.
+The [Tokio mpsc contract](https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html)
+documents capacity and backpressure but does not establish a process memory quota.
 
-O tamanho do dataset continuará sem quota na 0.1. Vários `SET` válidos ainda poderão
-esgotar a memória disponível. Limites de rede não resolvem esse problema; contabilidade
-do armazenamento e política de rejeição serão implementadas na 0.2, sem eviction
-automática.
+Dataset size will remain unbounded in 0.1. Multiple valid `SET` commands may still
+exhaust available memory. Network limits do not solve this problem; storage accounting
+and rejection policy will be implemented in 0.2, without automatic eviction.
 
-O bind padrão em loopback acompanha o escopo sem autenticação. A 0.1 será apresentada
-como protótipo para uso local e testes, sem promessa de serviço pronto para produção.
+Default loopback binding accompanies the unauthenticated scope. Version 0.1 will
+be presented as a prototype for local use and testing, without a production-ready
+service promise.
 
-### Aceitação, cancelamento e desconexão
+### Acceptance, cancellation, and disconnection
 
-O envio concluído ao `mpsc` será a fronteira de aceitação. Antes desse ponto, cancelar
-a tentativa de envio não modifica o mapa. Depois dele, o worker executará o comando
-aceito mesmo se o receptor `oneshot` tiver sido descartado.
+A completed send to `mpsc` will be the acceptance boundary. Before that point,
+canceling the send attempt does not modify the map. After it, the worker will
+execute the accepted command even if the `oneshot` receiver has been dropped.
 
-Qualquer timeout de `execute` fechará a conexão, sem despachar outro pedido desse
-cliente. Esse fechamento não cancela comandos já aceitos. Se houver timeout ou queda
-da conexão após a aceitação, o resultado será desconhecido para o cliente. Não
-enviaremos uma mensagem que prometa ausência de efeitos e não repetiremos comandos
-automaticamente. Falhar ao entregar a resposta não derrubará o worker nem desfará
-uma mutação.
+Any `execute` timeout will close the connection without dispatching another request
+from that client. Closing does not cancel already accepted commands. If a timeout
+or disconnection occurs after acceptance, the outcome will be unknown to the client.
+We will not send a message promising no effects or retry commands automatically.
+Failure to deliver a response will not terminate the worker or undo a mutation.
 
-Em EOF, frames completos já recebidos serão processados na ordem. Se restar um
-frame parcial, ele será descartado como truncado, sem execução. Um cliente que fecha
-apenas sua escrita ainda poderá receber respostas de comandos completos.
+At EOF, already received complete frames will be processed in order. Any remaining
+partial frame will be discarded as truncated without execution. A client that closes
+only its write side will still be able to receive responses to complete commands.
 
-Erro de comando produzirá um frame de erro e permitirá ler o comando seguinte.
-Erro de protocolo produzirá uma resposta curta, quando possível, seguida de fechamento.
-Uma escrita interrompida não será retomada na mesma conexão com uma nova resposta.
+A command error will produce an error frame and allow reading the next command.
+A protocol error will produce a short response, when possible, followed by closing.
+An interrupted write will not be resumed on the same connection with a new response.
 
-### Encerramento e supervisão
+### Shutdown and supervision
 
-Ao receber o sinal de parada, o servidor deixará de aceitar conexões e novos pedidos.
-As conexões finalizarão o pedido já aceito e tentarão entregar sua resposta.
-Leituras ociosas e envios ainda não aceitos serão cancelados. Todos os handles de envio
-serão liberados, o worker drenará o que já recebeu e as tarefas serão aguardadas.
+Upon receiving the shutdown signal, the server will stop accepting connections
+and new requests. Connections will finish their already accepted request and
+attempt to deliver its response. Idle reads and sends not yet accepted will be
+canceled. All send handles will be released, the worker will drain what it has
+already received, and tasks will be awaited.
 
-O prazo de encerramento limita essa drenagem. Se expirar, tarefas restantes serão
-abortadas e registradas; comandos pendentes não terão garantia de conclusão nessa
-saída forçada. O servidor também monitorará falha inesperada do worker e encerrará
-o listener, evitando continuar aceitando clientes sem armazenamento funcional.
+The shutdown deadline limits this drain. If it expires, remaining tasks will be
+aborted and logged; pending commands will have no completion guarantee during
+that forced exit. The server will also monitor unexpected worker failure and
+close the listener, avoiding continued client acceptance without functioning storage.
 
-Essa organização segue as fases de detectar, comunicar e aguardar a parada descritas
-em [Graceful Shutdown no Tokio](https://tokio.rs/tokio/topics/shutdown).
-É um encerramento básico testável, sem durabilidade: o dataset continua apenas em memória.
+This organization follows the detect, notify, and wait phases described in
+[Tokio Graceful Shutdown](https://tokio.rs/tokio/topics/shutdown).
+It is basic testable shutdown without durability: the dataset remains entirely in memory.
 
-## Checklist incremental
+## Incremental checklist
 
-Cada etapa termina com código compilável e os testes disponíveis passando.
-O avanço depende desses critérios, não de uma estimativa fixa de dias.
+Each stage ends with compiling code and passing available tests.
+Progress depends on these criteria, not a fixed estimate in days.
 
-### 1. Fundação e especificação executável
+### 1. Foundation and executable specification
 
-- [x] Criar pacote `sider`, `lib.rs`, binário mínimo e configuração inicial.
-- [x] Fixar a toolchain estável de desenvolvimento, inicialmente 1.97.1, e gerar
-      `Cargo.lock`. Definir MSRV apenas se ele também for testado.
-- [x] Adicionar `forbid(unsafe_code)`, formatação e lint.
-- [x] Escrever os primeiros testes de configuração e integração do binário.
-- [x] Adicionar fixtures literais das futuras respostas RESP2.
-- [x] Criar matriz de compatibilidade com todos os itens como pendentes.
-- [x] Fixar Redis e `redis-cli` 8.10.1 e o digest Linux amd64 no manifesto de releases.
-- [x] Preparar a infraestrutura de referência e conferir sua execução em `R01-01`.
-      A imagem fixada não constitui evidência de compatibilidade sem executar os testes.
+- [x] Create package `sider`, `lib.rs`, a minimal binary, and initial configuration.
+- [x] Pin the stable development toolchain, initially 1.97.1, and generate
+      `Cargo.lock`. Define an MSRV only if it is also tested.
+- [x] Add `forbid(unsafe_code)`, formatting, and lint.
+- [x] Write the first configuration and binary integration tests.
+- [x] Add literal fixtures for future RESP2 responses.
+- [x] Create a compatibility matrix with every item pending.
+- [x] Pin Redis and `redis-cli` 8.10.1 and the Linux amd64 digest in the release manifest.
+- [x] Prepare the reference infrastructure and verify its execution in `R01-01`.
+      A pinned image does not establish compatibility without running tests.
 
-Saída: `cargo check --locked` e `cargo test --locked` passam. O binário é executável,
-mas ainda não oferece serviço TCP. A escolha da versão de referência precede a
-consolidação dos fixtures de erros e dos testes diferenciais.
+Outcome: `cargo check --locked` and `cargo test --locked` pass. The binary runs
+but does not yet offer TCP service. Choosing the reference version precedes
+consolidating error fixtures and differential tests.
 
-### 2. Codec RESP2 isolado
+### 2. Isolated RESP2 codec
 
-- [x] Implementar tipos, validação de limites e encoder.
-- [x] Implementar decoder incremental com cursor e pilha limitados.
-- [x] Testar tipos RESP2, nulos, vazios, inteiros nos extremos e conteúdo binário.
-- [x] Para cada fixture curta, testar todos os pontos de fragmentação e entrega
-      byte a byte. Para payloads grandes, testar divisões representativas e aleatórias.
-- [x] Testar frames concatenados, preservação do sufixo e CRLF dividido entre leituras.
-- [x] Testar comprimento inválido, overflow, prefixo desconhecido, CRLF inválido,
-      limites exatos e limite excedido por um byte/nó/nível.
-- [x] Adicionar `proptest`: round trip de frames válidos, fragmentação equivalente,
-      consumo correto e entrada arbitrária sem panic sob limites pequenos.
+- [x] Implement types, limit validation, and encoder.
+- [x] Implement an incremental decoder with bounded cursor and stack.
+- [x] Test RESP2 types, nulls, empty values, integer extremes, and binary content.
+- [x] For each short fixture, test every fragmentation point and byte-by-byte delivery.
+      For large payloads, test representative and random splits.
+- [x] Test concatenated frames, suffix preservation, and CRLF split across reads.
+- [x] Test invalid lengths, overflow, unknown prefixes, invalid CRLF,
+      exact limits, and exceeding a limit by one byte/node/level.
+- [x] Add `proptest`: valid-frame round trips, equivalent fragmentation,
+      correct consumption, and arbitrary input without panics under small limits.
 
-Saída: codec testado sem rede e sem banco. Um contador de trabalho disponível apenas
-nos testes verifica crescimento aproximadamente linear ao fragmentar cabeçalhos e
-arrays, para detectar reprocessamento quadrático sem depender do relógio.
-Os contratos implementados estão no [guia do codec](docs/resp.md). Linhas incluem
-prefixo e CRLF no seu limite; a profundidade configurável tem teto de 128 para
-proteger também a destruição da árvore de frames.
+Outcome: codec tested without networking or a database. A test-only work counter
+checks approximately linear growth when fragmenting headers and arrays, detecting
+quadratic reprocessing without relying on the clock.
+Implemented contracts are in the [codec guide](docs/resp.md). Line limits include
+the prefix and CRLF; configurable depth is capped at 128 to also protect frame-tree destruction.
 
-### 3. Comandos e semântica do mapa
+### 3. Commands and map semantics
 
-- [x] Implementar parsing dos cinco comandos e classificação de erros.
-- [x] Implementar `Store`, com operação síncrona e resposta tipada.
-- [x] Testar caixa do nome do comando, aridade e rejeição das opções de `SET`.
-- [x] Testar sobrescrita, ausentes, chave vazia, valor vazio e bytes não UTF-8.
-- [x] Testar `DEL a a inexistente`: contar apenas uma remoção quando `a` existir.
-- [x] Testar que comandos rejeitados não alteram o estado.
+- [x] Implement parsing for the five commands and error classification.
+- [x] Implement `Store` with synchronous operations and typed replies.
+- [x] Test command-name casing, arity, and rejection of `SET` options.
+- [x] Test overwrites, absent keys, empty keys, empty values, and non-UTF-8 bytes.
+- [x] Test `DEL a a missing`: count only one removal when `a` exists.
+- [x] Test that rejected commands do not change state.
 
-Saída: semântica completa da 0.1 testada sem sockets ou tarefas assíncronas.
+Outcome: complete 0.1 semantics tested without sockets or asynchronous tasks.
 
-### 4. Worker proprietário e canais
+### 4. Owning worker and channels
 
-- [x] Implementar `Request`, `DbHandle` e worker com fila limitada.
-- [x] Testar ordem, compartilhamento do estado entre handles e encerramento do canal.
-- [x] Testar backpressure com fila pequena e sincronização explícita.
-- [x] Descartar o receptor de resposta após aceitar `SET` e verificar o efeito por `GET`.
-- [x] Testar indisponibilidade do worker sem panic e sem espera infinita.
+- [x] Implement `Request`, `DbHandle`, and a worker with a bounded queue.
+- [x] Test ordering, shared state across handles, and channel closure.
+- [x] Test backpressure with a small queue and explicit synchronization.
+- [x] Drop the response receiver after accepting `SET` and verify its effect with `GET`.
+- [x] Test worker unavailability without panic or infinite waits.
 
-Saída: nenhum acesso concorrente direto ao mapa; concorrência testada com canais e
-barreiras, sem usar sleeps arbitrários para determinar a ordem das operações.
+Outcome: no direct concurrent map access; concurrency tested with channels and
+barriers, without arbitrary sleeps to determine operation order.
 
-### 5. TCP e ciclo completo
+### 5. TCP and the full lifecycle
 
-- [x] Implementar `serve`, tarefa por conexão, buffer limitado e encoder de respostas.
-- [x] Integrar configuração, logs, supervisão e sinal de parada no binário.
-- [x] Testar o ciclo `SET -> GET -> DEL -> GET` por TCP em porta efêmera.
-- [x] Testar dois clientes compartilhando estado e isolamento dos buffers.
-- [x] Testar vários comandos enviados em uma escrita, com respostas na ordem.
-- [x] Testar erro recuperável seguido de comando válido na mesma conexão.
-- [x] Testar EOF limpo, half-close, frame truncado, conexão excedente e cliente lento.
-- [x] Testar timeout e shutdown em leitura, fila cheia e escrita de resposta.
+- [x] Implement `serve`, a per-connection task, bounded buffer, and response encoder.
+- [x] Integrate configuration, logging, supervision, and shutdown signal in the binary.
+- [x] Test the `SET -> GET -> DEL -> GET` cycle over TCP on an ephemeral port.
+- [x] Test two clients sharing state and buffer isolation.
+- [x] Test multiple commands sent in one write, with ordered responses.
+- [x] Test a recoverable error followed by a valid command on the same connection.
+- [x] Test clean EOF, half-close, truncated frames, excess connections, and slow clients.
+- [x] Test timeout and shutdown during reads, full queues, and response writing.
 
-Saída: `cargo run --locked --bin sider` inicia o servidor em loopback. Logs indicam
-inicialização, erros e encerramento, sem registrar chaves ou valores por padrão.
+Outcome: `cargo run --locked --bin sider` starts the server on loopback. Logs
+show startup, errors, and shutdown, without recording keys or values by default.
 
-### 6. Compatibilidade com Redis e redis-cli
+### 6. Redis and redis-cli compatibility
 
-- [x] Criar suíte diferencial que envia os mesmos bytes a instâncias isoladas de
-      Redis e Sider. O oráculo de teste não dependerá apenas do codec sob teste.
-- [x] Comparar respostas brutas, tipos, códigos e mensagens de erro declaradas
-      compatíveis, além do estado observado pelos comandos suportados.
-- [x] Executar sequências determinísticas e geradas de `SET`, `GET` e `DEL`, com
-      prefixos de chaves exclusivos por caso e instâncias descartáveis.
-- [x] Executar os cinco comandos usando `redis-cli` em modo RESP2 e não interativo.
-- [x] Separar testes nativos obrigatórios da suíte externa, marcada explicitamente
-      como dependente de Redis/CLI. Ausência da ferramenta não conta como aprovação.
-- [x] Atualizar a matriz por comando, forma suportada, limitação, teste e versão usada.
+- [x] Create a differential suite that sends the same bytes to isolated Redis
+      and Sider instances. The oracle will not depend solely on the codec under test.
+- [x] Compare raw responses, types, codes, and error messages declared compatible,
+      as well as state observed through supported commands.
+- [x] Run deterministic and generated `SET`, `GET`, and `DEL` sequences,
+      with unique key prefixes per case and disposable instances.
+- [x] Run all five commands using `redis-cli` in noninteractive RESP2 mode.
+- [x] Separate required native tests from the external suite, explicitly marked
+      as requiring Redis/CLI. A missing tool does not count as a pass.
+- [x] Update the matrix by command, supported form, limitation, test, and version used.
 
-Saída: os testes externos passam antes de declarar a 0.1 concluída. Não usaremos a
-saída textual de `redis-cli` como comparação binária: ele apresenta valores ao usuário,
-conforme o [guia oficial da CLI](https://redis.io/docs/latest/develop/tools/cli/).
+Outcome: external tests pass before declaring 0.1 complete. We will not use
+`redis-cli` textual output for binary comparison: it presents values to users,
+as described in the [official CLI guide](https://redis.io/docs/latest/develop/tools/cli/).
 
-No Windows, priorizar um ambiente Linux de testes com Redis e CLI da mesma versão,
-via Docker ou WSL. O daemon e a conectividade serão verificados nessa etapa. O Docker
-servirá como infraestrutura de teste; uma imagem de distribuição do Sider fica depois.
-Clientes que exigem handshake automático terão sua limitação documentada.
+On Windows, prioritize a Linux test environment with matching Redis and CLI versions
+through Docker or WSL. The daemon and connectivity will be checked at that stage.
+Docker will provide test infrastructure; a Sider distribution image comes later.
+Limitations for clients requiring automatic handshake will be documented.
 
-### 7. Robustez e entrega da 0.1
+### 7. Robustness and 0.1 delivery
 
-- [x] Validar liberação de recursos após clientes lentos e múltiplas desconexões.
-- [x] Documentar arquitetura, comandos suportados, limites e como reproduzir os testes.
-- [x] Executar a bateria final e registrar resultados reais, incluindo testes ignorados.
+- [x] Validate resource release after slow clients and multiple disconnections.
+- [x] Document architecture, supported commands, limits, and test reproduction.
+- [x] Run the final suite and record actual results, including ignored tests.
 
-Verificação rápida local das etapas, conforme os alvos forem surgindo:
+Quick local stage checks as targets become available:
 
 ```powershell
-cargo test --locked <filtro>
+cargo test --locked <filter>
 cargo xtask check
 ```
 
-O check reúne formatação, Clippy, build do binário e testes nativos.
-Mudanças de interfaces, documentação de API ou build exigem
-`cargo doc --locked --no-deps` e
-`cargo build --locked --release`. Registre os resultados locais no PR e integre
-por merge commit, sem aguardar CI.
+The check combines formatting, Clippy, the binary build, and native tests.
+Changes to interfaces, API documentation, or builds require
+`cargo doc --locked --no-deps` and
+`cargo build --locked --release`. Record local results in the PR and integrate
+with a merge commit without waiting for CI.
 
-Os testes externos têm comandos próprios documentados e não são executados
-implicitamente em `cargo test`.
-Antes de publicar, o build e os testes comuns serão verificados manualmente em
-Windows e Linux. A CI
-multiplataforma foi verificada no bootstrap, mas está desativada nesta fase.
-Os workflows foram removidos; uma futura CI exige solicitação explícita depois da 1.0.
+External tests have their own documented commands and do not run implicitly
+with `cargo test`. Before publication, the build and common tests will be
+checked manually on Windows and Linux. Cross-platform CI was verified at bootstrap,
+but is disabled in this phase. Workflows were removed; future CI requires
+an explicit request after 1.0.
 
-## Critérios de conclusão
+## Completion criteria
 
-A versão 0.1 estará pronta quando:
+Version 0.1 will be ready when:
 
-1. Os cinco comandos funcionarem via TCP e `redis-cli` no subconjunto declarado.
-2. Chaves e valores binários, vazios e ausentes tiverem comportamento verificado.
-3. Fragmentação, concatenação, limites e entradas malformadas tiverem testes passando.
-4. A suíte diferencial passar contra a versão registrada do Redis.
-5. Cancelamento, backpressure, clientes lentos e shutdown tiverem comportamento testado.
-6. Formatação, lint e testes nativos estiverem registrados.
-7. A matriz não confundir comportamento planejado com compatibilidade demonstrada.
+1. All five commands work through TCP and `redis-cli` within the declared subset.
+2. Binary, empty, and absent keys and values have verified behavior.
+3. Fragmentation, concatenation, limits, and malformed inputs have passing tests.
+4. The differential suite passes against the recorded Redis version.
+5. Cancellation, backpressure, slow clients, and shutdown have tested behavior.
+6. Formatting, lint, and native test results are recorded.
+7. The matrix distinguishes planned behavior from demonstrated compatibility.
 
-Não haverá meta de superar Redis nesta versão. O custo de cópias, canais e alocações
-será registrado como hipótese para medição futura, sem alegação de desempenho.
+This version will not target outperforming Redis. Copying, channel, and allocation
+costs will be recorded as hypotheses for future measurement, without performance claims.
 
-## Riscos e evolução
+## Risks and evolution
 
-| Risco ou decisão | Tratamento planejado |
+| Risk or decision | Planned treatment |
 | --- | --- |
-| Parser consumir memória ou CPU com entrada hostil | Limites agregados, aritmética verificada, estado incremental, fixtures e propriedades |
-| Chave pequena reter buffer grande | Copiar payloads para alocações independentes na entrada |
-| Limites de rede serem confundidos com limite do banco | Documentar dataset sem quota; resolver contabilidade na 0.2 |
-| Cliente interpretar timeout como operação desfeita | Definir aceitação no enqueue e resultado desconhecido depois dele |
-| Worker único virar gargalo | Medir antes de particionar; limitar trabalho por comando e por conexão |
-| Comando grande atrasar os demais | Limitar bytes e argumentos; evitar prometer justiça estrita |
-| Teste diferencial repetir o mesmo bug do codec | Fixtures literais e leitura do wire independentes para as respostas esperadas |
-| Diferenças de versão serem confundidas com bugs | Fixar Redis, CLI, toolchain e dependências; versionar a matriz |
-| Interface crescer cedo demais | Manter módulos concretos; introduzir abstrações quando surgir o segundo caso |
+| Parser consumes memory or CPU on hostile input | Aggregate limits, checked arithmetic, incremental state, fixtures, and properties |
+| Small key retains a large buffer | Copy input payloads into independent allocations |
+| Network limits mistaken for database limits | Document unbounded dataset; address accounting in 0.2 |
+| Client interprets timeout as an undone operation | Define acceptance at enqueue and unknown outcome afterward |
+| Single worker becomes a bottleneck | Measure before partitioning; bound work per command and connection |
+| Large command delays others | Limit bytes and arguments; avoid promising strict fairness |
+| Differential test repeats the codec's bug | Literal fixtures and independent wire reading for expected responses |
+| Version differences mistaken for bugs | Pin Redis, CLI, toolchain, and dependencies; version the matrix |
+| Interface grows too early | Keep concrete modules; introduce abstractions when the second case arises |
 
-As decisões de evolução estão fechadas no manifesto; detalhes de implementação e
-evidências serão produzidos na tarefa correspondente, sem antecipar suporte:
+Evolution decisions are fixed in the manifest; implementation details and evidence
+will be produced in the corresponding task, without claiming support ahead of time:
 
-| Versão | Contrato e entrega |
+| Version | Contract and deliverable |
 | --- | --- |
-| 0.2 | Strings adicionais, opções de `SET`, TTL passivo/ativo e quota com rejeição de crescimento, sem eviction automática |
-| 0.3 | AOF versionado e checksum, escritor global, mutações resolvidas, políticas de fsync, recuperação e compactação |
-| 0.4 | Roteamento estável, hash tags, shards fixos e rejeição de operações multichave entre shards antes de efeitos |
-| 0.5 | Hashes, listas e sets com TTL, quota, `WRONGTYPE` e persistência |
-| 0.6 | Sorted sets com `ZADD` básico, `ZREM`, `ZCARD`, `ZSCORE` e `ZRANGE start stop [WITHSCORES]` |
-| 0.7 | `MULTI`, `EXEC`, `DISCARD`, `WATCH` e `UNWATCH` no mesmo shard; replay atômico do lote |
-| 0.8 | `SUBSCRIBE`, `UNSUBSCRIBE`, `PUBLISH` e `PING` no modo assinante; filas limitadas |
-| 0.9 | Replicação assíncrona Sider→Sider da mesma versão/configuração, réplica somente leitura e promoção manual |
-| 0.10 | Métricas, diagnóstico, backup/restauração e imagem Docker Linux amd64 distribuída privadamente |
-| 1.0 | Subconjunto congelado, auditoria diferencial, carga contínua de uma hora, migração e benchmarks reproduzíveis |
+| 0.2 | Additional strings, `SET` options, passive/active TTL, and quota with growth rejection, without automatic eviction |
+| 0.3 | Versioned AOF and checksums, global writer, resolved mutations, fsync policies, recovery, and compaction |
+| 0.4 | Stable routing, hash tags, fixed shards, and rejection of cross-shard multikey operations before effects |
+| 0.5 | Hashes, lists, and sets with TTL, quota, `WRONGTYPE`, and persistence |
+| 0.6 | Sorted sets with basic `ZADD`, `ZREM`, `ZCARD`, `ZSCORE`, and `ZRANGE start stop [WITHSCORES]` |
+| 0.7 | `MULTI`, `EXEC`, `DISCARD`, `WATCH`, and `UNWATCH` on the same shard; atomic batch replay |
+| 0.8 | `SUBSCRIBE`, `UNSUBSCRIBE`, `PUBLISH`, and `PING` in subscriber mode; bounded queues |
+| 0.9 | Asynchronous Sider→Sider replication with the same version/configuration, read-only replicas, and manual promotion |
+| 0.10 | Metrics, diagnostics, backup/restoration, and a privately distributed Linux amd64 Docker image |
+| 1.0 | Frozen subset, differential audit, one-hour continuous load, migration, and reproducible benchmarks |
 
-O AOF exigirá validar também condições dependentes do estado antes de registrar uma
-mutação e preservar a ordem entre log, aplicação e resposta. Com fsync periódico,
-uma resposta de sucesso não terá a mesma garantia que fsync por escrita. Após uma
-falha, também pode existir operação durável cuja resposta não chegou ao cliente.
-Replay de TTL exigirá prazo absoluto persistido; `Instant` não serve como formato
-durável. A substituição atômica de arquivos precisará de testes específicos por sistema.
+AOF will also require validating state-dependent conditions before logging a mutation
+and preserving the order of log, application, and response. With periodic fsync,
+a success response will not have the same guarantee as per-write fsync.
+After a failure, there may also be a durable operation whose response never
+reached the client. TTL replay will require a persisted absolute deadline;
+`Instant` is not a durable format. Atomic file replacement will need system-specific tests.
 
-Para shards, a proposta é paralelismo entre partições, não entre quaisquer chaves
-distintas: duas chaves independentes ainda podem cair no mesmo shard. Usar hash tags
-não implica compatibilidade com Redis Cluster. Isso exigiria contratos adicionais
-de slots, descoberta e redirecionamentos.
+For shards, the proposal is parallelism between partitions, not between arbitrary
+distinct keys: two independent keys can still fall on the same shard.
+Using hash tags does not imply Redis Cluster compatibility. That would require
+additional slot, discovery, and redirection contracts.
 
-Na 0.4, `DEL`, `MGET`, `MSET` e demais operações multichave ficarão restritos ao
-mesmo shard, com erro antes de qualquer efeito. Essa restrição altera o conjunto
-de operações aceitas no worker único e deverá aparecer nas notas e na matriz de
-compatibilidade. O AOF manterá inicialmente um escritor global; as medições da
-0.4 avaliarão seu custo sem alterar a garantia de recuperação.
+In 0.4, `DEL`, `MGET`, `MSET`, and other multikey operations will be restricted
+to the same shard, with an error before any effect. This restriction changes the
+operations accepted by the single worker and must appear in notes and the
+compatibility matrix. AOF will initially retain a global writer; 0.4 measurements
+will evaluate its cost without changing the recovery guarantee.
 
-Na 0.7, erros de enfileiramento abortam a transação conforme o subconjunto Redis;
-erros individuais durante `EXEC` não desfazem as outras operações. AOF registra
-o lote de mutações resolvidas de modo que replay não aplique meia transação.
-Replicação na 0.9 preserva esse lote e TTL, mas permanece assíncrona, sem failover
-automático e sem suporte entre versões/configurações distintas.
+In 0.7, queueing errors abort the transaction according to the Redis subset;
+individual errors during `EXEC` do not undo other operations. AOF records the
+resolved mutation batch so replay cannot apply half a transaction.
+Replication in 0.9 preserves that batch and TTL but remains asynchronous,
+without automatic failover or support across different versions/configurations.
 
-Redis Cluster, Sentinel, resharding online, RESP3, Lua, operações bloqueantes,
-transações entre shards, TLS e ACL ficam após a 1.0. O ambiente suportado até lá
-é controlado. Toda publicação requer candidata e gates cumulativos aprovados;
-o bootstrap não será publicado como versão funcional.
+Redis Cluster, Sentinel, online resharding, RESP3, Lua, blocking operations,
+cross-shard transactions, TLS, and ACL come after 1.0. The supported environment
+until then is controlled. Every publication requires a candidate and passing
+cumulative gates; the bootstrap will not be published as a functional version.
 
-A fundação executável, os testes de configuração e as fixtures de referência
-Redis/CLI estão implementados. A execução de `R01-01` está documentada no
-[guia de testes](docs/testing.md). O codec isolado de `R01-02` também está
-implementado, assim como parser e armazenamento síncrono de `R01-03`, worker e
-TCP de `R01-04`. `R01-05` integra diferenciais e CLI. `R01-GATE` publicou a
-primeira candidata, preservada como histórico. O marco 0.1 será encerrado como
-checkpoint técnico, sem outra publicação. O roadmap preserva os IDs deste plano.
+The executable foundation, configuration tests, and Redis/CLI reference fixtures
+are implemented. Execution of `R01-01` is documented in the
+[testing guide](docs/testing.md). The isolated `R01-02` codec is also implemented,
+as are the `R01-03` parser and synchronous storage, and `R01-04` worker and TCP.
+`R01-05` integrates differential tests and CLI. `R01-GATE` published the first
+candidate, preserved as history. Milestone 0.1 will close as a technical checkpoint
+without another publication. The roadmap preserves this plan's IDs.

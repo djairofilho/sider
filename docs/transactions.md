@@ -1,107 +1,104 @@
-# Transações
+# Transactions
 
-`MULTI`, `EXEC`, `DISCARD`, `WATCH` e `UNWATCH` pertencem à conexão TCP. Uma
-transação pode acessar um único shard. Chaves e argumentos preservam bytes
-arbitrários; hash tags permitem colocar as chaves relacionadas no mesmo shard.
+`MULTI`, `EXEC`, `DISCARD`, `WATCH`, and `UNWATCH` belong to the TCP connection.
+A transaction may access one shard. Keys and arguments retain arbitrary bytes;
+hash tags can place related keys in the same shard.
 
-## Fila e execução
+## Queueing and execution
 
-`MULTI` inicia a fila e responde `OK`. Cada comando aceito responde `QUEUED` e
-fica sem efeito até `EXEC`. `EXEC` retorna um array de respostas na ordem dos
-comandos; uma fila vazia retorna array vazio. `DISCARD` remove a fila e as
-observações. EOF, cancelamento e encerramento também descartam a fila que ainda
-não foi enviada ao worker.
+`MULTI` starts the queue and replies `OK`. Each accepted command replies `QUEUED`
+and has no effect until `EXEC`. `EXEC` returns an array of replies in command order;
+an empty queue returns an empty array. `DISCARD` removes the queue and observations.
+EOF, cancellation, and shutdown also discard a queue not yet sent to the worker.
 
-Um erro de aridade ou parsing, uma tentativa de cruzar shards ou um limite da
-fila deixa a transação inválida. `EXEC` então retorna `EXECABORT` e nenhum comando
-da fila executa. `MULTI` aninhado e `WATCH` dentro de `MULTI` retornam erro sem
-invalidar a fila anterior. `EXEC` e `DISCARD` fora de `MULTI` retornam erro.
+An arity or parsing error, an attempt to cross shards, or a queue limit makes the
+transaction invalid. `EXEC` then returns `EXECABORT` and no queued command runs.
+Nested `MULTI` and `WATCH` inside `MULTI` return an error without invalidating the
+previous queue. `EXEC` and `DISCARD` outside `MULTI` return an error.
 
-Erros de execução, como inteiro inválido, overflow, `WRONGTYPE` ou quota, ocupam
-sua posição no array; os outros comandos continuam. Não há rollback das operações
-válidas. Essa distinção entre falha de enfileiramento e falha individual segue o
-[contrato transacional do Redis](https://redis.io/docs/latest/develop/using-commands/transactions/).
+Execution errors, such as an invalid integer, overflow, `WRONGTYPE`, or quota,
+occupy their place in the array; other commands continue. There is no rollback of
+valid operations. This distinction between queueing failure and individual failure
+follows the [Redis transaction contract](https://redis.io/docs/latest/develop/using-commands/transactions/).
 
-O worker prepara todos os comandos com um relógio congelado, resolve condições,
-TTL e quota e reúne as pós-imagens finais em um único `ResolvedBatch`. Só as chaves
-tocadas entram no estado temporário. Nenhum outro pedido do mesmo shard intercala
-com o lote. A barreira global de snapshot mantém a admissão do pedido até a
-aplicação e resposta, inclusive quando o cliente cancela a espera após o aceite.
+The worker prepares all commands with a frozen clock, resolves conditions, TTL,
+and quota, and gathers final post-images in one `ResolvedBatch`. Only touched keys
+enter temporary state. No other request from that shard interleaves with the batch.
+The global snapshot barrier retains request admission through application and reply,
+including when the client cancels its wait after acceptance.
 
-## WATCH e liberação de recursos
+## WATCH and resource release
 
-`WATCH chave [chave ...]` observa as chaves até `EXEC`, `DISCARD`, `UNWATCH` ou o
-fim da conexão. Uma escrita da própria conexão também invalida a observação.
-Escrever o mesmo valor, criar e remover uma chave ou alcançar seu prazo de
-expiração são conflitos. Remover uma chave já ausente não gera conflito.
-`EXEC` com conflito retorna array nulo (`*-1\r\n`) e não grava nem aplica o lote.
-`UNWATCH` dentro de `MULTI` fica enfileirado; portanto não elimina um conflito já
-detectado antes da execução. A semântica de expiração segue
-[WATCH no Redis](https://redis.io/docs/latest/commands/watch/).
+`WATCH key [key ...]` observes keys until `EXEC`, `DISCARD`, `UNWATCH`, or the end
+of the connection. A write by the same connection also invalidates observation.
+Writing the same value, creating and removing a key, or reaching its expiration
+deadline are conflicts. Removing an already absent key is not a conflict. `EXEC`
+with a conflict returns a null array (`*-1\r\n`) and neither writes nor applies the
+batch. `UNWATCH` inside `MULTI` is queued, so it does not remove a conflict already
+detected before execution. Expiration semantics follow
+[Redis WATCH](https://redis.io/docs/latest/commands/watch/).
 
-Cada conexão mantém tokens com propriedade exclusiva. O registro compartilha um
-indicador de mudança entre observadores da mesma chave e o remove ao invalidar
-essa geração ou liberar seu último token. Não existe um mapa permanente de
-versões de todas as chaves já usadas. A observação nova recebe seu próprio estado
-quando uma geração anterior já foi invalidada.
+Each connection keeps exclusively owned tokens. The registry shares a change flag
+among observers of the same key and removes it when that generation is invalidated
+or its last token released. There is no permanent version map for every key ever
+used. A new observation receives its own state when an earlier generation has
+already been invalidated.
 
-Antes de registrar WATCH, o worker resolve expirações pendentes dessas chaves.
-Com AOF habilitada, os tombstones precisam ser aceitos pelo escritor primeiro.
-Uma rejeição de limite não cria tokens. O prazo de uma chave já observada também
-é conferido em `EXEC`, mesmo antes da limpeza ativa ou passiva do registro.
+Before registering WATCH, the worker resolves pending expiration of those keys.
+With AOF enabled, tombstones must first be accepted by the writer. A limit rejection
+does not create tokens. A deadline for an already watched key is also checked in
+`EXEC`, even before active or passive registry cleanup.
 
-## Persistência e Pub/Sub
+## Persistence and Pub/Sub
 
-Com AOF habilitada, um lote com alterações duráveis produz um único append antes
-de alterar o Store. O replay aplica esse registro inteiro. Um erro individual
-não impede que as operações válidas do lote sejam persistidas. Um WATCH abortado
-e uma transação sem alterações duráveis não produzem registro de mutação.
-Os limites e garantias de fsync seguem a configuração da AOF.
+With AOF enabled, a batch with durable changes produces one append before changing
+Store. Replay applies that complete record. An individual error does not prevent
+the batch's valid operations from being persisted. An aborted WATCH and a
+transaction without durable changes produce no mutation record. fsync limits and
+guarantees follow AOF configuration.
 
-`PUBLISH`, `SUBSCRIBE` e `UNSUBSCRIBE` podem ser enfileirados em `MULTI`.
-Depois que o append é aceito, uma seção curta do hub aplica as mudanças do banco
-e executa os efeitos efêmeros na ordem dos comandos. Ela não aguarda sockets.
-Pub/Sub não entra na AOF. Falha de append/fsync ou rejeição do tamanho do registro
-impede tanto a aplicação do lote quanto publicações e inscrições pendentes.
+`PUBLISH`, `SUBSCRIBE`, and `UNSUBSCRIBE` can be queued in `MULTI`. After the
+append is accepted, a short hub section applies database changes and performs
+ephemeral effects in command order. It does not await sockets. Pub/Sub is not in
+the AOF. An append/fsync failure or record-size rejection prevents both batch
+application and pending publications and subscriptions.
 
-Uma inscrição dentro de `EXEC` altera o formato dos `PING` seguintes. Os comandos
-de banco que já estavam enfileirados continuam executando, e a conexão termina no
-modo correspondente às inscrições restantes. Novos comandos recebidos após
-`EXEC` respeitam as restrições do modo assinante.
+A subscription inside `EXEC` changes the format of later `PING`s. Database commands
+already queued keep running, and the connection ends in the mode corresponding to
+remaining subscriptions. New commands received after `EXEC` obey subscriber-mode
+restrictions.
 
-Em RESP2, `SUBSCRIBE a b` e `UNSUBSCRIBE a b` geram uma confirmação por argumento
-dentro de `EXEC`, enquanto o cabeçalho externo mantém a quantidade de comandos.
-Uma mensagem publicada para a própria conexão aparece depois de todas as
-respostas do lote. O teste preserva o transcript literal observado no Redis
-8.10.1; o adiamento também consta no
-[caminho de escrita do Redis](https://github.com/redis/redis/blob/8.10.1/src/networking.c).
+In RESP2, `SUBSCRIBE a b` and `UNSUBSCRIBE a b` generate one confirmation per
+argument inside `EXEC`, while the outer header retains command count. A message
+published to the same connection appears after all batch replies. The test retains
+the literal transcript observed in Redis 8.10.1; this deferral also appears in the
+[Redis write path](https://github.com/redis/redis/blob/8.10.1/src/networking.c).
 
-Toda a saída de `EXEC`, incluindo confirmações e mensagens próprias, é codificada
-em um buffer limitado antes da primeira escrita. Se a codificação exceder o
-limite, a conexão encerra sem transmitir um prefixo incompleto dessa resposta.
-O lote já aceito pode ter sido aplicado; timeout ou desconexão após o aceite não
-promete ausência de efeitos e não provoca repetição automática.
+All `EXEC` output, including confirmations and messages for the connection itself,
+is encoded in a bounded buffer before the first write. If encoding exceeds the
+limit, the connection closes without transmitting an incomplete prefix of that
+reply. The already accepted batch may have been applied; timeout or disconnection
+after acceptance does not promise no effects or trigger automatic retry.
 
-## Limites
+## Limits
 
-| Configuração | Padrão | Efeito |
+| Configuration | Default | Effect |
 | --- | --- | --- |
-| `SIDER_TRANSACTION_MAX_COMMANDS` | 128 | Quantidade de comandos retidos na fila |
-| `SIDER_TRANSACTION_MAX_BYTES` | 1048576 | Soma dos tamanhos RESP completos dos comandos enfileirados |
-| `SIDER_WATCH_MAX_KEYS` | 128 | Chaves distintas observadas por conexão |
+| `SIDER_TRANSACTION_MAX_COMMANDS` | 128 | Commands retained in the queue |
+| `SIDER_TRANSACTION_MAX_BYTES` | 1048576 | Sum of complete RESP sizes of queued commands |
+| `SIDER_WATCH_MAX_KEYS` | 128 | Distinct keys watched per connection |
 
-O limite de bytes inclui argumentos, comprimentos e framing. Uma fila inválida
-libera os comandos já retidos e conserva apenas o estado necessário para devolver
-`EXECABORT`. Excesso de WATCH rejeita o novo comando sem remover as observações
-anteriores. Esses limites são próprios do Sider e não simulam a política de memória
-do Redis.
+The byte limit includes arguments, lengths, and framing. An invalid queue releases
+commands already retained and keeps only the state needed to return `EXECABORT`.
+WATCH excess rejects the new command without removing earlier observations. These
+limits are specific to Sider and do not simulate Redis memory policy.
 
-Também se aplicam os limites de entrada e resposta RESP, canais e fila Pub/Sub,
-quota do dataset, capacidade da fila do worker, prazo total de pedido e tamanho do
-registro AOF. A quantidade de conexões limita a soma das filas e observações
-pertencentes aos clientes; o orçamento lógico não representa o RSS do processo.
+RESP input and reply limits, Pub/Sub channels and queue, dataset quota, worker
+queue capacity, total request deadline, and AOF record size also apply. Connection
+count bounds the sum of client-owned queues and observations; the logical budget
+does not represent process RSS.
 
-## Reprodução
+## Reproduction
 
 ```sh
 cargo test --locked --lib transactions_
@@ -110,20 +107,20 @@ cargo test --locked --test transactions_persistence transactions_ -- --nocapture
 cargo test --locked --test transactions transactions_matches_redis -- --ignored --exact --nocapture
 ```
 
-O diferencial usa a imagem Redis 8.10.1 fixada em `releases/plan.json`, um servidor
-Sider descartável e comparação de bytes. Os testes nativos cobrem fila, ausência
-de efeitos antecipados, WATCH, relógio pausado, shards, snapshot, limite de resposta
-e falhas AOF sem efeitos Pub/Sub. Os testes de persistência usam o lote real do
-worker, truncamento de cada prefixo do registro e nove pontos de crash de processo,
-incluindo publicação de gerações compactadas.
+The differential uses the Redis 8.10.1 image pinned in `releases/plan.json`, a
+disposable Sider server, and byte comparison. Native tests cover the queue, absence
+of early effects, WATCH, a paused clock, shards, snapshot, reply limit, and AOF
+failures without Pub/Sub effects. Persistence tests use the worker's real batch,
+truncation of every record prefix, and nine process-crash points, including
+publication of compacted generations.
 
-Na execução local em Windows, passaram 16 testes de implementação, 91 comparações
-binárias com Redis, o transcript Pub/Sub de 274 bytes, 71 prefixos do registro e
-nove crashes de processo. O replay após compactação preservou hash, lista, set e
-sorted set escritos no mesmo lote, inclusive com `WRONGTYPE` em outra posição.
-Essas evidências não substituem a execução Linux exigida para publicação.
+In the local Windows run, 16 implementation tests, 91 binary comparisons with
+Redis, the 274-byte Pub/Sub transcript, 71 record prefixes, and nine process
+crashes passed. Replay after compaction preserved hash, list, set, and sorted set
+written in the same batch, including with `WRONGTYPE` in another position. This
+evidence does not replace the Linux execution required for publication.
 
-O gate `transactions` executa essas verificações e só publica recibo depois de
-sucesso e limpeza dos processos. O contexto de release exige Linux e checkout
-limpo. A validação local do marco interno não produz recibo de publicação; o gate
-da 1.0 ainda deve executar no SHA exato do bundle.
+The `transactions` gate runs these checks and publishes a receipt only after
+success and process cleanup. The release context requires Linux and a clean
+checkout. Local validation of the internal milestone does not produce a publication
+receipt; the 1.0 gate must still run at the exact bundle SHA.

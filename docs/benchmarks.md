@@ -1,125 +1,125 @@
-# Benchmarks do pacote candidato
+# Candidate package benchmarks
 
-O gate `benchmarks` executa o binário Linux GNU x86_64 extraído do pacote
-candidato e produz medições reproduzíveis de loopback. Não estabelece
-superioridade sobre Redis nem um compromisso de throughput ou latência.
+The `benchmarks` gate runs the Linux GNU x86_64 binary extracted from the
+candidate package and produces reproducible loopback measurements. It does not
+establish superiority over Redis or a throughput or latency commitment.
 
-A carga só começa quando o operador define `SIDER_BENCH_IDLE_MACHINE=1`.
-Compile primeiro e reserve a máquina para o ensaio. A variável registra essa
-declaração; o runner não consegue provar ausência de outros processos.
-Não rode builds, testes, soak ou outra carga simultaneamente.
+The workload starts only when the operator sets `SIDER_BENCH_IDLE_MACHINE=1`.
+Compile first and reserve the machine for the test. The variable records that
+declaration; the runner cannot prove that no other processes are running.
+Do not run builds, tests, soak tests, or other workloads concurrently.
 
-## Identidade da entrada
+## Input identity
 
-O [helper de entrada](../tests/common/release_input.rs) é compartilhável com
-outros gates que executam o pacote. Ele exige checkout limpo no SHA declarado,
-versão Cargo e artefato `1.0.0`, target nativo e política de publicação privada
-do [contrato de release](releases.md).
+The [input helper](../tests/common/release_input.rs) can be shared with other gates
+that run the package. It requires a clean checkout at the declared SHA, Cargo and
+artifact version `1.0.0`, a native target, and the private publication policy
+from the [release contract](releases.md).
 
-Antes e depois do ensaio, o helper confere:
+Before and after the test, the helper checks:
 
-- Identidade do manifesto schema 2: versão, SHA, target e proveniência do checkout.
-- Nome, tamanho e SHA-256 do tar.gz conforme o manifesto.
-- Igualdade integral entre o executável extraído e o membro único correspondente
-  do tar.gz, com limite de tamanho e rejeição de nomes de membros ambíguos.
-- README e licença extraídos iguais aos arquivos do checkout.
-- SHA-256 e tamanho do executável, preservados até o fim da medição.
+- Schema 2 manifest identity: version, SHA, target, and checkout provenance.
+- tar.gz name, size, and SHA-256 against the manifest.
+- Full equality between the extracted executable and its unique corresponding tar.gz
+  member, with a size limit and rejection of ambiguous member names.
+- Extracted README and license equality with checkout files.
+- Executable SHA-256 and size, preserved through the end of measurement.
 
-A comparação lê o membro com [GNU tar --to-stdout](https://www.gnu.org/software/tar/manual/html_node/Writing-to-Standard-Output.html);
-não extrai outros membros durante o gate. GNU tar e `sha256sum` precisam estar
-disponíveis. O diretório de entrada deve permanecer sob controle do operador.
-Hashes conferem identidade e integridade, sem autenticar a autoria dos arquivos.
+The comparison reads the member with [GNU tar --to-stdout](https://www.gnu.org/software/tar/manual/html_node/Writing-to-Standard-Output.html);
+it does not extract other members during the gate. GNU tar and `sha256sum` must be
+available. The input directory must remain under operator control.
+Hashes verify identity and integrity without authenticating file authorship.
 
-O manifesto pode ser preliminar, ainda sem todos os recibos. O gate não exige
-aprovação final antecipada, pois seu próprio recibo fará parte dessa aprovação.
-O pacote selecionado e seus bytes já precisam estar fixos. Após todos os gates,
-o bundle é congelado; candidata e final reutilizam os mesmos arquivos.
+The manifest may be preliminary, without all receipts yet. The gate does not require
+final approval in advance, since its own receipt will contribute to that approval.
+The selected package and its bytes must already be fixed. After all gates, the
+bundle is frozen; the candidate and final release reuse the same files.
 
-## Matriz e metodologia
+## Matrix and methodology
 
-O [runner](../tests/shard_benchmark.rs) executa 16 cenários em ordem fixa:
+The [runner](../tests/shard_benchmark.rs) executes 16 scenarios in fixed order:
 
-| Dimensão | Valores |
+| Dimension | Values |
 | --- | --- |
-| Shards | 1 e 4 |
-| Chaves | Uma chave compartilhada ou 256 chaves por cliente |
-| Pipeline | 1 e 16 comandos por lote |
-| Persistência | Desativada ou AOF `always`, compactação automática desativada |
+| Shards | 1 and 4 |
+| Keys | One shared key or 256 keys per client |
+| Pipeline | 1 and 16 commands per batch |
+| Persistence | Disabled or AOF `always`, with automatic compaction disabled |
 
-Cada cenário tem três repetições, cada uma com processo e dataset novos.
-Quatro conexões executam 128 operações de aquecimento por cliente e depois
-2.048 operações medidas por cliente. A fase medida só começa após todos
-concluírem o aquecimento. O recibo conta **393.216 operações medidas**;
-as 24.576 operações de aquecimento são registradas separadamente.
+Each scenario has three repetitions, each with a fresh process and dataset.
+Four connections execute 128 warmup operations per client, followed by
+2,048 measured operations per client. Measurement begins only after all clients
+complete warmup. The receipt counts **393,216 measured operations**;
+the 24,576 warmup operations are recorded separately.
 
-O gerador usa seed `0x52404005 XOR client_id`, multiplicador LCG
-`6364136223846793005`, incremento `1` e aritmética modular de 64 bits.
-A fase medida continua a sequência usada no aquecimento. Pedidos são
-pré-calculados; cada resposta INCR precisa ser um inteiro positivo. Ao terminar,
-GET verifica a contagem de todas as chaves, somando aquecimento e medição.
+The generator uses seed `0x52404005 XOR client_id`, LCG multiplier
+`6364136223846793005`, increment `1`, and modular 64-bit arithmetic.
+The measured phase continues the warmup sequence. Requests are precomputed;
+each INCR response must be a positive integer. At completion, GET checks every
+key's count, including both warmup and measurement.
 
-O throughput divide as operações medidas pelo intervalo entre o primeiro
-cliente iniciar e o último terminar. A latência é o **RTT do lote inteiro**:
-da escrita do lote à leitura de todas as suas respostas. Inclui o trabalho do
-cliente para configurar prazos, escrever e decodificar respostas. Pipeline 16
-não divide esse intervalo por 16 para inventar latências individuais.
-Os percentis p50/p95/p99 usam nearest rank nas amostras reais de RTT.
+Throughput divides measured operations by the interval from the first client
+starting to the last client finishing. Latency is the **RTT of the entire batch**:
+from writing the batch to reading all its responses. It includes client work
+to configure deadlines, write, and decode responses. Pipeline 16 does not divide
+this interval by 16 to invent individual latencies.
+The p50/p95/p99 percentiles use nearest rank on actual RTT samples.
 
-Uma thread lê `/proc/PID/status` durante a fase medida, com intervalo solicitado
-de 1 ms, e converte VmRSS de KiB para bytes. O arquivo bruto preserva os tempos
-observados; o agendamento do sistema pode alongar o intervalo. Só contam
-amostras dentro da janela medida. Ausência de amostras faz o gate falhar.
-O máximo observado não é garantia do pico real de memória.
+A thread reads `/proc/PID/status` during measurement, at a requested 1 ms interval,
+and converts VmRSS from KiB to bytes. The raw file preserves observed timestamps;
+system scheduling may lengthen the interval. Only samples within the measured
+window count. Missing samples fail the gate.
+The observed maximum does not guarantee the actual peak memory usage.
 
-As três taxas por cenário produzem mínimo, mediana, máximo, média, desvio
-padrão populacional e coeficiente de variação. São estatísticas descritivas;
-não há intervalo de confiança, descarte automático de outliers, limiar de
-superioridade ou comparação de velocidade com Redis. O gate recebe a imagem
-Redis fixada apenas como parte do contexto comum, sem iniciar Redis.
+The three rates per scenario produce minimum, median, maximum, mean, population
+standard deviation, and coefficient of variation. These are descriptive statistics;
+there is no confidence interval, automatic outlier removal, superiority threshold,
+or Redis speed comparison. The gate receives the pinned Redis image only as
+part of the shared context, without starting Redis.
 
-## Execução manual
+## Manual execution
 
-Use o checkout congelado de publicação 1.0, com os pacotes já preparados.
-Marcos internos não satisfazem o contrato desse gate. O diretório de evidências
-deve conter o tar.gz e o manifesto preliminar, sem recibo ou arquivo bruto
-anterior do benchmark.
+Use the frozen 1.0 publication checkout with packages already prepared.
+Internal milestones do not satisfy this gate's contract. The evidence directory
+must contain the tar.gz and preliminary manifest, with no previous benchmark
+receipt or raw sample file.
 
-Configure `SIDER_RELEASE_VERSION=1.0.0`, `SIDER_RELEASE_SHA`,
-`SIDER_RELEASE_TARGET=x86_64-unknown-linux-gnu`, `SIDER_REFERENCE_IMAGE` com
-o valor exato de `releases/plan.json` e `SIDER_RELEASE_DIR` com o caminho
-absoluto das evidências. `SIDER_PACKAGE_DIR` aponta para o diretório absoluto
-extraído que contém `sider`, `README.md` e `LICENSE`.
+Set `SIDER_RELEASE_VERSION=1.0.0`, `SIDER_RELEASE_SHA`,
+`SIDER_RELEASE_TARGET=x86_64-unknown-linux-gnu`, `SIDER_REFERENCE_IMAGE` to the
+exact value in `releases/plan.json`, and `SIDER_RELEASE_DIR` to the absolute
+evidence path. `SIDER_PACKAGE_DIR` points to the absolute extracted directory
+containing `sider`, `README.md`, and `LICENSE`.
 
-Compile antes de reservar a máquina:
+Compile before reserving the machine:
 
 ```sh
 cargo test --locked --release --test shard_benchmark --no-run
 ```
 
-Quando as demais cargas tiverem terminado, execute:
+When other workloads have finished, run:
 
 ```sh
 SIDER_BENCH_IDLE_MACHINE=1 cargo test --locked --release --test shard_benchmark -- --ignored --exact release_benchmarks_gate --nocapture
 ```
 
-A execução usa o target Cargo já compilado. Mudanças que exijam recompilação
-pedem uma nova preparação antes da reserva. O executável do servidor vem sempre
-de `SIDER_PACKAGE_DIR`; o runner não usa `CARGO_BIN_EXE_sider` como entrada.
+Execution uses the already compiled Cargo target. Changes requiring recompilation
+need fresh preparation before reservation. The server executable always comes
+from `SIDER_PACKAGE_DIR`; the runner does not use `CARGO_BIN_EXE_sider` as input.
 
-O resultado separado `benchmarks-samples.json` contém hardware, sistema,
-toolchain, load average antes/depois, configuração efetiva de cada repetição,
-seeds e todas as amostras ordenadas de RTT e RSS. O diagnóstico de configuração
-é coletado antes de iniciar o servidor; a prontidão e a porta efêmera acrescentadas
-pelo helper são registradas como dados de runtime. O limite desse arquivo é
-64 MiB. O recibo registra o hash e o tamanho do arquivo bruto, os hashes do
-pacote/binário, resumos por repetição e variação por cenário.
+The separate `benchmarks-samples.json` result contains hardware, system, toolchain,
+load average before/after, effective configuration for each repetition, seeds,
+and all ordered RTT and RSS samples. Configuration diagnostics are collected before
+starting the server; readiness and the ephemeral port added by the helper are
+recorded as runtime data. This file has a 64 MiB limit. The receipt records the
+raw file's hash and size, package/binary hashes, per-repetition summaries, and
+variation by scenario.
 
-Timeout, resposta inválida, estado final divergente, falha de observação ou
-entrada alterada impedem a publicação do recibo. Uma execução interrompida não
-é aprovada. Preserve o material incompleto para diagnóstico em outro diretório;
-não sobrescreva evidências aprovadas para repetir o gate.
+Timeouts, invalid responses, mismatched final state, observation failures, or
+changed input prevent receipt publication. An interrupted run is not approved.
+Preserve incomplete material in another directory for diagnostics; do not
+overwrite approved evidence to repeat the gate.
 
-## Verificação durante implementação
+## Verification during implementation
 
 ```sh
 cargo test --locked --test shard_benchmark benchmark_contract -- --nocapture
@@ -127,12 +127,11 @@ cargo test --locked --test shard_benchmark release_input -- --nocapture
 cargo clippy --locked --test shard_benchmark -- -D warnings
 ```
 
-Esses testes conferem matriz, contagens, cálculo dos percentis, dispersão,
-unidades RSS e rejeições de identidade da entrada. Eles compilam o runner sem
-iniciar a medição. A implementação foi validada dessa forma no Windows; o
-ensaio completo Linux do pacote permanece reservado ao build candidato em
-máquina livre.
+These tests check the matrix, counts, percentile calculation, dispersion,
+RSS units, and input identity rejection. They compile the runner without
+starting measurement. The implementation was validated this way on Windows;
+the full Linux package test remains reserved for the candidate build on an idle machine.
 
-A [medição exploratória R04-05](sharding.md#medição-exploratória-r04-05)
-permanece como evidência histórica do SHA registrado. Ela usava outro volume,
-não tinha aquecimento/repetições e não satisfaz este gate.
+The [R04-05 exploratory measurement](sharding.md#r04-05-exploratory-measurement)
+remains historical evidence for its recorded SHA. It used a different volume,
+had no warmup/repetitions, and does not satisfy this gate.

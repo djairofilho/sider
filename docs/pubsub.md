@@ -1,91 +1,91 @@
 # Pub/Sub
 
-O marco R08 implementa `SUBSCRIBE`, `UNSUBSCRIBE` e `PUBLISH` no TCP, com canais
-e mensagens binários. O registro é compartilhado pelas conexões de uma instância
-do servidor e separado do `Store` e das filas do worker. Publicações não criam
-chaves, não possuem replay e desaparecem ao encerrar o processo.
+Milestone R08 implements TCP `SUBSCRIBE`, `UNSUBSCRIBE`, and `PUBLISH`, with
+binary channels and messages. The registry is shared by connections in one server
+instance and is separate from `Store` and worker queues. Publications do not
+create keys, have no replay, and disappear when the process exits.
 
-## Comandos e transições
+## Commands and transitions
 
-| Comando | Modo normal | Modo assinante RESP2 |
+| Command | Normal mode | RESP2 subscriber mode |
 | --- | --- | --- |
-| `SUBSCRIBE canal [canal ...]` | Inscreve e entra no modo assinante | Acrescenta inscrições |
-| `UNSUBSCRIBE [canal ...]` | Confirma contagem zero | Remove as inscrições indicadas; sem argumentos, remove todas |
-| `PUBLISH canal mensagem` | Retorna o número de filas que aceitaram a mensagem | Retorna erro de comando proibido |
-| `PING [mensagem]` | `PONG` ou bulk com a mensagem | Array de dois bulks: `pong` e mensagem, vazia quando ausente |
-| Outros comandos implementados | Seguem seus contratos normais | Retornam erro sem executar no banco |
+| `SUBSCRIBE channel [channel ...]` | Subscribes and enters subscriber mode | Adds subscriptions |
+| `UNSUBSCRIBE [channel ...]` | Confirms a count of zero | Removes the specified subscriptions; without arguments, removes all |
+| `PUBLISH channel message` | Returns the number of queues that accepted the message | Returns a forbidden-command error |
+| `PING [message]` | `PONG` or a bulk containing the message | Two-bulk array: `pong` and message, empty when absent |
+| Other implemented commands | Follow their normal contracts | Return an error without executing against the database |
 
-A última remoção devolve a conexão ao modo normal. Cada argumento de inscrição
-ou remoção recebe uma confirmação, inclusive canais repetidos ou ausentes.
-Inscrições repetidas não duplicam destinatários. A confirmação contém o nome da
-operação, canal e quantidade de canais ainda inscritos. `UNSUBSCRIBE` sem canais
-ativos devolve canal nulo e contagem zero. Esses formatos seguem o
-[contrato RESP2 do Redis](https://redis.io/docs/latest/develop/pubsub/).
+The final removal returns the connection to normal mode. Each subscription or
+removal argument receives a confirmation, including duplicate or absent channels.
+Duplicate subscriptions do not duplicate recipients. The confirmation contains
+the operation name, channel, and remaining subscribed-channel count. `UNSUBSCRIBE`
+with no active channels returns a null channel and count zero. These formats follow
+the [Redis RESP2 contract](https://redis.io/docs/latest/develop/pubsub/).
 
-Uma mensagem usa o array `[message, canal, payload]`, com três bulk strings. Canal
-vazio, bytes nulos, CRLF e bytes fora de UTF-8 são preservados. No modo assinante,
-`PSUBSCRIBE`, `PUNSUBSCRIBE`, comandos sharded, `QUIT` e `RESET` ainda não estão
-implementados. O texto de erro dos comandos reconhecidos reproduz o Redis e cita
-essa família mais ampla; a matriz acima delimita o subconjunto efetivo.
+A message uses the `[message, channel, payload]` array, with three bulk strings.
+An empty channel, null bytes, CRLF, and non-UTF-8 bytes are preserved. In
+subscriber mode, `PSUBSCRIBE`, `PUNSUBSCRIBE`, sharded commands, `QUIT`, and
+`RESET` are not yet implemented. Error text for recognized commands reproduces
+Redis and refers to this broader family; the table above delimits the effective
+subset.
 
-`UNSUBSCRIBE` sem argumentos confirma os canais em ordem binária crescente. Essa
-ordem é uma escolha do Sider; não se exige a mesma ordem do Redis quando houver
-vários canais. Os diferenciais comparam o caso vazio e o caso de um canal restante.
+`UNSUBSCRIBE` without arguments confirms channels in ascending binary order. This
+order is a Sider choice; matching Redis order is not required when multiple
+channels exist. Differentials compare the empty case and the one-channel-remaining
+case.
 
-## Entrega, ordem e clientes lentos
+## Delivery, ordering, and slow clients
 
-`PUBLISH` faz envios imediatos para filas limitadas. Sua contagem confirma aceitação
-pela fila, sem confirmar leitura no socket. Não há reenvio, confirmação do cliente
-ou persistência. Desconexões podem perder notificações já aceitas. A entrega
-efêmera é compatível com a semântica
-[at-most-once do Redis](https://redis.io/docs/latest/develop/pubsub/).
+`PUBLISH` immediately sends to bounded queues. Its count confirms queue acceptance,
+not socket reading. There is no retry, client acknowledgment, or persistence.
+Disconnections can lose notifications that were already accepted. Ephemeral delivery
+is compatible with Redis [at-most-once semantics](https://redis.io/docs/latest/develop/pubsub/).
 
-O mutex do hub ordena publicações concorrentes. Ele protege somente metadados e
-`try_send`, sem esperar por sockets. Os assinantes recebem a mesma ordem de
-publicação e uma única tarefa escreve cada socket. Uma notificação completa nunca
-se mistura aos bytes de uma resposta de comando. Mensagens já aceitas são
-drenadas antes das confirmações de alteração de inscrição; a remoção impede novas
-mensagens daquele canal após a confirmação. Entre comandos consecutivos, o loop
-permite progresso das notificações.
+The hub mutex orders concurrent publications. It protects only metadata and
+`try_send`, without waiting for sockets. Subscribers receive the same publication
+order, and one task writes each socket. A complete notification never interleaves
+with bytes from a command response. Already accepted messages are drained before
+subscription-change confirmations; removal prevents further messages from that
+channel after confirmation. Between consecutive commands, the loop allows
+notifications to progress.
 
-| Configuração | Padrão | Efeito |
+| Configuration | Default | Effect |
 | --- | --- | --- |
-| `SIDER_PUBSUB_MAX_CHANNELS` | 32 | Canais distintos por conexão; excesso rejeita o comando inteiro, sem alterar inscrições |
-| `SIDER_PUBSUB_QUEUE_CAPACITY` | 32 | Notificações pendentes por assinante |
-| `SIDER_WRITE_TIMEOUT_MS` | 5000 | Prazo para escrever cada resposta ou notificação |
-| `SIDER_MAX_RESPONSE_BYTES` | 4194304 | Limite da notificação completa, incluindo framing |
+| `SIDER_PUBSUB_MAX_CHANNELS` | 32 | Distinct channels per connection; excess rejects the whole command without altering subscriptions |
+| `SIDER_PUBSUB_QUEUE_CAPACITY` | 32 | Pending notifications per subscriber |
+| `SIDER_WRITE_TIMEOUT_MS` | 5000 | Deadline to write each response or notification |
+| `SIDER_MAX_RESPONSE_BYTES` | 4194304 | Complete-notification limit, including framing |
 
-Fila cheia remove imediatamente todas as inscrições daquele cliente e sinaliza o
-encerramento da conexão, inclusive se ela estiver bloqueada na escrita. O cliente
-removido não entra na contagem dessa publicação. Essa política e os limites por
-quantidade são próprios do Sider; não reproduzem os limites de buffer do Redis.
-Os demais clientes e o banco continuam progredindo. Timeout, EOF, shutdown,
-cancelamento e erros também liberam as inscrições pelo guard da conexão.
+A full queue immediately removes all of that client's subscriptions and signals
+connection closure, including when it is blocked on writing. The removed client
+is not included in that publication's count. This policy and count limits are
+specific to Sider; they do not reproduce Redis buffer limits. Other clients and
+the database continue to progress. Timeout, EOF, shutdown, cancellation, and
+errors also release subscriptions through the connection guard.
 
-A fila guarda até o limite configurado, além de uma notificação em escrita.
-Alterações de inscrição podem manter temporariamente o lote drenado de tamanho
-limitado enquanto novas notificações entram na fila. O total permanece limitado
-pelas capacidades, pelo número de conexões e pelos limites RESP. `Bytes` compartilha
-payloads imutáveis entre destinatários. Esses limites não são uma quota do RSS.
-Uma notificação que exceda o limite de resposta é rejeitada antes de qualquer
-envio, com `ERR pubsub message exceeds response limit`.
+The queue holds up to its configured limit plus one notification being written.
+Subscription changes can temporarily retain the bounded drained batch while new
+notifications enter the queue. The total remains bounded by capacities, connection
+count, and RESP limits. `Bytes` shares immutable payloads among recipients. These
+limits are not an RSS quota. A notification exceeding the response limit is
+rejected before any send with `ERR pubsub message exceeds response limit`.
 
-## Integração com armazenamento e transações
+## Integration with storage and transactions
 
-`connection::run_with_pubsub` recebe o hub pertencente ao servidor. O parser produz
-comandos tipados; a conexão intercepta os três comandos Pub/Sub antes de chamar
-`DbHandle::execute`. Uma chamada direta ao `Store` retorna
-`ERR command requires connection context`, protegendo essa fronteira.
+`connection::run_with_pubsub` receives the hub owned by the server. The parser
+produces typed commands; the connection intercepts the three Pub/Sub commands
+before calling `DbHandle::execute`. A direct call to `Store` returns
+`ERR command requires connection context`, protecting this boundary.
 
-`MULTI` pode enfileirar comandos Pub/Sub junto dos comandos de banco. O worker
-aprova o único append durável antes de aplicar os efeitos; erro de AOF impede
-publicações e inscrições daquele lote. A execução efêmera mantém a ordem no hub
-sem esperar sockets e não produz registros Pub/Sub na AOF. Em `EXEC`, mensagens
-para a própria conexão aparecem depois das respostas do lote. A saída completa
-continua sujeita ao limite de resposta. Consulte [transações](transactions.md)
-para WATCH, framing RESP2, limites e evidências da integração.
+`MULTI` can queue Pub/Sub commands alongside database commands. The worker approves
+the single durable append before applying effects; an AOF error prevents the batch's
+publications and subscriptions. Ephemeral execution preserves hub order without
+waiting for sockets and does not produce Pub/Sub records in the AOF. In `EXEC`,
+messages to the same connection appear after batch responses. Complete output
+remains subject to the response limit. See [transactions](transactions.md) for
+WATCH, RESP2 framing, limits, and integration evidence.
 
-## Reprodução e evidências
+## Reproduction and evidence
 
 ```sh
 cargo test --locked --lib pubsub
@@ -93,16 +93,17 @@ cargo test --locked --test pubsub pubsub_tcp_contract -- --exact
 cargo test --locked --test pubsub pubsub_matches_redis -- --ignored --exact --nocapture
 ```
 
-O último comando exige Docker Linux e verifica a imagem Redis 8.10.1 fixada em
-`releases/plan.json`. Em 8 de setembro de 2026, passou no Windows com 245
-comparações binárias, 64 mensagens para dois assinantes e 16 reconexões, usando
-processo Sider e container Redis descartáveis. O teste nativo TCP passou, assim
-como os cenários determinísticos de publicação concorrente, fila cheia, socket
-lento paralelo a socket rápido e worker, limite, timeout e limpeza. Os testes de
-conexão usam I/O controlada e relógio pausado; não dependem de sleeps.
+The last command requires Linux Docker and verifies the Redis 8.10.1 image pinned
+in `releases/plan.json`. On September 8, 2026, it passed on Windows with 245
+binary comparisons, 64 messages for two subscribers, and 16 reconnections, using
+disposable Sider processes and Redis containers. The native TCP test passed, as
+did deterministic scenarios for concurrent publication, a full queue, a slow
+socket alongside a fast socket and worker, limits, timeouts, and cleanup.
+Connection tests use controlled I/O and a paused clock; they do not depend on
+sleeps.
 
-O gate `pubsub` executa os testes nativos com filtro `pubsub_`, exige casos reais,
-executa o diferencial e só então publica `receipt-pubsub.json`. O recibo exige o
-contexto de release Linux e checkout limpo; execução local avulsa não gera recibo
-de publicação. O gate no contexto final da 1.0 ainda deve ser executado no SHA
-do bundle. Consulte o [fluxo de releases](releases.md).
+The `pubsub` gate runs native tests with the `pubsub_` filter, requires real cases,
+runs the differential, and only then publishes `receipt-pubsub.json`. The receipt
+requires the Linux release context and a clean checkout; an isolated local run does
+not generate a publication receipt. The gate in the final 1.0 context must still
+run at the bundle SHA. See the [release flow](releases.md).

@@ -1,55 +1,54 @@
-# Testes do Sider
+# Sider testing
 
-Os testes do banco e da referência são escritos em Rust. Python não é necessário
-para os comandos deste documento. A CI permanece desligada até a 1.0 inclusive.
+Database and reference tests are written in Rust. Python is not required for the
+commands in this document. CI remains disabled through 1.0.
 
-## Índice
+## Contents
 
-- [Ciclo local](#ciclo-local)
-- [Codec isolado](#codec-isolado)
-- [Comandos sem rede](#comandos-sem-rede)
-- [Worker, TCP e binário](#worker-tcp-e-binário)
-- [Diferenciais e robustez](#diferenciais-e-robustez)
-- [Suítes das capacidades integradas](#suítes-das-capacidades-integradas)
-- [Pacotes e estabilização](#pacotes-e-estabilização)
-- [Referência Redis descartável](#referência-redis-descartável)
-- [O que as fixtures cobrem](#o-que-as-fixtures-cobrem)
-- [Execução registrada](#execução-registrada)
-- [Limites desta evidência](#limites-desta-evidência)
+- [Local cycle](#local-cycle)
+- [Standalone codec](#standalone-codec)
+- [Commands without networking](#commands-without-networking)
+- [Worker, TCP, and binary](#worker-tcp-and-binary)
+- [Differential testing and robustness](#differential-testing-and-robustness)
+- [Integrated capability suites](#integrated-capability-suites)
+- [Packages and stabilization](#packages-and-stabilization)
+- [Disposable Redis reference](#disposable-redis-reference)
+- [What the fixtures cover](#what-the-fixtures-cover)
+- [Recorded runs](#recorded-runs)
+- [Limits of this evidence](#limits-of-this-evidence)
 
-## Ciclo local
+## Local cycle
 
-Na raiz do repositório:
+From the repository root:
 
 ```sh
 cargo test --locked <filtro>
 cargo xtask check
 ```
 
-Use testes focados durante a implementação. Antes de integrar, o check executa
-formatação, Clippy, build do binário e testes nativos uma vez. Clippy já verifica
-os targets; não repita `cargo check` na mesma sequência.
+Use focused tests during implementation. Before integration, the check runs
+formatting, Clippy, the binary build, and native tests once. Clippy already checks
+the targets; do not repeat `cargo check` in the same sequence.
 
-As entradas externas aparecem como `ignored` no ciclo normal. Isso não significa
-aprovação da referência, do pacote ou de qualquer gate. Execute explicitamente
-a entrada relevante e confira seus casos, resultados e requisitos de ambiente.
+External entrypoints appear as `ignored` in the normal cycle. This does not mean
+the reference, package, or any gate has passed. Explicitly run the relevant
+entrypoint and check its cases, results, and environment requirements.
 
-## Codec isolado
+## Standalone codec
 
-O codec de R01-02 tem testes unitários e integração sem Docker:
+The R01-02 codec has unit and integration tests without Docker:
 
 ```sh
 cargo test --locked --lib resp::
 cargo test --locked --test resp_codec
 ```
 
-A suíte cobre os cinco tipos, fixtures literais, fragmentação, concatenação,
-limites e entradas inválidas. Quatro propriedades executam 512 casos cada,
-incluindo árvores válidas e bytes arbitrários. O contador de trabalho dos testes
-unitários confere crescimento linear ao fragmentar cabeçalhos e arrays.
-Consulte os [contratos do codec](resp.md).
+The suite covers the five types, literal fixtures, fragmentation, concatenation,
+limits, and invalid input. Four properties run 512 cases each, including valid
+trees and arbitrary bytes. The unit tests' work counter checks linear growth when
+fragmenting headers and arrays. See the [codec contracts](resp.md).
 
-## Comandos sem rede
+## Commands without networking
 
 ```sh
 cargo test --locked --lib command::
@@ -57,12 +56,12 @@ cargo test --locked --lib storage::
 cargo test --locked --test commands
 ```
 
-R01-03 reproduz no núcleo Sider os oito casos e as 48 trocas de comandos das
-fixtures Redis. Cada caso é repetido para conferir seu estado final. Os testes
-também verificam aridade, classificação de erros, opções de `SET` recusadas sem
-efeito e compartilhamento imutável dos payloads. Não há sockets ou runtime.
+R01-03 reproduces the Redis fixtures' eight cases and 48 command exchanges in the
+Sider core. Each case is repeated to check its final state. Tests also verify arity,
+error classification, `SET` options rejected without effects, and immutable payload
+sharing. There are no sockets or runtime.
 
-## Worker, TCP e binário
+## Worker, TCP, and binary
 
 ```sh
 cargo test --locked --lib storage::worker::
@@ -73,102 +72,102 @@ cargo test --locked --test tcp
 cargo test --locked --test cli
 ```
 
-R01-04 reproduz as fixtures pela rede com portas efêmeras, respostas literais,
-pipelines, fragmentação, clientes concorrentes, half-close e truncamento.
-O binário real publica prontidão depois do bind e atende comandos binários.
-Os testes Unix também enviam `SIGTERM` apenas ao processo filho criado pelo teste.
-No Windows, a drenagem é testada pela API de servidor, sem enviar sinais ao console
-compartilhado do executor.
+R01-04 reproduces fixtures over the network using ephemeral ports, literal responses,
+pipelines, fragmentation, concurrent clients, half-close, and truncation.
+The real binary publishes readiness after binding and serves binary commands.
+Unix tests also send `SIGTERM` only to the child process created by the test.
+On Windows, draining is tested through the server API without sending signals to
+the runner's shared console.
 
-Testes de worker e conexão usam canais, I/O controlada, polling explícito e relógio
-pausado para comprovar backpressure, fronteira de aceitação e prazos totais.
-A espera pelo arquivo de prontidão consulta um processo filho vivo com deadline;
-não usa uma pausa arbitrária para decidir a ordem de comandos.
-O [guia de rede](network.md) detalha os contratos verificados.
+Worker and connection tests use channels, controlled I/O, explicit polling, and
+a paused clock to demonstrate backpressure, the acceptance boundary, and total
+deadlines. Waiting for the readiness file polls a live child process with a deadline;
+it does not use an arbitrary pause to determine command order.
+The [network guide](network.md) details the contracts being verified.
 
-## Diferenciais e robustez
+## Differential testing and robustness
 
 ```sh
 cargo test --locked --test compatibility --test harness --test gate_contract
 cargo test --locked --test robustness
 ```
 
-Esses comandos cobrem o leitor independente de respostas, geração de sequências,
-processos descartáveis, recibos de gates e reocupação de todas as
-vagas após ondas de desconexões ou frames lentos. Não medem quota do dataset nem
-provam ausência geral de leaks.
+These commands cover the independent response reader, sequence generation, disposable
+processes, gate receipts, and reuse of all connection slots after waves of
+disconnections or slow frames. They do not measure dataset quota or prove the
+general absence of leaks.
 
-Os [diferenciais externos](differential.md) enviam os mesmos bytes a Redis e Sider,
-comparam tipos e respostas completas e observam o estado final das chaves. O caminho
-Linux compartilhado também executa `redis-cli` contra o Sider. Docker ou imagem
-ausentes causam falha; esses entrypoints não rodam implicitamente na suíte comum.
+[External differential tests](differential.md) send the same bytes to Redis and Sider,
+compare types and complete responses, and observe the final key state. The shared
+Linux path also runs `redis-cli` against Sider. Missing Docker or images cause
+failure; these entrypoints do not run implicitly in the regular suite.
 
-Os runners externos escrevem recibos apenas após sucesso e validação do checkout limpo.
+External runners write receipts only after success and clean-checkout validation.
 
-## Suítes das capacidades integradas
+## Integrated capability suites
 
-Escolha as suítes afetadas pela mudança. A tabela aponta os testes e os guias
-com contratos, comandos opt-in e limites da evidência:
+Choose the suites affected by the change. The table lists tests and guides
+containing contracts, opt-in commands, and evidence limitations:
 
-| Capacidade | Suítes Rust | Guia |
+| Capability | Rust suites | Guide |
 | --- | --- | --- |
-| Strings, TTL e quota | `strings`, `expiration`, `memory` | [Strings](strings.md) |
-| AOF, crash e recuperação | `persistence`, `aof_migration` | [Persistência](persistence.md), [migração](aof-migration.md) |
-| Shards e snapshots globais | `sharding`, módulos `storage::snapshot` e `storage::worker` | [Shards](sharding.md) |
-| Hashes, listas, sets e sorted sets | `collections`, `sorted_sets`, `collections_differential` | [Coleções](collections.md), [ordenação](sorted-sets.md), [AOF tipado](types-persistence.md) |
-| Transações e WATCH | `transactions`, `transactions_persistence` | [Transações](transactions.md) |
-| Assinaturas e publicações | `pubsub` | [Pub/Sub](pubsub.md) |
-| Replicação, retomada e promoção | `replication_protocol`, `replication_journal`, `replication_storage`, `replication_persistence`, `replication_network` | [Replicação](replication.md) |
-| Backup durante tráfego e restauração | `backup`, `backup_process` | [Backup](backup.md) |
-| INFO e diagnóstico | `metrics`, `cli` | [Operação](metrics.md) |
-| Sequências cruzadas entre famílias | `compatibility`, helper `common/cross_family.rs` | [Matriz](compatibility-matrix.md), [diferenciais](differential.md#auditoria-r11-entre-famílias) |
+| Strings, TTL, and quota | `strings`, `expiration`, `memory` | [Strings](strings.md) |
+| AOF, crash, and recovery | `persistence`, `aof_migration` | [Persistence](persistence.md), [migration](aof-migration.md) |
+| Shards and global snapshots | `sharding`, `storage::snapshot` and `storage::worker` modules | [Shards](sharding.md) |
+| Hashes, lists, sets, and sorted sets | `collections`, `sorted_sets`, `collections_differential` | [Collections](collections.md), [ordering](sorted-sets.md), [typed AOF](types-persistence.md) |
+| Transactions and WATCH | `transactions`, `transactions_persistence` | [Transactions](transactions.md) |
+| Subscriptions and publications | `pubsub` | [Pub/Sub](pubsub.md) |
+| Replication, resumption, and promotion | `replication_protocol`, `replication_journal`, `replication_storage`, `replication_persistence`, `replication_network` | [Replication](replication.md) |
+| Backup during traffic and restore | `backup`, `backup_process` | [Backup](backup.md) |
+| INFO and diagnostics | `metrics`, `cli` | [Operations](metrics.md) |
+| Cross-family sequences | `compatibility`, `common/cross_family.rs` helper | [Matrix](compatibility-matrix.md), [differential tests](differential.md#r11-cross-family-audit) |
 
-Por exemplo, uma alteração no backup pode ser verificada com:
+For example, a backup change can be checked with:
 
 ```sh
 cargo test --locked --test backup --test backup_process
 ```
 
-O corpus novo da auditoria cruzada também pode ser executado isoladamente,
-com a referência e a rede preparadas conforme o guia de diferenciais:
+The new cross-family audit corpus can also run independently, with the reference
+and network prepared as described in the differential testing guide:
 
 ```sh
 cargo test --locked --test compatibility -- --ignored --exact cross_family_audit_only --nocapture
 ```
 
-Ele preserva as contagens históricas R01/R02 e registra separadamente os casos
-entre tipos, TTL, transações e Pub/Sub. Os testes de persistência precisam rodar
-nativamente em Windows MSVC e Linux GNU quando filesystem ou durabilidade mudarem.
+It preserves historical R01/R02 counts and separately records cases across types,
+TTL, transactions, and Pub/Sub. Persistence tests must run natively on Windows
+MSVC and Linux GNU when filesystem behavior or durability changes.
 
-## Pacotes e estabilização
+## Packages and stabilization
 
-O [smoke de pacotes](packages.md) executa os quatro binários realmente extraídos.
-O [ensaio Docker](docker.md) verifica build sem recompilação, usuário sem
-privilégio, TCP, AOF/reinício, sinais e a imagem depois de `save`/compressão/`load`.
-O [backup do pacote](backup.md#evidência-reproduzível) exercita exportação e restauração sob
-tráfego; não se limita ao binário de desenvolvimento.
+[Package smoke tests](packages.md) run all four executables actually extracted
+from the packages. The [Docker test](docker.md) verifies image construction without
+recompilation, an unprivileged user, TCP, AOF/restart, signals, and the image after
+`save`/compression/`load`. The [package backup test](backup.md#reproducible-evidence)
+exercises export and restore under traffic; it is not limited to the development binary.
 
-O [soak](soak.md) mantém carga por pelo menos 3600 segundos e observa invariantes,
-TTL, clientes lentos, compactação e recuperação da replicação. O ensaio curto
-serve para verificar o runner e não aprova o gate de duração.
-Os [benchmarks](benchmarks.md) medem o pacote extraído com cenários e repetições
-fixados, amostras de latência/RSS e registro da configuração. Compile o harness
-antes de reservar a máquina e não execute benchmarks junto de builds ou outra carga.
+The [soak](soak.md) sustains load for at least 3600 seconds and observes invariants,
+TTL, slow clients, compaction, and replication recovery. A short run checks the
+runner and does not approve the duration gate. [Benchmarks](benchmarks.md) measure
+the extracted package using fixed scenarios and repetitions, latency/RSS samples,
+and recorded configuration. Compile the harness before reserving the machine and
+do not run benchmarks alongside builds or other loads.
 
-A candidata usa os [20 recibos de gates](releases.md#gates-do-produto),
-distribuídos entre as duas plataformas, além dos pacotes e seus hashes.
-A migração 1.0 deve consumir a baseline interna R10 preservada; fixtures de
-formatos antigos continuam complementares. Resultados de desenvolvimento não
-são transferidos a outro SHA. A final promove os mesmos arquivos aprovados na RC.
+The candidate uses [20 gate receipts](releases.md#product-gates), distributed across
+the two platforms, plus packages and their hashes. The 1.0 migration must consume
+the preserved R10 internal baseline; old-format fixtures remain supplementary.
+Development results are not transferred to another SHA. The final release promotes
+the same files approved in the RC.
 
-## Referência Redis descartável
+## Disposable Redis reference
 
-Requisitos: Rust da toolchain fixada, Docker CLI e daemon Linux amd64 ativos.
-No Windows, o Docker Desktop em modo Linux é suficiente. Use o mesmo contexto
-Docker no pull e no teste. Um daemon instalado dentro do WSL pode ser diferente
-do Docker Desktop; imagens de um não ficam automaticamente disponíveis no outro.
+Requirements: Rust from the pinned toolchain, Docker CLI, and an active Linux amd64
+daemon. On Windows, Docker Desktop in Linux mode is sufficient. Use the same Docker
+context for the pull and test. A daemon installed inside WSL may differ from Docker
+Desktop; images in one are not automatically available in the other.
 
-Confira o ambiente e faça o pull exato:
+Check the environment and pull the exact image:
 
 ```sh
 docker version
@@ -177,138 +176,138 @@ docker pull --platform linux/amd64 redis:8.10.1@sha256:76961cd2a0f40ef6fdd334b6b
 cargo test --locked --test reference -- --ignored --nocapture
 ```
 
-O teste lê versão, imagem, digest e plataforma diretamente de
-[`releases/plan.json`](../releases/plan.json). Não aceita um endpoint Redis externo
-nem limpa bancos existentes. A infraestrutura:
+The test reads the version, image, digest, and platform directly from
+[`releases/plan.json`](../releases/plan.json). It neither accepts an external Redis
+endpoint nor clears existing databases. The infrastructure:
 
-1. Confere disponibilidade da imagem, digest, plataforma e ID imutável.
-2. Cria seu próprio container sem persistência, com porta efêmera publicada
-   somente em `127.0.0.1`.
-3. Confere imagem usada, versão do servidor e versão do `redis-cli`.
-4. Aguarda conectividade com prazo e compara respostas brutas por TCP.
-5. Executa separadamente os cinco comandos com `redis-cli -2 --raw`.
-6. Remove somente o container criado pelo teste, inclusive em falhas normais de
-   setup ou de uma asserção. Não há limpeza global de containers ou volumes.
+1. Checks image availability, digest, platform, and immutable ID.
+2. Creates its own container without persistence, with an ephemeral port published
+   only on `127.0.0.1`.
+3. Checks the image used, server version, and `redis-cli` version.
+4. Waits for connectivity with a deadline and compares raw TCP responses.
+5. Separately executes the five commands using `redis-cli -2 --raw`.
+6. Removes only the container created by the test, including on normal setup or
+   assertion failures. There is no global cleanup of containers or volumes.
 
-Docker ou imagem ausentes, versão divergente, timeout e respostas inesperadas
-fazem o teste falhar. Nenhum desses casos é convertido em sucesso ou skip.
-Comandos Docker e operações de socket têm prazos limitados.
+Missing Docker or images, a mismatched version, timeout, and unexpected responses
+make the test fail. None of these cases is converted to success or a skip.
+Docker commands and socket operations have bounded deadlines.
 
-O encerramento forçado do processo de teste pode impedir o cleanup. Nesse caso,
-use o ID exato registrado pelo harness para inspecionar o container e confirmar
-sua propriedade antes de removê-lo. Não use `docker system prune` para esta tarefa.
+Forced termination of the test process may prevent cleanup. In that case, use
+the exact ID recorded by the harness to inspect the container and confirm ownership
+before removing it. Do not use `docker system prune` for this task.
 
-## O que as fixtures cobrem
+## What the fixtures cover
 
-As requisições e respostas em
-[`tests/common/resp_fixtures.rs`](../tests/common/resp_fixtures.rs) são literais
-Rust de bytes. Nenhum encoder ou decoder do Sider gera a resposta esperada.
-Os testes locais conferem os comprimentos das requisições por um leitor separado,
-restrito a arrays de bulk strings, antes de consultar a referência.
+Requests and responses in
+[`tests/common/resp_fixtures.rs`](../tests/common/resp_fixtures.rs) are Rust byte
+literals. No Sider encoder or decoder generates the expected response. Local tests
+check request lengths with a separate reader, restricted to arrays of bulk strings,
+before querying the reference.
 
-| Caso | Contrato verificado na referência |
+| Case | Contract verified against the reference |
 | --- | --- |
-| `ping` | Simple string sem argumento; mensagem, vazio e binário como bulk |
-| `echo` | Preservar ASCII, vazio, NUL, CRLF e bytes não UTF-8 |
-| `strings_and_missing` | Ausente, criação, leitura, sobrescrita por vazio e remoção |
-| `empty_key_and_binary_value` | Chave vazia e valor binário |
-| `binary_key` | Chave com NUL, CRLF e byte não UTF-8 |
-| `del_duplicates` | Contar remoções efetivas; ignorar duplicatas e ausentes |
-| `ascii_command_case_and_distinct_keys` | Comandos sem distinguir caixa ASCII; chaves distinguem caixa |
-| `arity_errors_preserve_connection_and_state` | Aridade dos cinco comandos, conexão reutilizável e valor preservado |
+| `ping` | Simple string without an argument; message, empty, and binary payloads as bulk strings |
+| `echo` | Preserve ASCII, empty content, NUL, CRLF, and non-UTF-8 bytes |
+| `strings_and_missing` | Missing key, creation, reading, overwrite with empty content, and removal |
+| `empty_key_and_binary_value` | Empty key and binary value |
+| `binary_key` | Key with NUL, CRLF, and a non-UTF-8 byte |
+| `del_duplicates` | Count actual removals; ignore duplicates and missing keys |
+| `ascii_command_case_and_distinct_keys` | ASCII case-insensitive commands; case-sensitive keys |
+| `arity_errors_preserve_connection_and_state` | Arity of the five commands, reusable connection, and preserved value |
 
-Cada caso é repetido em pipeline, comparando a concatenação literal das respostas.
-Uma chamada `PING` após cada pipeline detecta bytes residuais antes do caso seguinte.
-Ao terminar, o cliente fecha sua escrita e exige EOF sem bytes adicionais.
-Todos os casos terminam sem suas chaves e podem ser repetidos na mesma instância.
+Each case is repeated in a pipeline, comparing the literal concatenation of responses.
+A `PING` after each pipeline detects residual bytes before the next case.
+At the end, the client closes its write half and requires EOF without additional
+bytes. Every case leaves none of its keys behind and can be repeated on the same instance.
 
-Os contratos de tipos seguem a [especificação RESP oficial](https://redis.io/docs/latest/develop/reference/protocol-spec/).
-As aridades e respostas são verificadas executando a versão fixada, não inferidas
-somente da documentação.
+Type contracts follow the [official RESP specification](https://redis.io/docs/latest/develop/reference/protocol-spec/).
+Arities and responses are verified by executing the pinned version, not inferred
+from documentation alone.
 
-## Execução registrada
+## Recorded runs
 
-Em 8 de setembro de 2026, o teste externo passou no Windows x86_64, com Rust
-1.97.1 e Redis Linux amd64 no Docker Desktop. Foram verificados oito casos,
-48 trocas sequenciais, oito pipelines, EOF sem bytes extras e os cinco comandos
-via `redis-cli`. Servidor e CLI reportaram 8.10.1; a imagem correspondeu ao digest
-fixado acima. A remoção do container foi confirmada pelo harness.
+On September 8, 2026, the external test passed on Windows x86_64 with Rust 1.97.1
+and Linux amd64 Redis in Docker Desktop. It verified eight cases, 48 sequential
+exchanges, eight pipelines, EOF without extra bytes, and the five commands through
+`redis-cli`. Server and CLI reported 8.10.1; the image matched the digest pinned
+above. The harness confirmed container removal.
 
-Os testes locais também incluem um processo filho sem Docker no `PATH` para
-comprovar que infraestrutura ausente resulta em falha explícita. Esse ambiente
-é configurado somente no processo filho, sem alterar o ambiente global dos testes.
+Local tests also include a child process without Docker in `PATH` to demonstrate
+that missing infrastructure produces an explicit failure. This environment is
+configured only in the child process, without changing the tests' global environment.
 
-Na validação de R01-03, na mesma data, os 89 testes locais e um doctest passaram
-em Windows x86_64 MSVC e Linux x86_64 GNU, com Rust 1.97.1 e o lockfile versionado.
-No Linux, compilação e execução ocorreram em um container Ubuntu 24.04, com os
-fontes montados somente para leitura e cache de build separado do Windows.
+During R01-03 validation on the same date, the 89 local tests and one doctest passed
+on Windows x86_64 MSVC and Linux x86_64 GNU, using Rust 1.97.1 and the versioned
+lockfile. On Linux, building and running occurred in an Ubuntu 24.04 container,
+with sources mounted read-only and a build cache separate from Windows.
 `cargo fmt --check`, `cargo check --locked --all-targets`,
 `cargo clippy --locked --all-targets -- -D warnings`,
-`cargo doc --locked --no-deps` e `cargo build --locked --release` também passaram
-nos dois ambientes. O teste externo, ignorado no ciclo padrão, foi executado
-separadamente no Windows contra Redis no Docker e passou novamente.
+`cargo doc --locked --no-deps`, and `cargo build --locked --release` also passed
+in both environments. The external test, ignored in the default cycle, was run
+separately on Windows against Redis in Docker and passed again.
 
-R01-04 passou pela mesma bateria em 8 de setembro de 2026, incluindo build de
-release: 150 testes locais no Windows e 151 no Ubuntu 24.04, mais um doctest
-em cada sistema. A diferença é o teste Unix de `SIGTERM`, que confirmou saída
-bem-sucedida e remoção da prontidão. Os 16 testes do worker, 14 da conexão e 11
-testes TCP incluem cancelamento, backpressure, prazos e encerramento. A referência
-Redis continua opt-in e não foi contabilizada como aprovação pelo teste ignorado.
-Esses resultados não são gates de uma release nem testes de pacotes extraídos.
+R01-04 passed the same suite on September 8, 2026, including a release build:
+150 local tests on Windows and 151 on Ubuntu 24.04, plus one doctest on each system.
+The difference is the Unix `SIGTERM` test, which confirmed successful exit and
+readiness file removal. The 16 worker tests, 14 connection tests, and 11 TCP tests
+include cancellation, backpressure, deadlines, and shutdown. The Redis reference
+remains opt-in and was not counted as passed based on the ignored test.
+These results are neither release gates nor tests of extracted packages.
 
-### Histórico de R01-05 antes da remoção do fuzz
+### R01-05 history before fuzz removal
 
-Os resultados abaixo descrevem a implementação original e seu ambiente da época.
-A estrutura e o gate de fuzz foram removidos; seus caminhos e ferramentas citados
-aqui são registros históricos, sem instruções de execução para o checkout atual.
-As notas da [candidata publicada](../releases/notes/v0.1.0-rc.1.md) também preservam
-os critérios e as evidências exigidos naquela revisão.
+The results below describe the original implementation and its environment at the
+time. The fuzz infrastructure and gate were removed; paths and tools cited here
+are historical records, not execution instructions for the current checkout.
+The [published candidate's notes](../releases/notes/v0.1.0-rc.1.md) also preserve
+the criteria and evidence required at that revision.
 
-R01-05 passou em Windows x86_64 MSVC e Linux x86_64 GNU (Ubuntu 24.04), com Rust
-1.97.1: 230 testes comuns e 231, respectivamente, mais um doctest em cada sistema.
-Formatação, check de todos os alvos, Clippy sem warnings, documentação e build de
-release também passaram. Seis entrypoints opt-in ficaram ignorados nesse ciclo:
-referência externa, três entradas de compatibilidade, preparação de corpus e gate
-de fuzz. Eles não foram contados como aprovação de gates.
+R01-05 passed on Windows x86_64 MSVC and Linux x86_64 GNU (Ubuntu 24.04), with
+Rust 1.97.1: 230 and 231 regular tests, respectively, plus one doctest on each system.
+Formatting, all-target checks, Clippy without warnings, documentation, and release
+builds also passed. Six opt-in entrypoints were ignored in this cycle: the external
+reference, three compatibility entrypoints, corpus preparation, and the fuzz gate.
+They were not counted as passed gates.
 
-Separadamente, `sider_matches_redis` passou no Windows com 3.588 comparações
-binárias. No Linux, `sider_matches_redis_and_cli` passou com as mesmas 3.588
-comparações e nove cenários CLI adicionais. Servidor e CLI reportaram 8.10.1,
-com digest e plataforma conferidos; a limpeza foi confirmada em ambos os caminhos.
-O build da receita local `dev/test.Dockerfile` também foi executado e suas versões
-de Rust, cargo-fuzz, Docker CLI e Clang foram conferidas.
+Separately, `sider_matches_redis` passed on Windows with 3,588 binary comparisons.
+On Linux, `sider_matches_redis_and_cli` passed with the same 3,588 comparisons and
+nine additional CLI scenarios. Server and CLI reported 8.10.1, with digest and
+platform checked; cleanup was confirmed on both paths. The local recipe
+`dev/test.Dockerfile` was also built and its Rust, cargo-fuzz, Docker CLI, and
+Clang versions were checked.
 
-O fuzz inicial do decoder terminou com exit code 0, após 903,636 segundos reais
-de execução, sem contar a compilação. O libFuzzer reportou 452.886 execuções em
-902 segundos, cobertura 539 e pico RSS de 596 MiB. Não houve panic, diagnóstico
-de sanitizer ou arquivo de falha. A execução usou AddressSanitizer,
-`nightly-2026-09-07`, cargo-fuzz 0.13.2, seed `1397310533` e limite de entrada
-de 4.096 bytes. O corpus inicial tinha 155 arquivos: 27 seeds versionados e
-128 entradas preservadas de uma amostra curta anterior.
+The initial decoder fuzz run ended with exit code 0 after 903.636 seconds of actual
+execution, excluding compilation. libFuzzer reported 452,886 executions in 902
+seconds, coverage 539, and peak RSS of 596 MiB. There was no panic, sanitizer
+diagnostic, or failure file. The run used AddressSanitizer, `nightly-2026-09-07`,
+cargo-fuzz 0.13.2, seed `1397310533`, and a 4,096-byte input limit.
+The initial corpus contained 155 files: 27 versioned seeds and 128 entries preserved
+from an earlier short sample.
 
-Os logs e o corpus foram preservados localmente em `target/fuzz-initial-r01/`.
-O SHA-256 de `initial.stderr.log` é
+Logs and corpus were preserved locally in `target/fuzz-initial-r01/`.
+The SHA-256 of `initial.stderr.log` is
 `85583e8d6e323f83078828c25880ac6b82d043d5819280f6cfb843c3f0c7d671`.
-O alvo compilado corresponde a `fuzz/fuzz_targets/resp_decoder.rs` com SHA-256
+The compiled target corresponds to `fuzz/fuzz_targets/resp_decoder.rs` with SHA-256
 `18ac54c4679546482512e4c6794a1699ee8077d168b8b7d38a73c00de59bfaaa`;
-o lockfile isolado tem SHA-256
+the isolated lockfile has SHA-256
 `f6433cd44db1590a09afa270cba31822ff8a59b314204b1cec3ad3efeed56ee2`.
-Esta foi a execução inicial de R01-05, com documentação ainda em edição.
-Não criou recibo de release e não aprovou os gates de nenhuma RC ou final.
+This was the initial R01-05 run, while documentation was still being edited.
+It did not create a release receipt or approve any RC or final release gates.
 
-## Limites desta evidência
+## Limits of this evidence
 
-R01-01 comprova a referência e suas fixtures. R01-03 reproduz essas fixtures no
-núcleo síncrono Sider e R01-04 pelo TCP. R01-05 acrescenta comparação simultânea
-dos servidores e CLI. Cada forma de comando é verificada somente
-nos cenários descritos; não há promessa de compatibilidade com clientes que exigem
-outros comandos ou handshake automático.
+R01-01 verifies the reference and its fixtures. R01-03 reproduces those fixtures
+in the synchronous Sider core, and R01-04 reproduces them over TCP. R01-05 adds
+simultaneous comparison of the servers and CLI. Each command form is verified
+only in the described scenarios; compatibility with clients requiring other
+commands or automatic handshakes is not promised.
 
-Opções de `SET`, comando desconhecido, requisições fora do subconjunto e limites
-próprios do Sider não entram como igualdade implícita com Redis. As diferenças
-intencionais estão na [matriz de compatibilidade](compatibility.md).
+`SET` options, unknown commands, requests outside the subset, and Sider-specific
+limits are not implicitly treated as equivalent to Redis. Intentional differences
+are documented in the [compatibility matrix](compatibility.md).
 
-Redis rodando em Linux dentro do Docker não comprova que o binário Sider foi
-compilado e testado nativamente em Linux. As execuções nativas de R01-03 a R01-05
-descritas acima são verificações separadas da referência Redis. Elas não validam
-pacotes extraídos nem substituem os gates no SHA exato de uma futura release.
+Redis running on Linux inside Docker does not prove that the Sider binary was
+built and tested natively on Linux. The native R01-03 through R01-05 runs described
+above are separate checks from the Redis reference. They neither validate extracted
+packages nor replace gates at the exact SHA of a future release.

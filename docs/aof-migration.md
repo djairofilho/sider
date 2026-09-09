@@ -1,20 +1,20 @@
-# Migração offline do AOF
+# Offline AOF migration
 
-O particionamento pertence à configuração durável do diretório. A recuperação
-confere a quantidade de shards e a versão do roteamento antes de reparar uma
-cauda ou aceitar dados. Trocar `SIDER_SHARDS` não redistribui um AOF existente.
+Partitioning is part of the directory's durable configuration. Recovery checks
+the shard count and routing version before repairing a tail or accepting data.
+Changing `SIDER_SHARDS` does not redistribute an existing AOF.
 
-O cabeçalho v1 da R03 representa um shard. Novos diretórios e compactações usam
-v2, que registra quantidade de shards e roteamento. A versão de roteamento 1 usa
-FNV-1a64 e as mesmas hash tags do servidor. As versões dos registros e das
-mutações não mudam nessa transição.
+The R03 v1 header represents one shard. New directories and compactions use v2,
+which records the shard count and routing. Routing version 1 uses FNV-1a64 and
+the same hash tags as the server. Record and mutation versions do not change
+in this transition.
 
-## Executar a migração
+## Running the migration
 
-Pare o servidor de origem e escolha um diretório de destino que ainda não exista.
-O pai desse diretório precisa existir, e o destino deve ficar fora da árvore da
-origem. A origem deve conter seu `writer.lock`, criado pelo servidor. O migrador
-adquire esse lock e recusa a operação se outro escritor ainda estiver ativo.
+Stop the source server and choose a destination directory that does not yet exist.
+Its parent must exist, and the destination must be outside the source tree.
+The source must contain its `writer.lock`, created by the server. The migrator
+acquires this lock and refuses the operation if another writer is still active.
 
 ```sh
 cargo build --locked --release --bin sider-aof-migrate
@@ -23,78 +23,78 @@ target/release/sider-aof-migrate \
   --destination ./data-r04 --shards 4 --routing 1
 ```
 
-No PowerShell:
+In PowerShell:
 
 ```powershell
 & .\target\release\sider-aof-migrate.exe `
-  --source 'C:\dados\sider-r03' --source-shards 1 --source-routing 1 `
-  --destination 'C:\dados\sider-r04' --shards 4 --routing 1
+  --source 'C:\data\sider-r03' --source-shards 1 --source-routing 1 `
+  --destination 'C:\data\sider-r04' --shards 4 --routing 1
 ```
 
-As seis opções de diretório e identidade são obrigatórias. Caminhos preservam a
-representação nativa do sistema. O parser é injetável e não altera o ambiente.
-`cargo run --locked` continua iniciando o servidor; para executar o migrador pelo
+All six directory and identity options are required. Paths preserve the system's
+native representation. The parser is injectable and does not modify the environment.
+`cargo run --locked` continues to start the server; to run the migrator through
 Cargo, use `cargo run --locked --bin sider-aof-migrate -- ...`.
 
-| Opção adicional | Padrão | Uso |
+| Additional option | Default | Purpose |
 | --- | --- | --- |
-| `--source-max-dataset-bytes` | `67108864` | Quota usada para recuperar a origem |
-| `--max-dataset-bytes` | `67108864` | Quota total do destino |
-| `--source-max-record-bytes` | `67108864` | Limite de registro aceito na origem |
-| `--max-record-bytes` | `67108864` | Limite de registro escrito no destino |
+| `--source-max-dataset-bytes` | `67108864` | Quota used to recover the source |
+| `--max-dataset-bytes` | `67108864` | Total destination quota |
+| `--source-max-record-bytes` | `67108864` | Accepted source record limit |
+| `--max-record-bytes` | `67108864` | Destination record write limit |
 
-A quota do destino é dividida de forma fixa: `total / shards`, mais um byte para
-cada índice menor que `total % shards`. A migração recusa uma distribuição com
-shard sobrecarregado, mesmo que o dataset caiba na soma. Nesse caso, escolha uma
-quota que comporte a distribuição ou ajuste os dados antes de tentar novamente.
+The destination quota is divided statically: `total / shards`, plus one byte
+for each index below `total % shards`. Migration rejects a distribution with
+an overloaded shard even if the dataset fits within the total. In that case,
+choose a quota that accommodates the distribution or adjust the data before retrying.
 
-## O que é preservado
+## What is preserved
 
-O migrador recupera a origem somente para leitura, sem truncar nem compactar seus
-arquivos. Valores, chaves binárias, deadlines Unix e a última sequência completa
-são preservados. Valores já expirados no instante da migração ficam ausentes.
-Um par de relógios congelado torna a leitura e a validação do snapshot consistentes.
+The migrator recovers the source read-only, without truncating or compacting its
+files. Values, binary keys, Unix deadlines, and the last complete sequence are
+preserved. Values already expired at migration time are absent.
+A frozen clock pair makes snapshot reading and validation consistent.
 
-Uma cauda incompleta depois de um selo válido é ignorada no snapshot de destino,
-mas permanece intacta na origem e aparece no relatório. Corrupção, versão
-desconhecida, configuração divergente ou lote inválido interrompem a operação.
+An incomplete tail after a valid seal is ignored in the destination snapshot,
+but remains intact in the source and appears in the report. Corruption, an unknown
+version, mismatched configuration, or an invalid batch stops the operation.
 
-O snapshot é roteado pela implementação real do servidor. A contabilidade usa
-um `Store` temporário com no máximo uma entrada, compartilhando o valor imutável;
-não constrói um segundo dataset completo. Depois de conferir as quotas, o migrador
-reserva o diretório novo, escreve um snapshot e selo completos e sincroniza o
-arquivo. Reabre o temporário, confere cabeçalho, cada registro e fim de arquivo,
-e só então publica a geração zero.
+The snapshot is routed by the actual server implementation. Accounting uses a
+temporary `Store` with at most one entry, sharing the immutable value; it does not
+build a second complete dataset. After checking quotas, the migrator reserves the
+new directory, writes a complete snapshot and seal, and synchronizes the file.
+It reopens the temporary file, checks the header, every record, and EOF,
+and only then publishes generation zero.
 
-Se a escrita falhar, a limpeza retira somente os arquivos criados por essa operação.
-O destino existente nunca é sobrescrito e a origem permanece utilizável. A publicação
-e a sincronização obedecem às [garantias por plataforma](persistence.md#garantias-por-plataforma).
+If writing fails, cleanup removes only files created by that operation.
+An existing destination is never overwritten and the source remains usable.
+Publication and synchronization follow the [platform guarantees](persistence.md#platform-guarantees).
 
-O CLI retorna JSON com formato de origem, sequência, quantidade de entradas,
-identidades de origem e destino, uso por shard e bytes de cauda incompleta. Guarde
-esse relatório com a configuração e os hashes dos diretórios. O migrador não troca
-a configuração do servidor nem começa a atender conexões.
+The CLI returns JSON with the source format, sequence, entry count, source and
+destination identities, per-shard usage, and incomplete tail bytes. Keep this
+report with the configuration and directory hashes. The migrator does not change
+server configuration or begin accepting connections.
 
-Após conferir o resultado, inicie o servidor com o novo diretório e a quantidade
-de shards correspondente. A migração não modifica nomes de chaves: operações
-multichave que antes usavam um único worker podem ser recusadas como `CROSSSHARD`
-na nova distribuição. Hash tags permitem manter grupos de chaves juntos.
+After checking the result, start the server with the new directory and matching
+shard count. Migration does not change key names: multikey operations that previously
+used a single worker may be rejected as `CROSSSHARD` under the new distribution.
+Hash tags allow groups of keys to stay together.
 
-Para voltar à configuração anterior, pare o novo servidor e use a origem preservada
-com seu binário e configuração compatíveis. Escritas feitas somente no destino
-depois da migração não estarão nessa origem. O binário antigo da R03 não entende
-cabeçalhos v2.
+To return to the previous configuration, stop the new server and use the preserved
+source with its compatible binary and configuration. Writes made only to the
+destination after migration will not exist in that source. The old R03 binary
+does not understand v2 headers.
 
-## API e verificação
+## API and verification
 
-`AofConfig.layout` define `DurableLayout { shard_count, routing_version }`.
-`recover` entrega `Recovered.metadata` com identidade, sequência, versão do
-cabeçalho, uso por shard e extensão válida/incompleta. O integrador pode distribuir
-o snapshot pelos workers somente depois dessas verificações.
+`AofConfig.layout` defines `DurableLayout { shard_count, routing_version }`.
+`recover` returns `Recovered.metadata` with identity, sequence, header version,
+per-shard usage, and valid/incomplete extent. The integrator may distribute the
+snapshot to workers only after these checks.
 
-`migration::migrate_offline(MigrationOptions, Arc<dyn Clock>)` recebe configurações
-e quotas separadas para origem e destino. `migration::options_from_args` é o
-parser puro usado pelo CLI.
+`migration::migrate_offline(MigrationOptions, Arc<dyn Clock>)` accepts separate
+source and destination configurations and quotas. `migration::options_from_args`
+is the pure parser used by the CLI.
 
 ```sh
 cargo test --locked --test aof_migration
@@ -102,15 +102,15 @@ cargo test --locked --test persistence
 cargo test --locked --lib persistence
 ```
 
-Os casos incluem v1/v2, truncamento e corrupção do cabeçalho, incompatibilidade de
-configuração, lote entre shards, quota local, preservação de TTL e sequência,
-lock de origem ativa, recusa de sobrescrita, limpeza após erro e CLI real.
+Cases include v1/v2, header truncation and corruption, configuration mismatches,
+cross-shard batches, local quota, TTL and sequence preservation, an active source
+lock, overwrite refusal, cleanup after errors, and the actual CLI.
 
-A baseline interna R03 foi congelada no SHA
-`c7b148abeff43fd354d29b1bbce36aea43ea8f3f`, com binário, AOF de strings/MSET/TTL,
-configuração, logs e hashes. A migração real desse diretório de um para quatro
-shards foi conferida com o migrador no SHA
-`4739d596f8d80d0038a9a97838395c90be60ceff`: três entradas, sequência dois e hash
-da origem idêntico antes e depois. Os artefatos locais ficam em
-`target/baselines/r03-<SHA>` e `target/baselines/r04-migration-<SHA>`.
-Esses registros são baselines internas, sem identidade ou publicação de release.
+The internal R03 baseline was frozen at SHA
+`c7b148abeff43fd354d29b1bbce36aea43ea8f3f`, with the binary, strings/MSET/TTL AOF,
+configuration, logs, and hashes. Actual migration of that directory from one to
+four shards was checked with the migrator at SHA
+`4739d596f8d80d0038a9a97838395c90be60ceff`: three entries, sequence two, and an
+identical source hash before and after. Local artifacts are in
+`target/baselines/r03-<SHA>` and `target/baselines/r04-migration-<SHA>`.
+These records are internal baselines, without release identity or publication.
