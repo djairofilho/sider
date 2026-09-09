@@ -58,6 +58,24 @@ Nenhum teste altera o ambiente global ou depende de portas fixas.
 
 ## Limites da migração verificada
 
+A baseline interna R05 foi gerada pelo executável do checkout limpo
+`a615f705266c7562eece5e751d43d94b2b0eb363`, com quatro shards, strings, hashes,
+listas, sets e TTL. O processo confirmou cinco mutações com `always`; uma
+reinicialização do mesmo binário conferiu os quatro tipos. O binário, a
+configuração, os comandos, os logs e os hashes ficam preservados em
+`target/baselines/r05-a615f705266c7562eece5e751d43d94b2b0eb363/`.
+O executável tem SHA-256
+`7eb68f536d9ba8c6e41f430fb7ed66cb04b2e0dab38dcb8f6e6401b20da42aba`;
+os 403 bytes AOF têm SHA-256
+`87d12a8fc88698266882a6dce88506249fdd7dac3ffe594fc12e42cded47242b`.
+
+`sorted_set_migration_from_frozen_r05_binary_output_preserves_collections`
+usa esses bytes em `tests/fixtures/aof-r05-collections.hex`, recupera os tipos
+anteriores, acrescenta e atualiza um sorted set, compacta e reinicia com relógio
+injetado após o vencimento do hash. Os demais tipos e a ordenação permanecem.
+O ensaio passou no Windows e Linux; o SHA histórico identifica a origem dos
+dados, sem atribuir a ele a validação do código novo.
+
 `tests/fixtures/aof-v1.hex` foi introduzida no commit
 `ea86917` antes dos tipos novos. O SHA-256 do arquivo textual é
 `9236640383afe34c7733dddc5cbf30153b0be8b1f7108c584bff3133f8b10862`.
