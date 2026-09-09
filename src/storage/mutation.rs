@@ -294,7 +294,7 @@ impl Store {
         )
     }
 
-    fn prepared(
+    pub(super) fn prepared(
         &self,
         reply: Reply,
         entries: Vec<(Bytes, Option<Entry>)>,
@@ -323,6 +323,7 @@ impl Store {
     pub fn apply(&mut self, prepared: Prepared) -> Reply {
         assert_eq!(self.generation, prepared.generation, "preparação obsoleta");
         for (key, _) in &prepared.entries {
+            self.watches.invalidate(key);
             self.remove(key);
         }
         for (key, entry) in prepared.entries {

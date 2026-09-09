@@ -51,18 +51,36 @@ impl ShardRouter {
     /// usam o worker zero; duplicatas continuam intactas no comando original.
     pub fn route(&self, command: &Command) -> Result<usize, ExecutionError> {
         let mut selected = None;
+        self.select_command(command, &mut selected)?;
+        Ok(selected.unwrap_or(0))
+    }
+
+    pub fn select_key(
+        &self,
+        key: &[u8],
+        selected: &mut Option<usize>,
+    ) -> Result<(), ExecutionError> {
+        let shard = self.shard_for(key);
+        if selected.is_some_and(|previous| previous != shard) {
+            return Err(ExecutionError::CrossShard);
+        }
+        *selected = Some(shard);
+        Ok(())
+    }
+
+    pub fn select_command(
+        &self,
+        command: &Command,
+        selected: &mut Option<usize>,
+    ) -> Result<(), ExecutionError> {
         let mut crossed = false;
         command.visit_keys(|key| {
-            let shard = self.shard_for(key);
-            if selected.is_some_and(|previous| previous != shard) {
-                crossed = true;
-            }
-            selected = Some(shard);
+            crossed |= self.select_key(key, selected).is_err();
         });
         if crossed {
             Err(ExecutionError::CrossShard)
         } else {
-            Ok(selected.unwrap_or(0))
+            Ok(())
         }
     }
 }

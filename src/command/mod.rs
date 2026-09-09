@@ -153,6 +153,18 @@ pub enum Command {
         channel: Bytes,
         message: Bytes,
     },
+    /// Inicia uma fila transacional pertencente à conexão.
+    Multi,
+    /// Executa a fila inteira no seu único shard.
+    Exec,
+    /// Descarta a fila e suas observações.
+    Discard,
+    /// Observa chaves até EXEC, DISCARD, UNWATCH ou encerramento.
+    Watch {
+        keys: Vec<Bytes>,
+    },
+    /// Libera as observações desta conexão.
+    Unwatch,
 }
 
 impl Command {
@@ -164,6 +176,8 @@ impl Command {
             | Self::Subscribe { .. }
             | Self::Unsubscribe { .. }
             | Self::Publish { .. } => {}
+            Self::Multi | Self::Exec | Self::Discard | Self::Unwatch => {}
+            Self::Watch { keys } => keys.iter().for_each(visit),
             Self::Get { key }
             | Self::Hash { key, .. }
             | Self::List { key, .. }

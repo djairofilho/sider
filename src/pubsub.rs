@@ -6,11 +6,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use thiserror::Error;
 use tokio::sync::{mpsc, watch};
 
-use crate::resp::Frame;
+use crate::command::{Command, Reply};
+use crate::resp::{EncodeError, Frame, RespLimits, encode};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Message {
@@ -55,6 +56,27 @@ struct Entry {
 }
 
 impl State {
+    fn publish(&mut self, message: Message) -> i64 {
+        let members = self
+            .channels
+            .get(&message.channel)
+            .cloned()
+            .unwrap_or_default();
+        let mut accepted = 0;
+        for id in members {
+            let sent = self
+                .subscribers
+                .get(&id)
+                .is_some_and(|entry| entry.messages.try_send(message.clone()).is_ok());
+            if sent {
+                accepted += 1;
+            } else {
+                self.remove(id);
+            }
+        }
+        accepted
+    }
+
     fn remove(&mut self, id: u64) {
         if let Some(entry) = self.subscribers.remove(&id) {
             entry.evicted.send_replace(true);
@@ -102,25 +124,10 @@ impl Hub {
     /// Conta filas que aceitaram a mensagem; isso não confirma leitura pelo cliente.
     /// Fila cheia remove todas as inscrições daquele cliente e sinaliza sua conexão.
     pub(crate) fn publish(&self, message: Message) -> i64 {
-        let mut state = self.state.lock().expect("mutex Pub/Sub envenenado");
-        let members = state
-            .channels
-            .get(&message.channel)
-            .cloned()
-            .unwrap_or_default();
-        let mut accepted = 0;
-        for id in members {
-            let sent = state
-                .subscribers
-                .get(&id)
-                .is_some_and(|entry| entry.messages.try_send(message.clone()).is_ok());
-            if sent {
-                accepted += 1;
-            } else {
-                state.remove(id);
-            }
-        }
-        accepted
+        self.state
+            .lock()
+            .expect("mutex Pub/Sub envenenado")
+            .publish(message)
     }
 }
 
@@ -175,7 +182,17 @@ impl Subscription {
     }
 
     pub(crate) fn subscribe(&mut self, channels: Vec<Bytes>) -> Result<Vec<Frame>, PubSubError> {
-        let mut state = self.hub.state.lock().expect("mutex Pub/Sub envenenado");
+        let hub = self.hub.clone();
+        let mut state = hub.state.lock().expect("mutex Pub/Sub envenenado");
+        self.subscribe_locked(&mut state, channels, true)
+    }
+
+    fn subscribe_locked(
+        &mut self,
+        state: &mut State,
+        channels: Vec<Bytes>,
+        drain_messages: bool,
+    ) -> Result<Vec<Frame>, PubSubError> {
         let entry = state.subscribers.get(&self.id).ok_or(PubSubError::Closed)?;
         let unique: BTreeSet<_> = channels
             .iter()
@@ -187,7 +204,11 @@ impl Subscription {
         }
         // Captura mensagens anteriores sob o mesmo lock da inscrição. Confirmações
         // nunca ultrapassam mensagens já aceitas na fila desta conexão.
-        let mut responses = drain(&mut self.receiver);
+        let mut responses = if drain_messages {
+            drain(&mut self.receiver)
+        } else {
+            Vec::new()
+        };
         for channel in channels {
             let entry = state
                 .subscribers
@@ -206,14 +227,28 @@ impl Subscription {
     }
 
     pub(crate) fn unsubscribe(&mut self, channels: Vec<Bytes>) -> Result<Vec<Frame>, PubSubError> {
-        let mut state = self.hub.state.lock().expect("mutex Pub/Sub envenenado");
+        let hub = self.hub.clone();
+        let mut state = hub.state.lock().expect("mutex Pub/Sub envenenado");
+        self.unsubscribe_locked(&mut state, channels, true)
+    }
+
+    fn unsubscribe_locked(
+        &mut self,
+        state: &mut State,
+        channels: Vec<Bytes>,
+        drain_messages: bool,
+    ) -> Result<Vec<Frame>, PubSubError> {
         let entry = state.subscribers.get(&self.id).ok_or(PubSubError::Closed)?;
         let channels = if channels.is_empty() {
             entry.channels.iter().cloned().collect()
         } else {
             channels
         };
-        let mut responses = drain(&mut self.receiver);
+        let mut responses = if drain_messages {
+            drain(&mut self.receiver)
+        } else {
+            Vec::new()
+        };
         if channels.is_empty() {
             responses.push(confirmation(b"unsubscribe", None, 0));
         }
@@ -234,6 +269,89 @@ impl Subscription {
         }
         Ok(responses)
     }
+
+    /// O worker chama somente após append aprovado. Nenhum await ou socket ocorre sob o lock.
+    pub(crate) fn complete_exec(
+        &mut self,
+        commands: Vec<Command>,
+        limits: RespLimits,
+        apply: impl FnOnce() -> Reply,
+    ) -> Result<Bytes, EncodeError> {
+        let hub = self.hub.clone();
+        let mut state = hub.state.lock().expect("mutex Pub/Sub envenenado");
+        let Reply::Array(replies) = apply() else {
+            unreachable!("prepare_batch sempre produz array")
+        };
+        let command_count = commands.len();
+        let mut frames = Vec::new();
+        for (command, reply) in commands.into_iter().zip(replies) {
+            match command {
+                Command::Subscribe { channels } => {
+                    match self.subscribe_locked(&mut state, channels, false) {
+                        Ok(acks) => frames.extend(acks),
+                        Err(error) => frames.push(Frame::Error(Bytes::from(error.to_string()))),
+                    }
+                }
+                Command::Unsubscribe { channels } => {
+                    match self.unsubscribe_locked(&mut state, channels, false) {
+                        Ok(acks) => frames.extend(acks),
+                        Err(error) => frames.push(Frame::Error(Bytes::from(error.to_string()))),
+                    }
+                }
+                Command::Publish { channel, message } => {
+                    let message = Message {
+                        channel,
+                        payload: message,
+                    };
+                    let mut check = BytesMut::new();
+                    if encode(&message.clone().into_frame(), &mut check, limits).is_err() {
+                        frames.push(Frame::Error(Bytes::from_static(
+                            b"ERR pubsub message exceeds response limit",
+                        )));
+                    } else {
+                        frames.push(Frame::Integer(state.publish(message)));
+                    }
+                }
+                Command::Ping(payload)
+                    if state
+                        .subscribers
+                        .get(&self.id)
+                        .is_some_and(|entry| !entry.channels.is_empty()) =>
+                {
+                    frames.push(Frame::Array(Some(vec![
+                        Frame::Bulk(Some(Bytes::from_static(b"pong"))),
+                        Frame::Bulk(Some(payload.unwrap_or_default())),
+                    ])));
+                }
+                _ => frames.push(reply.into()),
+            }
+        }
+        // Redis adia notificações à própria conexão até todas as respostas de EXEC.
+        frames.extend(drain(&mut self.receiver));
+        drop(state);
+        encode_exec(command_count, frames, limits)
+    }
+}
+
+/// SUBSCRIBE pode produzir vários frames para um comando no EXEC RESP2 do Redis.
+/// Primeiro valida/aloca o agregado físico completo; depois troca só o cabeçalho
+/// pela quantidade lógica de comandos. O cabeçalho novo nunca é maior.
+fn encode_exec(
+    command_count: usize,
+    frames: Vec<Frame>,
+    limits: RespLimits,
+) -> Result<Bytes, EncodeError> {
+    let physical_count = frames.len();
+    assert!(physical_count >= command_count);
+    let mut output = BytesMut::new();
+    encode(&Frame::Array(Some(frames)), &mut output, limits)?;
+    let physical_header = format!("*{physical_count}\r\n");
+    let logical_header = format!("*{command_count}\r\n");
+    let body = output.split_off(physical_header.len());
+    output.clear();
+    output.extend_from_slice(logical_header.as_bytes());
+    output.extend_from_slice(&body);
+    Ok(output.freeze())
 }
 
 fn drain(receiver: &mut mpsc::Receiver<Message>) -> Vec<Frame> {

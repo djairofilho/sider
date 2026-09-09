@@ -6,12 +6,15 @@ mod mutation;
 pub mod routing;
 pub mod snapshot;
 mod sorted_set;
+mod transaction;
 mod value;
+mod watch;
 pub use sorted_set::SortedSet;
 pub mod worker;
 pub use clock::{Clock, SystemClock};
 pub use mutation::{Mutation, MutationOrigin, Prepared, ReplayError, ResolvedBatch};
 pub use value::Value;
+pub use watch::WatchToken;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -72,6 +75,7 @@ pub struct Store {
     clock: Arc<dyn Clock>,
     config: StoreConfig,
     used_bytes: usize,
+    watches: watch::Registry,
 }
 
 impl Default for Store {
@@ -99,6 +103,7 @@ impl Store {
             clock,
             config,
             used_bytes: 0,
+            watches: watch::Registry::default(),
         })
     }
 
@@ -245,9 +250,14 @@ impl Store {
                 self.insert(key, entry.value.clone(), None);
                 Reply::Integer(1)
             }
-            Command::Subscribe { .. } | Command::Unsubscribe { .. } | Command::Publish { .. } => {
-                Reply::Error(ExecutionError::ConnectionOnly)
-            }
+            Command::Multi
+            | Command::Exec
+            | Command::Discard
+            | Command::Watch { .. }
+            | Command::Unwatch
+            | Command::Subscribe { .. }
+            | Command::Unsubscribe { .. }
+            | Command::Publish { .. } => Reply::Error(ExecutionError::ConnectionOnly),
         }
     }
 
@@ -377,6 +387,7 @@ impl Store {
 
     fn remove(&mut self, key: &Bytes) -> Option<Entry> {
         let entry = self.values.remove(key)?;
+        self.watches.invalidate(key);
         self.generation = self.generation.wrapping_add(1);
         self.used_bytes -= Self::entry_bytes(key, &entry.value).expect("entrada contabilizada");
         if let Some(deadline) = entry.expires_at {
@@ -388,6 +399,7 @@ impl Store {
 
     fn insert(&mut self, key: Bytes, value: impl Into<Value>, expiry: Option<(Instant, i64)>) {
         let value = value.into();
+        self.watches.invalidate(&key);
         self.remove(&key);
         self.used_bytes += Self::entry_bytes(&key, &value).expect("mutação pré-validada");
         // Há no máximo um evento por chave; o anterior foi removido antes da geração avançar.

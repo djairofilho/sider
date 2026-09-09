@@ -30,6 +30,12 @@ pub struct ServerConfig {
     pub pubsub_max_channels: usize,
     /// Notificações pendentes por assinante; lotação encerra a conexão.
     pub pubsub_queue_capacity: usize,
+    /// Comandos retidos por conexão entre MULTI e EXEC/DISCARD.
+    pub transaction_max_commands: usize,
+    /// Soma dos bytes RESP dos comandos retidos na fila transacional.
+    pub transaction_max_bytes: usize,
+    /// Chaves distintas observadas por conexão.
+    pub watch_max_keys: usize,
     /// Bytes não consumidos que uma conexão pode manter no buffer de entrada.
     pub max_input_buffer_bytes: usize,
     /// Bytes de uma resposta completa, incluindo framing.
@@ -60,6 +66,9 @@ impl Default for ServerConfig {
             shards: 1,
             pubsub_max_channels: 32,
             pubsub_queue_capacity: 32,
+            transaction_max_commands: 128,
+            transaction_max_bytes: 1024 * 1024,
+            watch_max_keys: 128,
             max_input_buffer_bytes: 4 * 1024 * 1024,
             max_response_bytes: 4 * 1024 * 1024,
             max_dataset_bytes: crate::storage::StoreConfig::default().max_dataset_bytes,
@@ -109,6 +118,12 @@ impl ServerConfig {
         read_size!(config.shards, "SIDER_SHARDS");
         read_size!(config.pubsub_max_channels, "SIDER_PUBSUB_MAX_CHANNELS");
         read_size!(config.pubsub_queue_capacity, "SIDER_PUBSUB_QUEUE_CAPACITY");
+        read_size!(
+            config.transaction_max_commands,
+            "SIDER_TRANSACTION_MAX_COMMANDS"
+        );
+        read_size!(config.transaction_max_bytes, "SIDER_TRANSACTION_MAX_BYTES");
+        read_size!(config.watch_max_keys, "SIDER_WATCH_MAX_KEYS");
         read_size!(config.resp_limits.max_frame_bytes, "SIDER_MAX_FRAME_BYTES");
         read_size!(config.resp_limits.max_bulk_bytes, "SIDER_MAX_BULK_BYTES");
         read_size!(config.resp_limits.max_line_bytes, "SIDER_MAX_LINE_BYTES");
@@ -187,6 +202,18 @@ impl ServerConfig {
         }
         for (value, reason) in [
             (
+                self.transaction_max_commands,
+                "transaction_max_commands precisa ser maior que zero",
+            ),
+            (
+                self.transaction_max_bytes,
+                "transaction_max_bytes precisa ser maior que zero",
+            ),
+            (
+                self.watch_max_keys,
+                "watch_max_keys precisa ser maior que zero",
+            ),
+            (
                 self.pubsub_max_channels,
                 "pubsub_max_channels precisa ser maior que zero",
             ),
@@ -219,6 +246,8 @@ impl ServerConfig {
             || self.worker_queue_capacity > tokio::sync::Semaphore::MAX_PERMITS
             || self.pubsub_max_channels > tokio::sync::Semaphore::MAX_PERMITS
             || self.pubsub_queue_capacity > tokio::sync::Semaphore::MAX_PERMITS
+            || self.transaction_max_commands > tokio::sync::Semaphore::MAX_PERMITS
+            || self.watch_max_keys > tokio::sync::Semaphore::MAX_PERMITS
         {
             return Err(invalid(
                 "conexões e capacidade da fila não podem exceder Semaphore::MAX_PERMITS",
@@ -230,6 +259,7 @@ impl ServerConfig {
             self.resp_limits.max_line_bytes,
             self.max_input_buffer_bytes,
             self.max_response_bytes,
+            self.transaction_max_bytes,
         ]
         .into_iter()
         .any(|bytes| bytes > isize::MAX as usize)
@@ -308,7 +338,10 @@ fn parse_integer<T: FromStr>(name: &'static str, value: OsString) -> Result<T, C
 mod tests {
     use super::*;
 
-    const NUMERIC_NAMES: [&str; 17] = [
+    const NUMERIC_NAMES: [&str; 20] = [
+        "SIDER_TRANSACTION_MAX_COMMANDS",
+        "SIDER_TRANSACTION_MAX_BYTES",
+        "SIDER_WATCH_MAX_KEYS",
         "SIDER_SHARDS",
         "SIDER_MAX_DATASET_BYTES",
         "SIDER_PUBSUB_MAX_CHANNELS",
@@ -385,6 +418,22 @@ mod tests {
         .unwrap();
         assert_eq!(config.pubsub_max_channels, 4);
         assert_eq!(config.pubsub_queue_capacity, 7);
+    }
+
+    #[test]
+    fn transactions_limits_are_bounded_and_read_without_global_environment() {
+        let config = config_with(&[
+            ("SIDER_TRANSACTION_MAX_COMMANDS", "3"),
+            ("SIDER_TRANSACTION_MAX_BYTES", "256"),
+            ("SIDER_WATCH_MAX_KEYS", "5"),
+        ])
+        .unwrap();
+        assert_eq!(config.transaction_max_commands, 3);
+        assert_eq!(config.transaction_max_bytes, 256);
+        assert_eq!(config.watch_max_keys, 5);
+        assert_eq!(ServerConfig::default().transaction_max_commands, 128);
+        assert_eq!(ServerConfig::default().transaction_max_bytes, 1_048_576);
+        assert_eq!(ServerConfig::default().watch_max_keys, 128);
     }
 
     #[test]

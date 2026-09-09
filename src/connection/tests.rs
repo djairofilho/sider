@@ -18,6 +18,131 @@ const LATER_SET: &[u8] = b"*3\r\n$3\r\nSET\r\n$5\r\nlater\r\n$5\r\nvalue\r\n";
 const SUBSCRIBE: &[u8] = b"*2\r\n$9\r\nSUBSCRIBE\r\n$1\r\na\r\n";
 const SUBSCRIBED: &[u8] = b"*3\r\n$9\r\nsubscribe\r\n$1\r\na\r\n:1\r\n";
 
+fn tx_request(arguments: &[&[u8]]) -> BytesMut {
+    let frame = Frame::Array(Some(
+        arguments
+            .iter()
+            .map(|value| Frame::Bulk(Some(Bytes::copy_from_slice(value))))
+            .collect(),
+    ));
+    let mut output = BytesMut::new();
+    encode(&frame, &mut output, RespLimits::default()).unwrap();
+    output
+}
+
+#[tokio::test(start_paused = true)]
+async fn transactions_queue_limits_abort_without_early_writes() {
+    for byte_limit in [false, true] {
+        let config = ServerConfig {
+            transaction_max_commands: if byte_limit { 128 } else { 1 },
+            transaction_max_bytes: if byte_limit {
+                LATER_SET.len()
+            } else {
+                1_048_576
+            },
+            ..ServerConfig::default()
+        };
+        let (stop, database, owner) = setup(&config);
+        let (mut client, stream) = duplex(1024);
+        let mut connection = Box::pin(run(stream, config, database.clone(), stop.subscribe()));
+        let mut worker = Box::pin(owner.run());
+        feed(&mut client, connection.as_mut(), &tx_request(&[b"MULTI"])).await;
+        read_exact_ready(&mut client, b"+OK\r\n").await;
+        feed(&mut client, connection.as_mut(), LATER_SET).await;
+        read_exact_ready(&mut client, b"+QUEUED\r\n").await;
+        feed(&mut client, connection.as_mut(), PING).await;
+        read_exact_ready(&mut client, b"-ERR transaction queue limit exceeded\r\n").await;
+        feed(&mut client, connection.as_mut(), &tx_request(&[b"EXEC"])).await;
+        read_exact_ready(
+            &mut client,
+            b"-EXECABORT Transaction discarded because of previous errors.\r\n",
+        )
+        .await;
+        let mut get = Box::pin(database.execute(get_later()));
+        assert_pending(get.as_mut()).await;
+        assert_pending(worker.as_mut()).await;
+        assert_eq!(ready(get.as_mut()).await.unwrap(), Reply::Bulk(None));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn transactions_cancel_before_exec_discards_queued_writes() {
+    let config = ServerConfig::default();
+    let (stop, database, owner) = setup(&config);
+    let (mut client, stream) = duplex(1024);
+    let mut connection = Box::pin(run(stream, config, database.clone(), stop.subscribe()));
+    feed(&mut client, connection.as_mut(), &tx_request(&[b"MULTI"])).await;
+    feed(&mut client, connection.as_mut(), LATER_SET).await;
+    read_exact_ready(&mut client, b"+OK\r\n+QUEUED\r\n").await;
+    drop(connection);
+    let mut worker = Box::pin(owner.run());
+    let mut get = Box::pin(database.execute(get_later()));
+    assert_pending(get.as_mut()).await;
+    assert_pending(worker.as_mut()).await;
+    assert_eq!(ready(get.as_mut()).await.unwrap(), Reply::Bulk(None));
+}
+
+#[tokio::test(start_paused = true)]
+async fn transactions_encode_complete_exec_before_writing_any_prefix() {
+    for pubsub in [false, true] {
+        let config = ServerConfig {
+            max_response_bytes: 128,
+            resp_limits: RespLimits {
+                max_bulk_bytes: 80,
+                ..RespLimits::default()
+            },
+            ..ServerConfig::default()
+        };
+        let (stop, database, owner) = setup(&config);
+        let hub = Hub::default();
+        let (mut client, stream) = duplex(1024);
+        let mut connection = Box::pin(run_with_pubsub(
+            stream,
+            config,
+            database,
+            stop.subscribe(),
+            hub.clone(),
+        ));
+        let mut worker = Box::pin(owner.run());
+        feed(&mut client, connection.as_mut(), &tx_request(&[b"MULTI"])).await;
+        read_exact_ready(&mut client, b"+OK\r\n").await;
+        if pubsub {
+            feed(&mut client, connection.as_mut(), SUBSCRIBE).await;
+            feed(
+                &mut client,
+                connection.as_mut(),
+                &tx_request(&[b"PUBLISH", b"a", &[b'x'; 80]]),
+            )
+            .await;
+        } else {
+            for _ in 0..2 {
+                feed(
+                    &mut client,
+                    connection.as_mut(),
+                    &tx_request(&[b"ECHO", &[b'x'; 80]]),
+                )
+                .await;
+            }
+        }
+        read_exact_ready(&mut client, b"+QUEUED\r\n+QUEUED\r\n").await;
+        feed(&mut client, connection.as_mut(), &tx_request(&[b"EXEC"])).await;
+        assert_pending(worker.as_mut()).await;
+        assert!(matches!(
+            ready(connection.as_mut()).await,
+            Err(ConnectionError::Encode(_))
+        ));
+        drop(connection);
+        assert_eof(&mut client).await;
+        assert_eq!(
+            hub.publish(Message {
+                channel: Bytes::from_static(b"a"),
+                payload: Bytes::new()
+            }),
+            0
+        );
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn pubsub_eviction_interrupts_blocked_write_and_cleans_every_channel() {
     let config = ServerConfig {
