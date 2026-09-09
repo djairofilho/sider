@@ -32,6 +32,10 @@ com fila limitada, WATCH, um append AOF por lote e integração com Pub/Sub.
 CI e publicação automática estão adiadas para depois da 1.0. Até a 1.0 inclusive,
 o desenvolvimento usa validação local e as releases são publicadas manualmente.
 
+`INFO` consulta métricas da instância e `sider --diagnose` valida a configuração
+sem iniciar o servidor. O [guia operacional](docs/metrics.md) define os campos,
+limites e procedimentos para filas cheias, clientes lentos e falhas de AOF.
+
 ## Executar o servidor
 
 Instale Rust com `rustup`. A toolchain e os componentes de desenvolvimento estão
