@@ -1,14 +1,15 @@
 # Sider
 
 Sider é um projeto de servidor de banco de dados em memória, escrito em Rust.
-O objetivo da versão 0.1 é oferecer um subconjunto explícito de compatibilidade
+O objetivo é oferecer um subconjunto explícito de compatibilidade
 com Redis pelo protocolo RESP2. O nome é Redis ao contrário.
 
-O binário atende `PING`, `ECHO`, `GET`, `SET` básico e `DEL` por RESP2/TCP.
+O binário atende strings, operações multichave, opções de `SET` e TTL por RESP2/TCP.
 Um worker proprietário serializa o armazenamento, com filas, conexões e buffers
-limitados. É um protótipo local, sem persistência, autenticação ou quota do dataset.
-A suíte diferencial compara o binário com Redis 8.10.1 e verifica os cinco comandos
-com `redis-cli`. A
+limitados e quota lógica de 64 MiB por padrão. Ainda não há persistência ou
+autenticação. O [guia de strings](docs/strings.md) descreve comandos e limites.
+A suíte diferencial compara o binário com Redis 8.10.1; os cinco comandos iniciais
+também foram verificados com `redis-cli`. A
 [candidata 0.1.0-rc.1](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1)
 foi publicada no repositório privado e permanece como registro histórico.
 
@@ -42,7 +43,7 @@ autorizada para o projeto.
 
 Sem argumentos, o programa valida a configuração e abre o listener TCP.
 Use Ctrl+C para encerrar. Em outro terminal, um cliente RESP2 pode enviar os
-cinco comandos suportados. Dados em memória são perdidos ao terminar o processo.
+comandos suportados. Dados em memória são perdidos ao terminar o processo.
 
 ### Configuração
 
@@ -50,6 +51,7 @@ cinco comandos suportados. Dados em memória são perdidos ao terminar o process
 | --- | --- | --- |
 | `SIDER_ADDR` | `127.0.0.1:6379` | Endereço IP e porta; IPv6 entre colchetes |
 | `SIDER_READY_FILE` | Ausente | Arquivo novo de prontidão com PID, IP e porta efetiva |
+| `SIDER_MAX_DATASET_BYTES` | `67108864` | Quota lógica positiva, distinta do RSS; sem eviction |
 
 O endereço é validado de forma estrita. Use um IP, como `127.0.0.1:6380` ou
 `[::1]:6380`, em vez de um hostname. Configuração inválida encerra o programa com
@@ -147,10 +149,10 @@ candidata histórica. O checkpoint R01-GATE passa a encerrar o marco técnico,
 sem nova publicação da 0.1. A implementação segue por dependências reais até
 a 1.0; as evidências anteriores continuam vinculadas aos seus próprios SHAs.
 
-O alvo da versão 0.1 inclui `PING`, `ECHO`, `GET`, `SET` básico e `DEL`, com um
-único worker de armazenamento. TTL, persistência e múltiplos shards pertencem às
-versões seguintes. O [plano da 0.1](PLANO.md) detalha os contratos técnicos e o
-[ROADMAP](ROADMAP.md) organiza as versões posteriores.
+R02 acrescenta `EXISTS`, `INCR`, `DECR`, `MGET`, `MSET`, opções de `SET`, expiração
+ativa/passiva e quota com rejeição atômica de crescimento. Persistência e múltiplos
+shards são as próximas capacidades. O [plano da 0.1](PLANO.md) preserva o desenho
+inicial e o [ROADMAP](ROADMAP.md) organiza as dependências posteriores.
 
 Banco, testes e ferramentas próprias usam Rust. Não há scripts Python nem workflows
 de CI no projeto. Ao alterar as ferramentas ou o manifesto, use:
