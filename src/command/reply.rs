@@ -8,6 +8,8 @@ use crate::resp::Frame;
 /// Erros recuperáveis de execução, sem encerrar a conexão ou o worker.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ExecutionError {
+    #[error("READONLY You can't write against a read only replica.")]
+    ReadOnly,
     #[error("CROSSSLOT Keys in request don't hash to the same slot")]
     CrossShard,
     #[error("WRONGTYPE Operation against a key holding the wrong kind of value")]

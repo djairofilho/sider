@@ -3,6 +3,7 @@
 mod clock;
 mod collections;
 mod mutation;
+pub mod replication;
 pub mod routing;
 pub mod snapshot;
 mod sorted_set;

@@ -172,6 +172,51 @@ pub enum Command {
 }
 
 impl Command {
+    /// Classificação sem consultar o dataset; condições que falhariam continuam escritas.
+    pub fn writes_dataset(&self) -> bool {
+        match self {
+            Self::Set { .. }
+            | Self::SetWithOptions { .. }
+            | Self::Del { .. }
+            | Self::Incr { .. }
+            | Self::Decr { .. }
+            | Self::MSet { .. }
+            | Self::Expire { .. }
+            | Self::Persist { .. } => true,
+            Self::Hash { operation, .. } => matches!(
+                operation,
+                HashCommand::Set { .. } | HashCommand::Delete { .. }
+            ),
+            Self::List { operation, .. } => matches!(
+                operation,
+                ListCommand::Push { .. } | ListCommand::Pop { .. }
+            ),
+            Self::SetCollection { operation, .. } => matches!(
+                operation,
+                SetCommand::Add { .. } | SetCommand::Remove { .. }
+            ),
+            Self::SortedSet { operation, .. } => matches!(
+                operation,
+                SortedSetCommand::Add { .. } | SortedSetCommand::Remove { .. }
+            ),
+            Self::Ping(_)
+            | Self::Info(_)
+            | Self::Echo(_)
+            | Self::Get { .. }
+            | Self::Exists { .. }
+            | Self::MGet { .. }
+            | Self::Ttl { .. }
+            | Self::Subscribe { .. }
+            | Self::Unsubscribe { .. }
+            | Self::Publish { .. }
+            | Self::Multi
+            | Self::Exec
+            | Self::Discard
+            | Self::Watch { .. }
+            | Self::Unwatch => false,
+        }
+    }
+
     /// Visita chaves na ordem original sem alocar nem confundir valores com chaves.
     pub fn visit_keys(&self, mut visit: impl FnMut(&Bytes)) {
         match self {

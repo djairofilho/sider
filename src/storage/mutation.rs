@@ -352,6 +352,17 @@ impl Store {
 
     /// Valida o lote completo antes de aplicar; TTL vencido vira remoção e não ressuscita valor anterior.
     pub fn replay(&mut self, mutations: &[Mutation]) -> Result<(), ReplayError> {
+        let prepared = self.prepare_replay(mutations, MutationOrigin::Client)?;
+        self.apply(prepared);
+        Ok(())
+    }
+
+    /// Pré-valida as pós-imagens para persistir antes de aplicar no worker.
+    pub fn prepare_replay(
+        &self,
+        mutations: &[Mutation],
+        origin: MutationOrigin,
+    ) -> Result<Prepared, ReplayError> {
         let now = self.clock.now();
         let unix_ms = self.clock.unix_millis();
         let mut keys = BTreeSet::new();
@@ -404,8 +415,6 @@ impl Store {
         if used > self.config.max_dataset_bytes {
             return Err(ReplayError::Quota);
         }
-        let prepared = self.prepared(Reply::Ok, entries, MutationOrigin::Client);
-        self.apply(prepared);
-        Ok(())
+        Ok(self.prepared(Reply::Ok, entries, origin))
     }
 }

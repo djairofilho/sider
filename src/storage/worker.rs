@@ -82,6 +82,8 @@ pub struct DbHandle {
     pub(super) shutdown: watch::Receiver<bool>,
     pub(super) barrier: Arc<RwLock<()>>,
     pub(super) snapshots: Vec<mpsc::Sender<oneshot::Sender<Vec<super::Mutation>>>>,
+    pub(super) controls: Vec<mpsc::Sender<super::replication::Control>>,
+    replication: Option<crate::replication::state::Runtime>,
 }
 
 /// Proprietário único do mapa e do lado receptor da fila.
@@ -97,6 +99,8 @@ pub struct Worker {
     shutdown: watch::Receiver<bool>,
     barrier: Arc<RwLock<()>>,
     snapshots: mpsc::Receiver<oneshot::Sender<Vec<super::Mutation>>>,
+    controls: mpsc::Receiver<super::replication::Control>,
+    replication: Option<crate::replication::state::Runtime>,
 }
 
 /// Cria um mapa vazio e seu canal limitado, sem iniciar uma tarefa.
@@ -155,6 +159,7 @@ pub fn channel_with_stores(
     let mut senders = Vec::with_capacity(stores.len());
     let mut workers = Vec::with_capacity(stores.len());
     let mut snapshots = Vec::with_capacity(stores.len());
+    let mut controls = Vec::with_capacity(stores.len());
     let barrier = Arc::new(RwLock::new(()));
     let shard_count = stores.len();
     let metrics = Metrics::new(stores.len(), capacity);
@@ -162,6 +167,8 @@ pub fn channel_with_stores(
         metrics.dataset(shard, store.dataset_stats());
         let (sender, receiver) = mpsc::channel(capacity);
         let (snapshot_sender, snapshot_receiver) = mpsc::channel(1);
+        let (control_sender, control_receiver) = mpsc::channel(1);
+        controls.push(control_sender);
         snapshots.push(snapshot_sender);
         senders.push(sender);
         workers.push(Worker {
@@ -176,6 +183,8 @@ pub fn channel_with_stores(
             shutdown: shutdown.clone(),
             barrier: barrier.clone(),
             snapshots: snapshot_receiver,
+            controls: control_receiver,
+            replication: None,
         });
     }
     Ok((
@@ -187,6 +196,8 @@ pub fn channel_with_stores(
             shutdown: shutdown.clone(),
             barrier,
             snapshots,
+            controls,
+            replication: None,
         },
         workers,
     ))
@@ -202,6 +213,17 @@ impl DbHandle {
             );
         }
         self.metrics.render(sections)
+    }
+
+    pub fn with_replication(mut self, replication: crate::replication::state::Runtime) -> Self {
+        self.replication = Some(replication);
+        self
+    }
+
+    pub fn readonly(&self) -> bool {
+        self.replication
+            .as_ref()
+            .is_some_and(|runtime| runtime.readonly())
     }
     /// Envia um comando e espera sua resposta dentro de um único prazo total.
     ///
@@ -366,6 +388,16 @@ impl DbHandle {
 }
 
 impl Worker {
+    pub fn with_replication(mut self, replication: crate::replication::state::Runtime) -> Self {
+        self.replication = Some(replication);
+        self
+    }
+
+    fn readonly(&self) -> bool {
+        self.replication
+            .as_ref()
+            .is_some_and(|runtime| runtime.readonly())
+    }
     /// Compactação local só existe com um shard. Com vários, o limiar local é
     /// desabilitado e [`DbHandle::run_compaction`] coordena o snapshot completo.
     pub fn with_aof(
@@ -400,12 +432,16 @@ impl Worker {
                 }
                 () = async { match &self.aof { Some(aof) => aof.failed().await, None => std::future::pending().await } } => return,
                 _ = expiration.tick() => {
+                    if self.readonly() { continue; }
                     let Ok(_admission) = self.barrier.clone().try_read_owned() else { continue; };
                     if self.expire().await.is_err() { return; }
                     self.compact_if_due().await;
                 }
                 Some(reply) = self.snapshots.recv() => {
                     let _ = reply.send(self.store.snapshot());
+                }
+                Some(control) = self.controls.recv() => {
+                    if !self.replication_control(control).await { return; }
                 }
                 request = self.requests.recv() => {
                     match request {
@@ -446,13 +482,31 @@ impl Worker {
                 reply,
                 _admission,
             } => {
+                if self.readonly() && commands.iter().any(Command::writes_dataset) {
+                    let _ = reply.send(Ok(TransactionReply {
+                        subscription,
+                        output: encode_reply(Reply::Error(ExecutionError::ReadOnly), limits),
+                    }));
+                    return true;
+                }
                 let valid = self.store.watches_valid(&watched);
                 drop(watched);
                 let output = if valid {
                     let prepared = self.store.prepare_batch(commands.clone());
-                    match self.persist(&prepared).await {
-                        Ok(None) => subscription
-                            .complete_exec(commands, limits, || self.apply_prepared(prepared)),
+                    let persisted = if self.readonly() {
+                        Ok(None)
+                    } else {
+                        self.persist(&prepared).await
+                    };
+                    let readonly = self.readonly();
+                    match persisted {
+                        Ok(None) => subscription.complete_exec(commands, limits, || {
+                            if readonly {
+                                prepared.reply
+                            } else {
+                                self.apply_prepared(prepared)
+                            }
+                        }),
                         Ok(Some(rejection)) => {
                             self.metrics.response(&Frame::from(rejection.clone()));
                             encode_reply(rejection, limits)
@@ -476,6 +530,10 @@ impl Worker {
                 reply,
                 _admission,
             } => {
+                if self.readonly() && command.writes_dataset() {
+                    let _ = reply.send(Ok(Reply::Error(ExecutionError::ReadOnly)));
+                    return true;
+                }
                 let prepared = self.store.prepare(command);
                 let result = self.commit(prepared).await;
                 let healthy = result.is_ok();
@@ -488,6 +546,10 @@ impl Worker {
                 reply,
                 _admission,
             } => {
+                if self.readonly() && commands.iter().any(Command::writes_dataset) {
+                    let _ = reply.send(Ok(Reply::Error(ExecutionError::ReadOnly)));
+                    return true;
+                }
                 let valid = self.store.watches_valid(&watched);
                 drop(watched);
                 let result = if valid {
@@ -518,6 +580,9 @@ impl Worker {
     }
 
     async fn commit(&mut self, prepared: super::Prepared) -> Result<Reply, DbError> {
+        if self.readonly() {
+            return Ok(prepared.reply);
+        }
         match self.persist(&prepared).await? {
             Some(rejection) => Ok(rejection),
             None => Ok(self.apply_prepared(prepared)),
@@ -569,6 +634,39 @@ impl Worker {
             match self.commit(prepared).await? {
                 Reply::Error(ExecutionError::AofRecordLimit) if budget > 1 => budget /= 2,
                 _ => return Ok(()),
+            }
+        }
+    }
+
+    async fn replication_control(&mut self, control: super::replication::Control) -> bool {
+        use super::replication::Control;
+        match control {
+            Control::Replace { store, reply } => {
+                self.store = store;
+                let _ = reply.send(());
+                true
+            }
+            Control::Apply {
+                batch,
+                sequence,
+                reply,
+            } => {
+                let result = async {
+                    let prepared = self.store.prepare_replay(&batch.mutations, batch.origin)?;
+                    let aof = self
+                        .aof
+                        .as_ref()
+                        .ok_or(crate::replication::Error::Sequence)?;
+                    aof.append_expected(sequence, batch).await?;
+                    self.store.apply(prepared);
+                    aof.flush().await?;
+                    Ok::<_, crate::replication::Error>(())
+                }
+                .await;
+                let fatal = matches!(&result, Err(crate::replication::Error::Persistence(error))
+                    if !matches!(error, crate::persistence::AofError::Sequence | crate::persistence::AofError::Format(crate::persistence::format::FormatError::Limit)));
+                let _ = reply.send(result);
+                !fatal
             }
         }
     }

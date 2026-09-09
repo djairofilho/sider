@@ -136,6 +136,7 @@ impl FaultInjector for NoFaults {
 type Response<T> = oneshot::Sender<Result<T, AofError>>;
 enum Request {
     Append(ResolvedBatch, Response<u64>),
+    Replicate(u64, ResolvedBatch, Response<u64>),
     Flush(Response<u64>),
     Compact(Vec<Mutation>, Response<()>),
     Status(Response<(u64, u64, bool)>),
@@ -175,6 +176,19 @@ impl AofDiagnosticsHandle {
 }
 
 impl AofHandle {
+    /// A sequência vem do upstream e deve ser o sucessor exato do AOF local.
+    pub async fn append_expected(
+        &self,
+        sequence: u64,
+        batch: ResolvedBatch,
+    ) -> Result<u64, AofError> {
+        let (reply, response) = oneshot::channel();
+        self.requests
+            .send(Request::Replicate(sequence, batch, reply))
+            .await
+            .map_err(|_| AofError::Unavailable)?;
+        response.await.map_err(|_| AofError::Unavailable)?
+    }
     /// O coordenador mantém a exclusão global até trocar todos os stores.
     pub async fn install_snapshot(
         &self,
@@ -676,6 +690,24 @@ impl Writer {
                 tokio::time::timeout(Duration::from_millis(10), requests.recv()).await
             });
             match request {
+                Ok(Some(Request::Replicate(sequence, batch, reply))) => {
+                    if self.sequence.checked_add(1) != Some(sequence)
+                        || !self
+                            .replication
+                            .is_some_and(|metadata| metadata.role == Role::Replica)
+                    {
+                        let _ = reply.send(Err(AofError::Sequence));
+                        continue;
+                    }
+                    let result = self.append(batch);
+                    if result.is_err()
+                        && !matches!(result, Err(AofError::Format(FormatError::Limit)))
+                    {
+                        let _ = reply.send(result);
+                        return Err(AofError::Unavailable);
+                    }
+                    let _ = reply.send(result);
+                }
                 Ok(Some(Request::Append(batch, reply))) => {
                     let result = self.append(batch);
                     self.refresh_diagnostics();
