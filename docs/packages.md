@@ -12,6 +12,10 @@ Cada arquivo contém um diretório `sider-vVERSAO-TARGET/` com:
 - `sider` no Linux GNU ou `sider.exe` no Windows MSVC;
 - `sider-aof-migrate` no Linux ou `sider-aof-migrate.exe` no Windows, para
   [migração offline explícita](aof-migration.md);
+- `sider-backup` no Linux ou `sider-backup.exe` no Windows, para
+  [exportar, verificar e restaurar backups](backup.md);
+- `sider-replica` no Linux ou `sider-replica.exe` no Windows, para consultar
+  estado e executar promoção manual pelo listener interno;
 - `README.md`, copiado de [releases/README.md](../releases/README.md);
 - `LICENSE`, copiado integralmente da raiz do checkout;
 - `licenses/`, cópia integral de [releases/licenses/](../releases/licenses/),
@@ -34,8 +38,9 @@ O teste Rust `extracted_package_runs_version_and_tcp` recebe `SIDER_PACKAGE_DIR`
 com o caminho absoluto do diretório realmente extraído. Ele não extrai o arquivo,
 não seleciona o binário de build e não produz aprovação de release sozinho.
 O operador deve comprovar extração, SHA, target e hashes na evidência da publicação.
-O smoke exige os dois executáveis, README e licença, e executa também `--help`
-do migrador extraído. Os avisos são conferidos separadamente
+O smoke exige os quatro executáveis, README e licença, e executa também `--help`
+do migrador e da CLI de replicação, além de `--version` da CLI de backup.
+Os avisos são conferidos separadamente
 pelo inventário e pela comparação de todos os arquivos extraídos.
 
 ```sh
