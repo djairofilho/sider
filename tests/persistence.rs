@@ -58,7 +58,7 @@ fn batch(value: &'static [u8]) -> ResolvedBatch {
             .into_iter()
             .map(|key| Mutation::Put {
                 key: Bytes::from_static(key),
-                value: Bytes::from_static(value),
+                value: Bytes::from_static(value).into(),
                 expires_at_unix_ms: None,
             })
             .collect(),
@@ -411,7 +411,7 @@ fn replay_restores_quota_and_absolute_deadlines_after_clock_movement() {
                 origin: MutationOrigin::Client,
                 mutations: vec![Mutation::Put {
                     key: Bytes::from_static(b"k"),
-                    value: Bytes::from_static(b"v"),
+                    value: Bytes::from_static(b"v").into(),
                     expires_at_unix_ms: Some(1000),
                 }],
             })

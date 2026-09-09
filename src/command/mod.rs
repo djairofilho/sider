@@ -137,21 +137,33 @@ pub enum Command {
         milliseconds: bool,
     },
     /// Remove a expiração de uma chave existente.
-    Persist { key: Bytes },
+    Persist {
+        key: Bytes,
+    },
     /// Inscreve esta conexão em canais efêmeros, fora do armazenamento.
-    Subscribe { channels: Vec<Bytes> },
+    Subscribe {
+        channels: Vec<Bytes>,
+    },
     /// Remove inscrições; lista vazia remove todas as inscrições da conexão.
-    Unsubscribe { channels: Vec<Bytes> },
+    Unsubscribe {
+        channels: Vec<Bytes>,
+    },
     /// Publica uma mensagem binária sem alterar o dataset.
-    Publish { channel: Bytes, message: Bytes },
+    Publish {
+        channel: Bytes,
+        message: Bytes,
+    },
 }
 
 impl Command {
     /// Visita chaves na ordem original sem alocar nem confundir valores com chaves.
     pub fn visit_keys(&self, mut visit: impl FnMut(&Bytes)) {
         match self {
-            Self::Ping(_) | Self::Echo(_) | Self::Subscribe { .. }
-            | Self::Unsubscribe { .. } | Self::Publish { .. } => {}
+            Self::Ping(_)
+            | Self::Echo(_)
+            | Self::Subscribe { .. }
+            | Self::Unsubscribe { .. }
+            | Self::Publish { .. } => {}
             Self::Get { key }
             | Self::Hash { key, .. }
             | Self::List { key, .. }
