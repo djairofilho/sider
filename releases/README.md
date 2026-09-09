@@ -45,6 +45,8 @@ redis-cli -2 -h 127.0.0.1 -p 6379 DEL exemplo
 O núcleo atende `PING`, `ECHO`, `GET`, `SET`, `DEL`, `EXISTS`, `INCR`, `DECR`,
 `MGET`, `MSET`, `EXPIRE`, `PEXPIRE`, `TTL`, `PTTL` e `PERSIST`. SET aceita NX, XX,
 EX, PX, GET e KEEPTTL. Requisições usam arrays RESP2 de bulk strings.
+Também atende [hashes, listas e sets](../docs/collections.md),
+[sorted sets](../docs/sorted-sets.md) e [Pub/Sub](../docs/pubsub.md).
 Chaves e valores preservam bytes arbitrários. Não há modo inline ou RESP3.
 Clientes que enviam comandos de inicialização adicionais podem ser incompatíveis.
 

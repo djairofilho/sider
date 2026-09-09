@@ -5,11 +5,14 @@ O objetivo é oferecer um subconjunto explícito de compatibilidade
 com Redis pelo protocolo RESP2. O nome é Redis ao contrário.
 
 O binário atende strings, operações multichave, opções de `SET` e TTL por RESP2/TCP.
+Hashes, listas, sets e sorted sets compartilham TTL, quota e persistência tipada.
 Pub/Sub oferece canais binários, assinaturas por conexão e filas limitadas.
 Workers proprietários serializam cada shard, com filas, conexões e buffers
 limitados e quota lógica total de 64 MiB por padrão. AOF opcional oferece replay,
 compactação global e migração offline de shards. Ainda não há autenticação.
 O [guia de strings](docs/strings.md) descreve comandos e limites.
+Os guias de [coleções](docs/collections.md) e [sorted sets](docs/sorted-sets.md)
+descrevem os comandos dessas famílias e sua evidência diferencial.
 A suíte diferencial compara o binário com Redis 8.10.1; os cinco comandos iniciais
 também foram verificados com `redis-cli`. A
 [candidata 0.1.0-rc.1](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1)

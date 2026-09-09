@@ -115,6 +115,12 @@ comprimento de chave `u32` e chave. `Put` acrescenta comprimento de valor `u32`,
 valor, indicador de TTL `u8` e deadline Unix em milissegundos `i64`. Sem TTL, ambos
 os últimos campos são zero. Origem `1` indica cliente; `2`, expiração.
 
+R05/R06 acrescentam postimages completas: tag `3` para hash, `4` para lista,
+`5` para set e `6` para sorted set. Coleções não podem estar vazias no arquivo;
+chaves/campos/membros continuam binários. Scores preservam os bits IEEE e recusam
+NaN mesmo com checksum válido. O [contrato de persistência tipada](types-persistence.md)
+descreve ordem, quota, TTL e ensaios de crash dessas famílias.
+
 O parser e o armazenamento pré-validam o lote inteiro. Chaves duplicadas no mesmo
 lote, quota excedida ou deadline não representável impedem sua aplicação. Na
 recuperação, um `Put` já vencido remove o valor anterior e não volta a ser persistente.

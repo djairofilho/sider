@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Hashes, listas, sets e sorted sets binários, com WRONGTYPE, TTL e quota atômica;
+  AOF preserva postimages tipadas, scores e deadlines em replay/compactação.
+- Diferenciais de coleções e ordenação contra Redis; conversão de scores em Rust
+  seguro baseada no fpconv sob Boost 1.0, com avisos de licença preservados.
+
 - AOF binário com checksum, lotes resolvidos, sync configurável, recuperação antes
   do bind, compactação global e rejeição recuperável de registros excessivos.
 - Metadados de shards no formato AOF v2, leitor legado v1 e migração offline

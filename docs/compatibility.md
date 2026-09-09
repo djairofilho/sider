@@ -143,8 +143,9 @@ e divergências. Transações e sua interação com Pub/Sub permanecem em R07.
 
 O [ROADMAP](../ROADMAP.md) é a sequência oficial. Strings, opções de `SET`, TTL e
 quota de R02 estão implementadas, assim como AOF e shards fixos duráveis (R03/R04).
-O formato AOF é próprio, sem compatibilidade de arquivo com Redis. Hashes, listas e sets ficam na 0.5;
-sorted sets na 0.6; transações de um shard na 0.7; replicação
+O formato AOF é próprio, sem compatibilidade de arquivo com Redis. Hashes, listas,
+sets e sorted sets estão implementados com TTL/quota e persistência tipada.
+Transações de um shard ficam na 0.7; replicação
 Sider→Sider na 0.9; operação e imagem Docker na 0.10. A 1.0 estabiliza esse subconjunto.
 
 Com `SIDER_SHARDS` maior que um, operações multichave precisam do mesmo shard,
