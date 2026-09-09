@@ -6,7 +6,7 @@ mod reply;
 use bytes::Bytes;
 
 pub use parser::{RequestError, parse};
-pub use reply::Reply;
+pub use reply::{ExecutionError, Reply};
 
 /// Comando validado, sem canais ou conhecimento do protocolo de transporte.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,4 +21,14 @@ pub enum Command {
     Set { key: Bytes, value: Bytes },
     /// Remove chaves; duplicatas são preservadas para contar apenas efeitos reais.
     Del { keys: Vec<Bytes> },
+    /// Conta cada ocorrência de uma chave existente.
+    Exists { keys: Vec<Bytes> },
+    /// Incrementa um inteiro decimal i64, criando zero antes da operação se ausente.
+    Incr { key: Bytes },
+    /// Decrementa um inteiro decimal i64.
+    Decr { key: Bytes },
+    /// Lê valores na ordem das chaves, preservando duplicatas.
+    MGet { keys: Vec<Bytes> },
+    /// Aplica um lote indivisível; o último par de uma chave prevalece.
+    MSet { entries: Vec<(Bytes, Bytes)> },
 }

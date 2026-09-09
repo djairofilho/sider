@@ -97,6 +97,45 @@ pub fn parse(frame: Frame) -> Result<Command, RequestError> {
         Ok(Command::Del {
             keys: arguments.collect(),
         })
+    } else if name.eq_ignore_ascii_case(b"EXISTS") || name.eq_ignore_ascii_case(b"MGET") {
+        let exists = name.eq_ignore_ascii_case(b"EXISTS");
+        if count == 0 {
+            return Err(RequestError::WrongArity(if exists {
+                "exists"
+            } else {
+                "mget"
+            }));
+        }
+        let keys = arguments.collect();
+        Ok(if exists {
+            Command::Exists { keys }
+        } else {
+            Command::MGet { keys }
+        })
+    } else if name.eq_ignore_ascii_case(b"INCR") || name.eq_ignore_ascii_case(b"DECR") {
+        let incr = name.eq_ignore_ascii_case(b"INCR");
+        let canonical = if incr { "incr" } else { "decr" };
+        if count != 1 {
+            return Err(RequestError::WrongArity(canonical));
+        }
+        let key = arguments
+            .next()
+            .ok_or(RequestError::WrongArity(canonical))?;
+        Ok(if incr {
+            Command::Incr { key }
+        } else {
+            Command::Decr { key }
+        })
+    } else if name.eq_ignore_ascii_case(b"MSET") {
+        if count == 0 || !count.is_multiple_of(2) {
+            return Err(RequestError::WrongArity("mset"));
+        }
+        let mut entries = Vec::with_capacity(count / 2);
+        while let Some(key) = arguments.next() {
+            let value = arguments.next().ok_or(RequestError::WrongArity("mset"))?;
+            entries.push((key, value));
+        }
+        Ok(Command::MSet { entries })
     } else {
         Err(RequestError::UnknownCommand)
     }
@@ -195,7 +234,7 @@ mod tests {
                 Err(RequestError::UnsupportedSetOptions)
             );
         }
-        for name in [b"".as_slice(), b"\xff", b"GET\0", b"SELECT", b"INCR"] {
+        for name in [b"".as_slice(), b"\xff", b"GET\0", b"SELECT"] {
             assert_eq!(parse(request(&[name])), Err(RequestError::UnknownCommand));
         }
         assert_eq!(

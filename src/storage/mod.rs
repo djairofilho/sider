@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 
-use crate::command::{Command, Reply};
+use crate::command::{Command, ExecutionError, Reply};
 
 /// Mapa em memória com proprietário único e execução sequencial dos comandos.
 ///
@@ -47,8 +47,53 @@ impl Store {
                 }
                 Reply::Integer(removed)
             }
+            Command::Exists { keys } => Reply::Integer(
+                keys.iter()
+                    .filter(|key| self.values.contains_key(*key))
+                    .count() as i64,
+            ),
+            Command::MGet { keys } => Reply::Array(
+                keys.iter()
+                    .map(|key| Reply::Bulk(self.values.get(key).cloned()))
+                    .collect(),
+            ),
+            Command::MSet { entries } => {
+                for (key, value) in entries {
+                    self.values.insert(key, value);
+                }
+                Reply::Ok
+            }
+            Command::Incr { key } => self.increment(key, 1),
+            Command::Decr { key } => self.increment(key, -1),
         }
     }
+
+    fn increment(&mut self, key: Bytes, delta: i64) -> Reply {
+        let previous = match self.values.get(&key) {
+            Some(value) => match parse_decimal(value) {
+                Some(value) => value,
+                None => return Reply::Error(ExecutionError::InvalidInteger),
+            },
+            None => 0,
+        };
+        let Some(value) = previous.checked_add(delta) else {
+            return Reply::Error(ExecutionError::IntegerOverflow);
+        };
+        self.values.insert(key, Bytes::from(value.to_string()));
+        Reply::Integer(value)
+    }
+}
+
+/// Decimal canônico compatível com o parser de inteiros Redis.
+pub(crate) fn parse_decimal(value: &[u8]) -> Option<i64> {
+    if value == b"0" {
+        return Some(0);
+    }
+    let digits = value.strip_prefix(b"-").unwrap_or(value);
+    if !matches!(digits.first(), Some(b'1'..=b'9')) || !digits.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    std::str::from_utf8(value).ok()?.parse().ok()
 }
 
 #[cfg(test)]
