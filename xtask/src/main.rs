@@ -14,19 +14,19 @@ use std::process::{Command, ExitCode};
 
 use serde_json::{Value, json};
 
-const HELP: &str = "Sider: ferramentas locais em Rust
+const HELP: &str = "Sider: local Rust tools
 
-Execute na raiz do repositório:
-  cargo xtask check                         fmt, clippy, build e testes do banco
-  cargo xtask check --tools                 fmt, clippy, testes do xtask e plano
-  cargo xtask validate                      valida plano, gates e roadmap
-  cargo xtask roadmap [--write]             mostra ou regenera ROADMAP.md
-  cargo xtask sync [--apply] [--json]       simula ou sincroniza o backlog
-  cargo xtask verify-release VERSAO SHA DIR verifica integridade de assets locais
+Run from the repository root:
+  cargo xtask check                         fmt, clippy, database build and tests
+  cargo xtask check --tools                 fmt, clippy, xtask tests and plan
+  cargo xtask validate                      validate plan, gates, and roadmap
+  cargo xtask roadmap [--write]             display or regenerate ROADMAP.md
+  cargo xtask sync [--apply] [--json]       preview or synchronize the backlog
+  cargo xtask verify-release VERSION SHA DIR verify local asset integrity
 
-Não executa Docker ou publicação implicitamente. Os gates externos continuam
-obrigatórios nas releases. Só sync --apply escreve no GitHub; não publica releases.
-verify-release não substitui testes, aprovação da RC ou conferência no GitHub.";
+Does not run Docker or publish implicitly. External gates remain
+mandatory for releases. Only sync --apply writes to GitHub; it does not publish releases.
+verify-release does not replace tests, RC approval, or verification on GitHub.";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Task {
@@ -80,7 +80,7 @@ fn parse(args: Vec<OsString>) -> Result<Task, String> {
             sha: (*sha).to_owned(),
             directory: PathBuf::from(&args[3]),
         },
-        _ => return Err(format!("Comando ou argumentos inválidos.\n\n{HELP}")),
+        _ => return Err(format!("Invalid command or arguments.\n\n{HELP}")),
     };
     Ok(task)
 }
@@ -96,7 +96,7 @@ fn main() -> ExitCode {
     match parse(std::env::args_os().skip(1).collect()).and_then(|task| execute(task, &root())) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("Erro: {error}");
+            eprintln!("Error: {error}");
             ExitCode::FAILURE
         }
     }
@@ -116,11 +116,11 @@ fn execute(task: Task, root: &Path) -> Result<(), String> {
                 .args(args)
                 .current_dir(root)
                 .status()
-                .map_err(|e| format!("iniciar Cargo: {e}"))?;
+                .map_err(|e| format!("start Cargo: {e}"))?;
             if status.success() {
                 Ok(())
             } else {
-                Err(format!("cargo {} falhou: {status}", args.join(" ")))
+                Err(format!("cargo {} failed: {status}", args.join(" ")))
             }
         })?;
         if tools {
@@ -135,7 +135,7 @@ fn execute(task: Task, root: &Path) -> Result<(), String> {
             let roadmap = plan::render(&plan)?;
             if write {
                 fs::write(root.join("ROADMAP.md"), roadmap).map_err(|e| e.to_string())?;
-                println!("ROADMAP.md regenerado a partir de releases/plan.json.");
+                println!("ROADMAP.md regenerated from releases/plan.json.");
             } else {
                 print!("{roadmap}");
             }
@@ -150,7 +150,7 @@ fn execute(task: Task, root: &Path) -> Result<(), String> {
             } else {
                 print_json(
                     json!({"apply": report["apply"], "total_changes": report["total_changes"],
-                    "counts": report["counts"], "details": "Use sync --json para conferir os corpos previstos antes de --apply."}),
+                    "counts": report["counts"], "details": "Use sync --json to inspect the planned bodies before --apply."}),
                 )?;
             }
         }
@@ -184,9 +184,9 @@ fn validate(root: &Path) -> Result<(), String> {
     validate_gates(&plan, &gates)?;
     let roadmap = fs::read_to_string(root.join("ROADMAP.md")).map_err(|e| e.to_string())?;
     if roadmap.replace("\r\n", "\n") != plan::render(&plan)? {
-        return Err("ROADMAP.md desatualizado; execute cargo xtask roadmap --write".into());
+        return Err("ROADMAP.md is outdated; run cargo xtask roadmap --write".into());
     }
-    let releases = plan["releases"].as_array().ok_or("releases ausente")?;
+    let releases = plan["releases"].as_array().ok_or("missing releases")?;
     print_json(
         json!({"valid": true, "milestones": releases.len(), "tasks": releases.iter()
         .map(|release| release["tasks"].as_array().map_or(0, Vec::len)).sum::<usize>()}),
@@ -195,28 +195,30 @@ fn validate(root: &Path) -> Result<(), String> {
 
 fn validate_gates(plan: &Value, value: &Value) -> Result<(), String> {
     if value["schema_version"] != json!(1) {
-        return Err("gates.schema_version deve ser 1".into());
+        return Err("gates.schema_version must be 1".into());
     }
-    let gates = value["gates"].as_object().ok_or("gates deve ser objeto")?;
+    let gates = value["gates"]
+        .as_object()
+        .ok_or("gates must be an object")?;
     let required: BTreeSet<_> = plan["releases"]
         .as_array()
-        .ok_or("releases ausente")?
+        .ok_or("missing releases")?
         .iter()
         .flat_map(|release| release["required_gates"].as_array().into_iter().flatten())
         .filter_map(Value::as_str)
         .filter(|name| !matches!(*name, "native" | "tcp_smoke"))
         .collect();
     if gates.keys().map(String::as_str).collect::<BTreeSet<_>>() != required {
-        return Err("gates não corresponde aos gates externos exigidos no plano".into());
+        return Err("gates does not match the external gates required by the plan".into());
     }
     for (name, gate) in gates {
         let timeout = gate["timeout_seconds"]
             .as_u64()
             .filter(|n| *n > 0 && *n <= 86_400)
-            .ok_or_else(|| format!("{name}: timeout inválido"))?;
+            .ok_or_else(|| format!("{name}: invalid timeout"))?;
         let command = gate
             .get("command")
-            .ok_or_else(|| format!("{name}: command ausente"))?;
+            .ok_or_else(|| format!("{name}: missing command"))?;
         if !command.is_null()
             && !command.as_array().is_some_and(|args| {
                 !args.is_empty()
@@ -226,9 +228,7 @@ fn validate_gates(plan: &Value, value: &Value) -> Result<(), String> {
                     })
             })
         {
-            return Err(format!(
-                "{name}: command precisa ser null ou argv não vazio"
-            ));
+            return Err(format!("{name}: command must be null or a nonempty argv"));
         }
         let required_minimum = match name.as_str() {
             "soak" => plan["release_policy"]["stable_soak_seconds"].as_u64(),
@@ -240,7 +240,7 @@ fn validate_gates(plan: &Value, value: &Value) -> Result<(), String> {
                 .is_some_and(|n| n >= minimum && n < timeout)
         {
             return Err(format!(
-                "{name}: duração mínima ausente, curta ou incompatível com timeout"
+                "{name}: minimum duration missing, too short, or incompatible with timeout"
             ));
         }
     }

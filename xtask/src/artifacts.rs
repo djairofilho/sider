@@ -1,4 +1,4 @@
-//! Integridade offline dos arquivos de uma release, sem execução ou publicação.
+//! Offline integrity of release files, without execution or publication.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, Metadata};
@@ -26,13 +26,13 @@ struct Proof {
 
 type GateKey = (String, String);
 
-/// Confere o mesmo bundle para o identificador de uma RC ou de sua versão final.
+/// Verifies the same bundle for an RC identifier or its final version.
 ///
-/// Não consulta o GitHub, executa testes, extrai pacotes ou autoriza publicação.
-/// A aprovação da RC e a igualdade dos assets publicados são conferidas fora do
-/// bundle; seus arquivos e recibos usam sempre a versão final do binário.
-/// O diretório deve permanecer imóvel durante a leitura. ZIP64, links e nomes
-/// não portáveis são rejeitados no formato limitado do arquivo de evidências.
+/// Does not query GitHub, run tests, extract packages, or authorize publication.
+/// RC approval and equality of published assets are checked outside the
+/// bundle; its files and receipts always use the final binary version.
+/// The directory must remain unchanged during reading. ZIP64, links, and
+/// nonportable names are rejected by the restricted evidence archive format.
 pub fn verify(
     plan: &Value,
     release_identifier: &str,
@@ -41,7 +41,7 @@ pub fn verify(
 ) -> Result<Value, String> {
     let (base, candidate) = parse_version(release_identifier)?;
     let artifact_version = format!("{}.{}.{}", base[0], base[1], base[2]);
-    require_hex(sha, 40, "SHA da release")?;
+    require_hex(sha, 40, "release SHA")?;
     let (required, docker) = required_gates(plan, base)?;
     let mut expected: BTreeSet<String> = [
         "release-manifest.json",
@@ -73,7 +73,7 @@ pub fn verify(
         || text(&manifest, "runtime_requirements")? != "runtime-requirements.md"
         || text(&manifest, "checksums")? != "SHA256SUMS"
     {
-        return Err("Nomes de arquivos do manifesto divergentes".into());
+        return Err("Manifest file name mismatch".into());
     }
     let manifest_assets = inventory(&manifest["artifacts"], MAX_ASSET_BYTES, false)?;
     let expected_inventory: BTreeSet<_> = expected
@@ -82,23 +82,23 @@ pub fn verify(
         .cloned()
         .collect();
     if manifest_assets.keys().cloned().collect::<BTreeSet<_>>() != expected_inventory {
-        return Err("Inventário de assets incompleto ou inesperado".into());
+        return Err("Incomplete or unexpected asset inventory".into());
     }
     for (name, proof) in &manifest_assets {
         if proofs.get(name) != Some(proof) {
-            return Err(format!("Asset divergente do manifesto: {name}"));
+            return Err(format!("Asset differs from manifest: {name}"));
         }
     }
     let gates = gate_records(plan, &manifest, &required, &artifact_version, sha)?;
     let evidence = inventory(&manifest["evidence_files"], MAX_ENTRY_BYTES, true)?;
     if evidence.is_empty() || evidence.len() > MAX_ENTRIES {
-        return Err("Quantidade de evidências inválida".into());
+        return Err("Invalid evidence count".into());
     }
     let expanded_bytes = evidence.values().try_fold(0_u64, |total, proof| {
         total
             .checked_add(proof.size)
             .filter(|size| *size <= MAX_EXPANDED_BYTES)
-            .ok_or("Evidências excedem o limite total de bytes")
+            .ok_or("Evidence exceeds the total byte limit")
     })?;
     verify_evidence(&directory.join(&evidence_name), &evidence, &gates)?;
     for name in [
@@ -108,9 +108,9 @@ pub fn verify(
     ] {
         let bytes = read_small(&directory.join(name), MAX_JSON_BYTES)?;
         let body =
-            std::str::from_utf8(&bytes).map_err(|e| format!("{name}: UTF-8 inválido: {e}"))?;
+            std::str::from_utf8(&bytes).map_err(|e| format!("{name}: invalid UTF-8: {e}"))?;
         if body.contains(['\u{fffd}', '\u{00c3}', '\u{00c2}', '\u{0007}']) {
-            return Err(format!("{name}: texto com possível mojibake"));
+            return Err(format!("{name}: text with possible mojibake"));
         }
     }
     let preflight = read_json(&directory.join("release-preflight.json"))?;
@@ -118,12 +118,12 @@ pub fn verify(
         || preflight["repository"]["isPrivate"] != true
         || preflight["pull_request"]["mergeCommit"]["oid"] != sha
     {
-        return Err("Preflight local divergente da identidade declarada".into());
+        return Err("Local preflight differs from declared identity".into());
     }
-    // Uma segunda leitura detecta alterações comuns durante a verificação; não
-    // oferece snapshot atômico contra um escritor adversarial concorrente.
+    // A second read detects common changes during verification; it does not
+    // provide an atomic snapshot against a concurrent adversarial writer.
     if directory_proofs(directory, &expected)? != proofs {
-        return Err("Arquivos mudaram durante a verificação".into());
+        return Err("Files changed during verification".into());
     }
     Ok(json!({
         "status": "integrity_verified", "release_identifier": release_identifier,
@@ -131,7 +131,7 @@ pub fn verify(
         "prerelease": candidate, "assets": proofs.len(), "checksums": proofs.len() - 1,
         "gate_records": gates.len(), "evidence_files": evidence.len(),
         "evidence_expanded_bytes": expanded_bytes, "publication_authorized": false,
-        "scope": "Integridade e coerência offline; não comprova execução, autenticidade, aprovação da RC, promoção dos mesmos assets ou estado atual do GitHub.",
+        "scope": "Offline integrity and consistency; does not establish execution, authenticity, RC approval, promotion of the same assets, or current GitHub state.",
         "limits": {"asset_bytes": MAX_ASSET_BYTES, "json_bytes": MAX_JSON_BYTES,
             "evidence_zip_bytes": MAX_EVIDENCE_ZIP_BYTES, "entry_bytes": MAX_ENTRY_BYTES,
             "expanded_bytes": MAX_EXPANDED_BYTES, "entries": MAX_ENTRIES, "zip64": false}
@@ -142,7 +142,7 @@ fn text<'a>(value: &'a Value, field: &str) -> Result<&'a str, String> {
     value[field]
         .as_str()
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("Campo textual ausente ou inválido: {field}"))
+        .ok_or_else(|| format!("Missing or invalid text field: {field}"))
 }
 
 fn require_hex(value: &str, size: usize, what: &str) -> Result<(), String> {
@@ -152,7 +152,7 @@ fn require_hex(value: &str, size: usize, what: &str) -> Result<(), String> {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     {
         return Err(format!(
-            "{what}: hexadecimal minúsculo de {size} caracteres exigido"
+            "{what}: {size} lowercase hexadecimal characters required"
         ));
     }
     Ok(())
@@ -160,11 +160,11 @@ fn require_hex(value: &str, size: usize, what: &str) -> Result<(), String> {
 
 fn parse_version(version: &str) -> Result<([u64; 3], bool), String> {
     if version.len() > 64 {
-        return Err("Versão longa demais".into());
+        return Err("Version too long".into());
     }
     let (base, candidate) = if let Some((base, rc)) = version.split_once("-rc.") {
         if number(rc)? == 0 {
-            return Err("RC deve ter número positivo".into());
+            return Err("RC must have a positive number".into());
         }
         (base, true)
     } else {
@@ -173,7 +173,7 @@ fn parse_version(version: &str) -> Result<([u64; 3], bool), String> {
     let parts = base.split('.').map(number).collect::<Result<Vec<_>, _>>()?;
     let numbers = parts
         .try_into()
-        .map_err(|_| "Versão deve ser MAJOR.MINOR.PATCH[-rc.N]".to_owned())?;
+        .map_err(|_| "Version must be MAJOR.MINOR.PATCH[-rc.N]".to_owned())?;
     Ok((numbers, candidate))
 }
 
@@ -182,9 +182,9 @@ fn number(value: &str) -> Result<u64, String> {
         || (value.len() > 1 && value.starts_with('0'))
         || !value.bytes().all(|b| b.is_ascii_digit())
     {
-        return Err("Componente numérico de versão inválido".into());
+        return Err("Invalid numeric version component".into());
     }
-    value.parse().map_err(|_| "Overflow em versão".into())
+    value.parse().map_err(|_| "Version overflow".into())
 }
 
 fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bool), String> {
@@ -195,39 +195,39 @@ fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bo
         || policy["final_promotion"] != "same_sha_same_assets"
         || policy["bundle_change_requires_new_candidate"] != true
     {
-        return Err("Plano deve exigir publicação privada e promoção do bundle imutável".into());
+        return Err("Plan must require private publication and immutable bundle promotion".into());
     }
     let targets = plan["release_policy"]["targets"]
         .as_array()
-        .ok_or("Targets ausentes no plano")?;
+        .ok_or("Missing targets in plan")?;
     if targets.len() != 2 || !targets.contains(&json!(LINUX)) || !targets.contains(&json!(WINDOWS))
     {
-        return Err("Targets do plano não são Linux GNU e Windows MSVC".into());
+        return Err("Plan targets are not Linux GNU and Windows MSVC".into());
     }
     let releases = plan["releases"]
         .as_array()
-        .ok_or("Releases ausentes no plano")?;
+        .ok_or("Missing releases in plan")?;
     let mut versions = BTreeSet::new();
     let mut names: BTreeSet<&str> = ["native", "tcp_smoke", "compatibility"].into();
     for release in releases {
         let (release_version, candidate) = parse_version(text(release, "version")?)?;
         if candidate || !versions.insert(release_version) {
-            return Err("Versão duplicada ou RC no plano".into());
+            return Err("Duplicate version or RC in plan".into());
         }
         if release_version == base && release["publication"] != true {
-            return Err("Marco interno não permite verificação de publicação".into());
+            return Err("Internal milestone does not allow publication verification".into());
         }
         if release_version <= base {
             for gate in release["required_gates"]
                 .as_array()
-                .ok_or("required_gates ausente")?
+                .ok_or("missing required_gates")?
             {
-                names.insert(gate.as_str().ok_or("Gate não textual no plano")?);
+                names.insert(gate.as_str().ok_or("Non-text gate in plan")?);
             }
         }
     }
     if !versions.contains(&base) {
-        return Err("Versão-base não registrada no plano".into());
+        return Err("Base version not registered in plan".into());
     }
     let (docker_since, _) = parse_version(text(&plan["release_policy"], "docker_since")?)?;
     if base >= docker_since {
@@ -240,7 +240,7 @@ fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bo
             "native" | "tcp_smoke" | "crash" | "recovery" | "migration" => &[LINUX, WINDOWS],
             "compatibility" | "sharding" | "types" | "sorted_sets" | "transactions" | "pubsub"
             | "replication" | "docker" | "soak" | "benchmarks" => &[LINUX],
-            _ => return Err(format!("Gate desconhecido: {name}")),
+            _ => return Err(format!("Unknown gate: {name}")),
         };
         required.extend(
             platforms
@@ -271,7 +271,7 @@ fn verify_identity(
         || !manifest["provenance"]["github_actions_run"].is_null()
         || manifest["provenance"]["frozen_checkout"] != sha
     {
-        return Err("Identidade, referência ou proveniência local do manifesto inválida".into());
+        return Err("Invalid manifest identity, reference, or local provenance".into());
     }
     for field in [
         "version",
@@ -282,16 +282,16 @@ fn verify_identity(
     ] {
         if manifest.get(field).is_some() {
             return Err(format!(
-                "Campo de publicação não pertence ao bundle imutável: {field}"
+                "Publication field does not belong to the immutable bundle: {field}"
             ));
         }
     }
     let targets = manifest["targets"]
         .as_array()
-        .ok_or("Targets do manifesto ausentes")?;
+        .ok_or("Missing manifest targets")?;
     if targets.len() != 2 || !targets.contains(&json!(LINUX)) || !targets.contains(&json!(WINDOWS))
     {
-        return Err("Targets do manifesto divergentes".into());
+        return Err("Manifest target mismatch".into());
     }
     Ok(())
 }
@@ -306,7 +306,7 @@ fn gate_records<'a>(
     let mut records = BTreeMap::new();
     for gate in manifest["gates"]
         .as_array()
-        .ok_or("Gates ausentes no manifesto")?
+        .ok_or("Missing gates in manifest")?
     {
         let name = text(gate, "gate")?;
         let target = text(gate, "target")?;
@@ -316,7 +316,7 @@ fn gate_records<'a>(
             || gate["status"] != "success"
             || !gate["cases"].as_u64().is_some_and(|n| n > 0)
         {
-            return Err(format!("Registro de gate inválido: {name}/{target}"));
+            return Err(format!("Invalid gate record: {name}/{target}"));
         }
         let minimum = match name {
             "soak" => Some(
@@ -335,29 +335,31 @@ fn gate_records<'a>(
                     .is_some_and(|n| n.is_finite() && n >= min as f64)
             })
         {
-            return Err(format!("Duração inválida ou insuficiente: {name}/{target}"));
+            return Err(format!("Invalid or insufficient duration: {name}/{target}"));
         }
         if (name == "compatibility" || !gate["reference_image"].is_null())
             && gate["reference_image"] != plan["reference"]["image"]
         {
-            return Err(format!("Referência divergente no gate {name}"));
+            return Err(format!("Reference mismatch in gate {name}"));
         }
         if records
             .insert((name.to_owned(), target.to_owned()), gate)
             .is_some()
         {
-            return Err(format!("Gate duplicado: {name}/{target}"));
+            return Err(format!("Duplicate gate: {name}/{target}"));
         }
     }
     if records.keys().cloned().collect::<BTreeSet<_>>() != *required {
-        return Err("Matriz cumulativa de gates ausente, extra ou com target incorreto".into());
+        return Err(
+            "Cumulative gate matrix has missing or extra entries, or an incorrect target".into(),
+        );
     }
     Ok(records)
 }
 
 fn safe_name(name: &str, nested: bool) -> Result<(), String> {
     if name.is_empty() || name.len() > MAX_NAME_BYTES || (!nested && name.contains('/')) {
-        return Err(format!("Nome inválido: {name:?}"));
+        return Err(format!("Invalid name: {name:?}"));
     }
     for part in name.split('/') {
         let upper = part.split('.').next().unwrap_or("").to_ascii_uppercase();
@@ -372,7 +374,7 @@ fn safe_name(name: &str, nested: bool) -> Result<(), String> {
                 && (upper.starts_with("COM") || upper.starts_with("LPT"))
                 && (b'1'..=b'9').contains(&upper.as_bytes()[3]))
         {
-            return Err(format!("Caminho não portátil ou inseguro: {name:?}"));
+            return Err(format!("Nonportable or unsafe path: {name:?}"));
         }
     }
     Ok(())
@@ -383,9 +385,9 @@ fn inventory(
     max_size: u64,
     nested: bool,
 ) -> Result<BTreeMap<String, Proof>, String> {
-    let entries = value.as_array().ok_or("Inventário deve ser array")?;
+    let entries = value.as_array().ok_or("Inventory must be an array")?;
     if entries.len() > MAX_ENTRIES {
-        return Err("Inventário excessivo".into());
+        return Err("Excessive inventory".into());
     }
     let mut result = BTreeMap::new();
     let mut folded = BTreeSet::new();
@@ -395,7 +397,7 @@ fn inventory(
         let size = entry["size"]
             .as_u64()
             .filter(|n| *n <= max_size)
-            .ok_or_else(|| format!("Tamanho inválido no inventário: {name}"))?;
+            .ok_or_else(|| format!("Invalid size in inventory: {name}"))?;
         let sha256 = text(entry, "sha256")?;
         require_hex(sha256, 64, name)?;
         if !folded.insert(name.to_ascii_lowercase())
@@ -409,7 +411,7 @@ fn inventory(
                 )
                 .is_some()
         {
-            return Err(format!("Nome duplicado no inventário: {name}"));
+            return Err(format!("Duplicate name in inventory: {name}"));
         }
     }
     Ok(result)
@@ -424,7 +426,7 @@ fn reject_link(path: &Path, metadata: &Metadata) -> Result<(), String> {
     #[cfg(not(windows))]
     let reparse = false;
     if metadata.file_type().is_symlink() || reparse {
-        return Err(format!("Link/reparse point recusado: {}", path.display()));
+        return Err(format!("Link/reparse point rejected: {}", path.display()));
     }
     Ok(())
 }
@@ -445,7 +447,7 @@ fn directory_proofs(
             fs::symlink_metadata(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         reject_link(parent, &metadata)?;
         if !metadata.is_dir() {
-            return Err(format!("Não é diretório: {}", parent.display()));
+            return Err(format!("Not a directory: {}", parent.display()));
         }
     }
     let mut result = BTreeMap::new();
@@ -454,14 +456,14 @@ fn directory_proofs(
         let name = entry
             .file_name()
             .into_string()
-            .map_err(|_| "Asset com nome não Unicode")?;
+            .map_err(|_| "Asset has a non-Unicode name")?;
         if !expected.contains(&name) {
-            return Err(format!("Asset inesperado: {name}"));
+            return Err(format!("Unexpected asset: {name}"));
         }
         let metadata = fs::symlink_metadata(entry.path()).map_err(|e| e.to_string())?;
         reject_link(&entry.path(), &metadata)?;
         if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_ASSET_BYTES {
-            return Err(format!("Asset vazio, não regular ou excessivo: {name}"));
+            return Err(format!("Empty, nonregular, or oversized asset: {name}"));
         }
         let (sha256, _) = hash_reader(
             File::open(entry.path()).map_err(|e| e.to_string())?,
@@ -477,7 +479,7 @@ fn directory_proofs(
         );
     }
     if result.keys().cloned().collect::<BTreeSet<_>>() != *expected {
-        return Err("Assets obrigatórios ausentes".into());
+        return Err("Missing required assets".into());
     }
     Ok(result)
 }
@@ -487,7 +489,7 @@ fn hash_reader(
     expected: u64,
     capture: bool,
 ) -> Result<(String, Vec<u8>), String> {
-    let mut reader = reader.take(expected.checked_add(1).ok_or("Overflow de leitura")?);
+    let mut reader = reader.take(expected.checked_add(1).ok_or("Read overflow")?);
     let mut hasher = Sha256::new();
     let mut bytes = Vec::new();
     let mut count = 0_u64;
@@ -495,15 +497,15 @@ fn hash_reader(
     loop {
         let n = reader
             .read(&mut buffer)
-            .map_err(|e| format!("Leitura/hash: {e}"))?;
+            .map_err(|e| format!("Read/hash: {e}"))?;
         if n == 0 {
             break;
         }
         count = count
             .checked_add(n as u64)
-            .ok_or("Overflow de bytes lidos")?;
+            .ok_or("Read byte count overflow")?;
         if count > expected {
-            return Err("Conteúdo maior que o tamanho declarado".into());
+            return Err("Content exceeds declared size".into());
         }
         hasher.update(&buffer[..n]);
         if capture {
@@ -511,7 +513,7 @@ fn hash_reader(
         }
     }
     if count != expected {
-        return Err("Conteúdo truncado".into());
+        return Err("Truncated content".into());
     }
     Ok((format!("{:x}", hasher.finalize()), bytes))
 }
@@ -520,10 +522,7 @@ fn read_small(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
     let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
     reject_link(path, &metadata)?;
     if !metadata.is_file() || metadata.len() > limit {
-        return Err(format!(
-            "Arquivo não regular ou excessivo: {}",
-            path.display()
-        ));
+        return Err(format!("Nonregular or oversized file: {}", path.display()));
     }
     hash_reader(
         File::open(path).map_err(|e| e.to_string())?,
@@ -543,30 +542,30 @@ fn verify_checksums(directory: &Path, proofs: &BTreeMap<String, Proof>) -> Resul
     let body = std::str::from_utf8(&bytes).map_err(|e| e.to_string())?;
     let mut seen = BTreeSet::new();
     for line in body.lines() {
-        let (digest, name) = line
-            .split_once("  ")
-            .ok_or("Linha inválida em SHA256SUMS")?;
+        let (digest, name) = line.split_once("  ").ok_or("Invalid line in SHA256SUMS")?;
         require_hex(digest, 64, "Checksum")?;
         safe_name(name, false)?;
         if name == "SHA256SUMS"
             || !seen.insert(name)
             || !proofs.get(name).is_some_and(|p| p.sha256 == digest)
         {
-            return Err(format!("Checksum ausente, duplicado ou divergente: {name}"));
+            return Err(format!(
+                "Missing, duplicate, or mismatched checksum: {name}"
+            ));
         }
     }
     if seen.len() + 1 != proofs.len() {
-        return Err("SHA256SUMS incompleto".into());
+        return Err("Incomplete SHA256SUMS".into());
     }
     Ok(())
 }
 
-// ZipArchive pode indexar entradas pelo nome. O diretório central bruto é
-// conferido antes para não esconder duplicatas nem aceitar metadados ilimitados.
+// ZipArchive may index entries by name. The raw central directory is
+// checked first to avoid hiding duplicates or accepting unbounded metadata.
 fn zip_names(file: &mut File) -> Result<Vec<String>, String> {
     let size = file.metadata().map_err(|e| e.to_string())?.len();
     if !(22..=MAX_EVIDENCE_ZIP_BYTES).contains(&size) {
-        return Err("Tamanho do ZIP de evidências inválido".into());
+        return Err("Invalid evidence ZIP size".into());
     }
     let tail_size = size.min(65_557) as usize;
     file.seek(SeekFrom::End(-(tail_size as i64)))
@@ -579,7 +578,7 @@ fn zip_names(file: &mut File) -> Result<Vec<String>, String> {
             tail[*offset..].starts_with(b"PK\x05\x06")
                 && *offset + 22 + u16_at(&tail, *offset + 20) as usize == tail_size
         })
-        .ok_or("Fim do diretório ZIP inválido")?;
+        .ok_or("Invalid ZIP end of central directory")?;
     let entries = u16_at(&tail, end + 10) as usize;
     let central_size = u32_at(&tail, end + 12) as u64;
     let central_offset = u32_at(&tail, end + 16) as u64;
@@ -594,7 +593,7 @@ fn zip_names(file: &mut File) -> Result<Vec<String>, String> {
         || central_offset == u32::MAX as u64
         || central_offset.checked_add(central_size) != Some(end_offset)
     {
-        return Err("ZIP multipartes, ZIP64 ou diretório excessivo/incoerente".into());
+        return Err("Multipart ZIP, ZIP64, or excessive/inconsistent directory".into());
     }
     file.seek(SeekFrom::Start(central_offset))
         .map_err(|e| e.to_string())?;
@@ -605,7 +604,7 @@ fn zip_names(file: &mut File) -> Result<Vec<String>, String> {
     let mut seen = BTreeSet::new();
     for _ in 0..entries {
         if central.len().saturating_sub(at) < 46 || !central[at..].starts_with(b"PK\x01\x02") {
-            return Err("Entrada central ZIP truncada ou inválida".into());
+            return Err("Truncated or invalid ZIP central directory entry".into());
         }
         let name_size = u16_at(&central, at + 28) as usize;
         let next = at
@@ -614,18 +613,18 @@ fn zip_names(file: &mut File) -> Result<Vec<String>, String> {
             + u16_at(&central, at + 30) as usize
             + u16_at(&central, at + 32) as usize;
         if next > central.len() || name_size > MAX_NAME_BYTES {
-            return Err("Nome/metadados ZIP excessivos ou truncados".into());
+            return Err("ZIP name/metadata oversized or truncated".into());
         }
         let extra_start = at + 46 + name_size;
         let extra_end = extra_start + u16_at(&central, at + 30) as usize;
         validate_zip_extra(&central[extra_start..extra_end])?;
         let name = std::str::from_utf8(&central[at + 46..at + 46 + name_size])
-            .map_err(|_| "Nome ZIP não UTF-8")?;
+            .map_err(|_| "Non-UTF-8 ZIP name")?;
         safe_name(name, true)?;
         let attributes = u32_at(&central, at + 38);
         let mode = attributes >> 16;
         if !seen.insert(name.to_ascii_lowercase()) {
-            return Err(format!("Entrada ZIP duplicada: {name}"));
+            return Err(format!("Duplicate ZIP entry: {name}"));
         }
         if u16_at(&central, at + 8) & 1 != 0
             || ![0, 8].contains(&u16_at(&central, at + 10))
@@ -637,14 +636,14 @@ fn zip_names(file: &mut File) -> Result<Vec<String>, String> {
             || !matches!(mode & 0o170000, 0 | 0o100000)
         {
             return Err(format!(
-                "Entrada ZIP criptografada, link, especial ou excessiva: {name}"
+                "Encrypted, linked, special, or oversized ZIP entry: {name}"
             ));
         }
         names.push(name.to_owned());
         at = next;
     }
     if at != central.len() {
-        return Err("Entradas ZIP não correspondem ao diretório declarado".into());
+        return Err("ZIP entries do not match the declared directory".into());
     }
     file.rewind().map_err(|e| e.to_string())?;
     Ok(names)
@@ -654,17 +653,17 @@ fn validate_zip_extra(extra: &[u8]) -> Result<(), String> {
     let mut at = 0;
     while at < extra.len() {
         if extra.len() - at < 4 {
-            return Err("Cabeçalho de extra field ZIP truncado".into());
+            return Err("Truncated ZIP extra field header".into());
         }
         let id = u16_at(extra, at);
         let end = at + 4 + u16_at(extra, at + 2) as usize;
         if end > extra.len() {
-            return Err("Conteúdo de extra field ZIP truncado".into());
+            return Err("Truncated ZIP extra field content".into());
         }
-        // A biblioteca pode aplicar estes u64 mesmo sem sentinelas nos campos
-        // principais. Recusar o ID preserva os limites e o contrato sem ZIP64.
+        // The library may apply these u64 values even without sentinels in the
+        // main fields. Rejecting the ID preserves the limits and the no-ZIP64 contract.
         if id == 0x0001 {
-            return Err("Extra field ZIP64 recusado".into());
+            return Err("ZIP64 extra field rejected".into());
         }
         at = end;
     }
@@ -686,35 +685,35 @@ fn verify_evidence(
     let mut file = File::open(path).map_err(|e| e.to_string())?;
     let names = zip_names(&mut file)?;
     if names.len() != evidence.len() {
-        return Err("Quantidade de entradas ZIP divergente do inventário".into());
+        return Err("ZIP entry count differs from inventory".into());
     }
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("ZIP inválido: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Invalid ZIP: {e}"))?;
     if archive.len() != names.len() {
-        return Err("Índice ZIP esconde entradas duplicadas".into());
+        return Err("ZIP index hides duplicate entries".into());
     }
     let mut receipts = BTreeSet::new();
     for (index, name) in names.iter().enumerate() {
         let mut entry = archive
             .by_index(index)
-            .map_err(|e| format!("Entrada ZIP: {e}"))?;
+            .map_err(|e| format!("ZIP entry: {e}"))?;
         let proof = evidence
             .get(name)
-            .ok_or_else(|| format!("Entrada ZIP inesperada: {name}"))?;
+            .ok_or_else(|| format!("Unexpected ZIP entry: {name}"))?;
         if entry.name_raw() != name.as_bytes() || entry.size() != proof.size {
-            return Err(format!("Nome/tamanho ZIP divergente: {name}"));
+            return Err(format!("ZIP name/size mismatch: {name}"));
         }
         let basename = name.rsplit('/').next().unwrap_or(name);
         let is_receipt = basename.starts_with("receipt-") && basename.ends_with(".json");
         if is_receipt && proof.size > MAX_JSON_BYTES {
-            return Err("Recibo ZIP excessivo".into());
+            return Err("Oversized ZIP receipt".into());
         }
         let (sha256, bytes) = hash_reader(&mut entry, proof.size, is_receipt)?;
         if sha256 != proof.sha256 {
-            return Err(format!("Hash da evidência divergente: {name}"));
+            return Err(format!("Evidence hash mismatch: {name}"));
         }
         if is_receipt {
             let receipt: Value =
-                serde_json::from_slice(&bytes).map_err(|e| format!("Recibo {name}: {e}"))?;
+                serde_json::from_slice(&bytes).map_err(|e| format!("Receipt {name}: {e}"))?;
             let gate = text(&receipt, "gate")?;
             let key = (gate.to_owned(), text(&receipt, "target")?.to_owned());
             if basename != format!("receipt-{gate}.json")
@@ -722,13 +721,13 @@ fn verify_evidence(
                 || !receipts.insert(key)
             {
                 return Err(format!(
-                    "Recibo ausente, duplicado ou divergente do gate: {name}"
+                    "Missing, duplicate, or mismatched gate receipt: {name}"
                 ));
             }
         }
     }
     if receipts != gates.keys().cloned().collect::<BTreeSet<_>>() {
-        return Err("ZIP não contém exatamente os recibos dos gates declarados".into());
+        return Err("ZIP does not contain exactly the declared gate receipts".into());
     }
     Ok(())
 }
@@ -753,7 +752,7 @@ mod tests {
 
     impl Drop for Fixture {
         fn drop(&mut self) {
-            // Apenas o diretório exclusivo criado pelo próprio teste.
+            // Only the dedicated directory created by the test itself.
             assert_eq!(self.root.parent(), Some(std::env::temp_dir().as_path()));
             let _ = fs::remove_dir_all(&self.root);
         }
@@ -847,7 +846,7 @@ mod tests {
             }
             fs::write(
                 root.join("release-notes.md"),
-                format!("# Sider v{version}\nNotas verificadas.\n"),
+                format!("# Sider v{version}\nVerified notes.\n"),
             )
             .unwrap();
             fs::write(
@@ -993,11 +992,16 @@ mod tests {
                 .unwrap()
                 .retain(|record| record["gate"] != gate || record["target"] != WINDOWS);
             fixture.write_manifest_and_checksums();
-            assert!(fixture.check().unwrap_err().contains("Matriz cumulativa"));
+            assert!(
+                fixture
+                    .check()
+                    .unwrap_err()
+                    .contains("Cumulative gate matrix")
+            );
         }
         let fixture = Fixture::new("1.0.0");
         fs::remove_file(fixture.root.join("sider-v1.0.0-linux-amd64-image.tar.gz")).unwrap();
-        assert!(fixture.check().unwrap_err().contains("ausentes"));
+        assert!(fixture.check().unwrap_err().contains("Missing"));
     }
 
     #[test]
@@ -1017,9 +1021,9 @@ mod tests {
             b"changed bytes",
         )
         .unwrap();
-        assert!(fixture.check().unwrap_err().contains("Checksum"));
+        assert!(fixture.check().unwrap_err().contains("checksum"));
         fs::remove_file(fixture.root.join("runtime-requirements.md")).unwrap();
-        assert!(fixture.check().unwrap_err().contains("ausentes"));
+        assert!(fixture.check().unwrap_err().contains("Missing"));
     }
 
     #[test]
@@ -1075,10 +1079,10 @@ mod tests {
             .unwrap();
         fixture.manifest["gates"][index]["duration_seconds"] = json!(3599.9);
         fixture.write_manifest_and_checksums();
-        assert!(fixture.check().unwrap_err().contains("Duração"));
+        assert!(fixture.check().unwrap_err().contains("duration"));
         fixture.manifest["gates"][index]["duration_seconds"] = json!(3999.0);
         fixture.write_manifest_and_checksums();
-        assert!(fixture.check().unwrap_err().contains("Recibo"));
+        assert!(fixture.check().unwrap_err().contains("receipt"));
     }
 
     #[test]
@@ -1087,7 +1091,7 @@ mod tests {
         fixture.entries.last_mut().unwrap().1[1] = 254;
         fixture.write_zip(false);
         fixture.refresh();
-        assert!(fixture.check().unwrap_err().contains("Hash da evidência"));
+        assert!(fixture.check().unwrap_err().contains("Evidence hash"));
     }
 
     #[test]
@@ -1097,7 +1101,7 @@ mod tests {
             let array = fixture.manifest[field].as_array_mut().unwrap();
             array.push(array[0].clone());
             fixture.write_manifest_and_checksums();
-            assert!(fixture.check().unwrap_err().contains("duplicado"));
+            assert!(fixture.check().unwrap_err().contains("Duplicate"));
             fixture.manifest[field].as_array_mut().unwrap().pop();
             fixture.manifest[field].as_array_mut().unwrap().pop();
             fixture.write_manifest_and_checksums();
@@ -1144,7 +1148,7 @@ mod tests {
         }
         fs::write(fixture.zip_path(), bytes).unwrap();
         fixture.refresh();
-        assert!(fixture.check().unwrap_err().contains("ZIP duplicada"));
+        assert!(fixture.check().unwrap_err().contains("Duplicate ZIP entry"));
     }
 
     #[test]
@@ -1199,7 +1203,7 @@ mod tests {
             extra.extend_from_slice(&u64::from(value).to_le_bytes());
         }
         insert_central_extra(&mut fixture, &extra);
-        assert!(fixture.check().unwrap_err().contains("Extra field ZIP64"));
+        assert!(fixture.check().unwrap_err().contains("ZIP64 extra field"));
     }
 
     #[test]
@@ -1215,7 +1219,7 @@ mod tests {
                 fixture
                     .check()
                     .unwrap_err()
-                    .contains("extra field ZIP truncado")
+                    .contains("Truncated ZIP extra field")
             );
         }
         let mut fixture = Fixture::new("1.0.0-rc.1");
@@ -1240,7 +1244,7 @@ mod tests {
             fixture.manifest[field] = value;
             fixture.write_manifest_and_checksums();
             assert!(
-                fixture.check().unwrap_err().contains("Campo de publicação"),
+                fixture.check().unwrap_err().contains("Publication field"),
                 "{field}"
             );
         }
@@ -1254,7 +1258,7 @@ mod tests {
                 fixture
                     .check_as(identifier)
                     .unwrap_err()
-                    .contains("Marco interno")
+                    .contains("Internal milestone")
             );
         }
         for publication in [json!(false), json!("true"), json!(1), Value::Null] {
@@ -1294,21 +1298,16 @@ mod tests {
             let mut fixture = Fixture::new("1.0.0");
             fixture.manifest["artifact_version"] = value;
             fixture.write_manifest_and_checksums();
-            assert!(fixture.check().unwrap_err().contains("Identidade"));
+            assert!(fixture.check().unwrap_err().contains("identity"));
         }
         let mut fixture = Fixture::new("1.0.0");
         fixture.manifest["schema_version"] = json!(1);
         fixture.write_manifest_and_checksums();
-        assert!(fixture.check().unwrap_err().contains("Identidade"));
+        assert!(fixture.check().unwrap_err().contains("identity"));
         let mut fixture = Fixture::new("1.0.0");
         fixture.manifest["gates"][0]["version"] = json!("1.0.0-rc.1");
         fixture.write_manifest_and_checksums();
-        assert!(
-            fixture
-                .check()
-                .unwrap_err()
-                .contains("Registro de gate inválido")
-        );
+        assert!(fixture.check().unwrap_err().contains("Invalid gate record"));
         let mut fixture = Fixture::new("1.0.0");
         let (_, bytes) = fixture.entries.first_mut().unwrap();
         let mut receipt: Value = serde_json::from_slice(bytes).unwrap();
@@ -1316,7 +1315,7 @@ mod tests {
         *bytes = serde_json::to_vec(&receipt).unwrap();
         fixture.write_zip(true);
         fixture.refresh();
-        assert!(fixture.check().unwrap_err().contains("Recibo"));
+        assert!(fixture.check().unwrap_err().contains("receipt"));
     }
 
     #[test]

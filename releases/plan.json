@@ -4,7 +4,7 @@
   "bootstrap": [
     {
       "id": "B00-01",
-      "title": "Fundação Rust, configuração validada e CI multiplataforma",
+      "title": "Rust foundation, validated configuration, and cross-platform CI",
       "status": "completed",
       "evidence": [
         "https://github.com/djairofilho/sider/commit/fddbfaa",
@@ -22,25 +22,25 @@
   },
   "contracts": {
     "decisions": [
-      "RESP2 com chaves e valores binários; limites de entrada e canais limitados desde a 0.1.",
-      "Armazenamento com proprietário único por worker; preserve as fronteiras entre protocolo, comandos, armazenamento e rede.",
-      "Quota do dataset rejeita crescimento acima do limite, sem eviction automática.",
-      "AOF inicialmente com escritor global, registros de mutações resolvidas e formato versionado independente da versão do produto.",
-      "Shards fixos durante a execução; operações multichave e transações exigem o mesmo shard e rejeitam cruzamento antes de qualquer mutação.",
-      "Transações distinguem erros de enfileiramento e de execução conforme Redis; não há rollback de erros individuais durante EXEC.",
-      "Replicação assíncrona Sider→Sider, com a mesma versão e configuração de shards, réplica somente leitura e promoção manual.",
-      "Compatibilidade é declarada somente com testes reproduzíveis; respostas sem ordem garantida são comparadas por conteúdo normalizado.",
-      "Ambiente suportado até a 1.0 é controlado; o endereço padrão permanece em loopback."
+      "RESP2 with binary keys and values; input limits and bounded channels since 0.1.",
+      "Storage with a single owner per worker; preserve boundaries between protocol, commands, storage, and networking.",
+      "Dataset quota rejects growth beyond the limit, without automatic eviction.",
+      "AOF initially uses a global writer, resolved mutation records, and a versioned format independent of the product version.",
+      "Shards remain fixed during execution; multi-key operations and transactions require the same shard and reject cross-shard access before any mutation.",
+      "Transactions distinguish queueing errors from execution errors as Redis does; individual errors during EXEC are not rolled back.",
+      "Asynchronous Sider→Sider replication, with the same version and shard configuration, a read-only replica, and manual promotion.",
+      "Compatibility is declared only with reproducible tests; responses without guaranteed ordering are compared by normalized content.",
+      "The supported environment through 1.0 is controlled; the default address remains on loopback."
     ],
     "commands_added": {
-      "0.1.0": ["PING [mensagem]", "ECHO mensagem", "GET chave", "SET chave valor", "DEL chave [chave ...]"],
-      "0.2.0": ["EXISTS", "INCR", "DECR", "MGET", "MSET", "EXPIRE", "PEXPIRE", "TTL", "PTTL", "PERSIST", "SET com NX, XX, EX, PX, GET e KEEPTTL"],
-      "0.5.0": ["HSET", "HGET", "HDEL", "HEXISTS", "HLEN", "HGETALL", "LPUSH", "RPUSH", "LPOP sem count", "RPOP sem count", "LLEN", "LRANGE", "SADD", "SREM", "SISMEMBER", "SCARD", "SMEMBERS"],
-      "0.6.0": ["ZADD básico", "ZREM", "ZCARD", "ZSCORE", "ZRANGE start stop [WITHSCORES]"],
+      "0.1.0": ["PING [message]", "ECHO message", "GET key", "SET key value", "DEL key [key ...]"],
+      "0.2.0": ["EXISTS", "INCR", "DECR", "MGET", "MSET", "EXPIRE", "PEXPIRE", "TTL", "PTTL", "PERSIST", "SET with NX, XX, EX, PX, GET, and KEEPTTL"],
+      "0.5.0": ["HSET", "HGET", "HDEL", "HEXISTS", "HLEN", "HGETALL", "LPUSH", "RPUSH", "LPOP without count", "RPOP without count", "LLEN", "LRANGE", "SADD", "SREM", "SISMEMBER", "SCARD", "SMEMBERS"],
+      "0.6.0": ["basic ZADD", "ZREM", "ZCARD", "ZSCORE", "ZRANGE start stop [WITHSCORES]"],
       "0.7.0": ["MULTI", "EXEC", "DISCARD", "WATCH", "UNWATCH"],
-      "0.8.0": ["SUBSCRIBE", "UNSUBSCRIBE", "PUBLISH", "PING no modo assinante"]
+      "0.8.0": ["SUBSCRIBE", "UNSUBSCRIBE", "PUBLISH", "PING in subscriber mode"]
     },
-    "after_1_0": ["Redis Cluster", "Sentinel", "failover automático", "resharding online", "RESP3", "Lua", "operações bloqueantes", "transações entre shards", "TLS", "ACL"],
+    "after_1_0": ["Redis Cluster", "Sentinel", "automatic failover", "online resharding", "RESP3", "Lua", "blocking operations", "cross-shard transactions", "TLS", "ACL"],
     "sources": ["https://redis.io/docs/latest/develop/using-commands/transactions/", "https://redis.io/docs/latest/develop/reference/protocol-spec/"]
   },
   "release_policy": {
@@ -63,442 +63,442 @@
   },
   "releases": [
     {
-      "id": "R01", "version": "0.1.0", "title": "Núcleo RESP2", "publication": false,
-      "scope": ["Implementar PING, ECHO, GET, SET básico e DEL via RESP2/TCP, com worker único.", "Preservar dados binários, fragmentação, ordenação por conexão, limites e encerramento definidos em PLANO.md."],
+      "id": "R01", "version": "0.1.0", "title": "RESP2 core", "publication": false,
+      "scope": ["Implement PING, ECHO, GET, basic SET, and DEL over RESP2/TCP, with a single worker.", "Preserve binary data, fragmentation, per-connection ordering, limits, and shutdown as defined in PLANO.md."],
       "required_gates": ["native","compatibility","tcp_smoke"],
       "tasks": [
         {
-          "id": "R01-01", "title": "Fixtures e referência Redis", "area": "testing", "depends_on": ["B00-01"],
-          "objective": "Fixar um oráculo reproduzível para os cinco comandos da Sider 0.1 antes de implementar o codec.",
-          "deliverables": ["Fixtures RESP2 literais para PING, ECHO, GET, SET básico e DEL, incluindo erros de aridade.", "Infraestrutura descartável com Redis e redis-cli 8.10.1 na imagem e no digest registrados em reference; documentar execução manual reproduzível."],
-          "tests": ["Conferir bytes de PONG, nulos, vazios e respostas binárias sem reutilizar o futuro decoder Sider.", "Verificar versão, digest e disponibilidade da referência; ausência de ferramenta deve falhar explicitamente."],
-          "acceptance": ["Fixtures e comandos de reprodução estão versionados; matriz distingue contratos pretendidos de suporte ainda não implementado."]
+          "id": "R01-01", "title": "Fixtures and Redis reference", "area": "testing", "depends_on": ["B00-01"],
+          "objective": "Pin a reproducible oracle for the five Sider 0.1 commands before implementing the codec.",
+          "deliverables": ["Literal RESP2 fixtures for PING, ECHO, GET, basic SET, and DEL, including arity errors.", "Disposable infrastructure with Redis and redis-cli 8.10.1 using the image and digest recorded in reference; document reproducible manual execution."],
+          "tests": ["Check PONG bytes, nulls, empty values, and binary responses without reusing the future Sider decoder.", "Verify reference version, digest, and availability; a missing tool must fail explicitly."],
+          "acceptance": ["Fixtures and reproduction commands are versioned; the matrix distinguishes intended contracts from support not yet implemented."]
         },
         {
-          "id": "R01-02", "title": "Codec RESP2 incremental", "area": "protocol", "depends_on": ["R01-01"],
-          "objective": "Implementar os cinco tipos RESP2 e codificação/decodificação incrementais independentes de sockets e armazenamento.",
-          "deliverables": ["Frame, RespLimits, encoder atômico e decoder com cursor/pilha limitada conforme PLANO.md.", "Decoder preserva buffer incompleto, consome um frame por vez e limita bytes, nós e profundidade antes de alocar payloads."],
-          "tests": ["Round trip, todos os pontos de fragmentação de fixtures curtas, entrega byte a byte e frames concatenados.", "Conteúdo não UTF-8, extremos inteiros, CRLF partido, overflow, limites exatos e excedidos; contador de trabalho detecta reprocessamento quadrático."],
-          "acceptance": ["Codec testado sem rede nem banco, sem panic em entrada arbitrária; erro de encoder não deixa saída parcial."]
+          "id": "R01-02", "title": "Incremental RESP2 codec", "area": "protocol", "depends_on": ["R01-01"],
+          "objective": "Implement all five RESP2 types and incremental encoding/decoding independent of sockets and storage.",
+          "deliverables": ["Frame, RespLimits, atomic encoder, and decoder with a cursor/bounded stack as specified in PLANO.md.", "The decoder preserves incomplete buffers, consumes one frame at a time, and limits bytes, nodes, and depth before allocating payloads."],
+          "tests": ["Round trips, every fragmentation point in short fixtures, byte-by-byte delivery, and concatenated frames.", "Non-UTF-8 content, integer extremes, split CRLF, overflow, exact and exceeded limits; a work counter detects quadratic reprocessing."],
+          "acceptance": ["Codec tested without networking or a database, with no panic on arbitrary input; encoder errors leave no partial output."]
         },
         {
-          "id": "R01-03", "title": "Cinco comandos e armazenamento", "area": "storage", "depends_on": ["R01-02"],
-          "objective": "Implementar parsing e execução síncrona de PING, ECHO, GET, SET básico e DEL sobre chaves e valores binários.",
-          "deliverables": ["Tipos Command e Reply, parser independente de estado e Store testável sem runtime.", "Classificação de erro recuperável de comando e erro de formato; SET com opções ainda retorna ERR unsupported SET options sem alteração."],
-          "tests": ["Aridade, caixa ASCII do nome, ausentes, vazios, NUL, bytes não UTF-8, sobrescrita e DEL com chaves repetidas.", "Comandos rejeitados preservam o mapa; DEL conta apenas remoções efetivas."],
-          "acceptance": ["Semântica dos cinco comandos comprovada por testes sem sockets; divergências de erro estão na matriz."]
+          "id": "R01-03", "title": "Five commands and storage", "area": "storage", "depends_on": ["R01-02"],
+          "objective": "Implement parsing and synchronous execution of PING, ECHO, GET, basic SET, and DEL on binary keys and values.",
+          "deliverables": ["Command and Reply types, a state-independent parser, and a Store testable without a runtime.", "Classify recoverable command errors and format errors; SET with options still returns ERR unsupported SET options without changes."],
+          "tests": ["Arity, ASCII command-name casing, missing and empty values, NUL, non-UTF-8 bytes, overwrites, and DEL with repeated keys.", "Rejected commands preserve the map; DEL counts only actual removals."],
+          "acceptance": ["Semantics of all five commands verified by socket-free tests; error differences are recorded in the matrix."]
         },
         {
-          "id": "R01-04", "title": "Worker e TCP", "area": "network", "depends_on": ["R01-03"],
-          "objective": "Conectar o protocolo ao worker proprietário via fila limitada e respostas oneshot, expondo um servidor TCP supervisionado.",
-          "deliverables": ["DbHandle, Request e worker dono do Store; aceitar comando ao concluir enqueue e executá-lo mesmo após desconexão do cliente.", "serve recebe listener já aberto; configuração validada, um pedido em voo por conexão, timeouts, limites, logs e encerramento com drenagem limitada.", "Para o smoke do binário extraído, SIDER_ADDR aceita porta 0 e SIDER_READY_FILE recebe JSON atômico com pid, host e port após o bind; seguir docs/releases.md."],
-          "tests": ["Portas efêmeras, SET/GET/DEL, dois clientes, comandos concatenados e resposta ordenada.", "Backpressure com barreiras, cliente lento, half-close, EOF truncado, worker indisponível, cancelamento e shutdown durante leitura/fila/escrita."],
-          "acceptance": ["Binário atende clientes TCP em loopback; recursos e filas limitados, testes não dependem de portas fixas ou sleeps para ordenar ações."]
+          "id": "R01-04", "title": "Worker and TCP", "area": "network", "depends_on": ["R01-03"],
+          "objective": "Connect the protocol to the owning worker through a bounded queue and oneshot responses, exposing a supervised TCP server.",
+          "deliverables": ["DbHandle, Request, and a worker that owns the Store; accept a command when enqueue completes and execute it even after client disconnection.", "serve receives an already open listener; validated configuration, one in-flight request per connection, timeouts, limits, logs, and shutdown with bounded draining.", "For the extracted binary smoke test, SIDER_ADDR accepts port 0 and SIDER_READY_FILE receives atomic JSON with pid, host, and port after bind; follow docs/releases.md."],
+          "tests": ["Ephemeral ports, SET/GET/DEL, two clients, concatenated commands, and ordered responses.", "Backpressure with barriers, a slow client, half-close, truncated EOF, unavailable worker, cancellation, and shutdown during reading/queueing/writing."],
+          "acceptance": ["The binary serves TCP clients on loopback; resources and queues are bounded, and tests do not rely on fixed ports or sleeps to order actions."]
         },
         {
-          "id": "R01-05", "title": "Testes diferenciais e robustez", "area": "testing", "depends_on": ["R01-04"],
-          "objective": "Demonstrar o subconjunto 0.1 contra Redis 8.10.1 e transformar entradas adversariais em regressões reproduzíveis.",
-          "deliverables": ["Suíte diferencial independente do codec sob teste e integração separada com redis-cli RESP2.", "Testes de robustez para entradas truncadas, concatenadas e malformadas; runner produz evidências do gate compatibility."],
-          "tests": ["Sequências determinísticas e geradas sobre instâncias descartáveis; comparar bytes, tipo de resposta e estado observado.", "Cobrir limites, fragmentação e rejeições; converter achados em regressões reproduzíveis."],
-          "acceptance": ["Cinco comandos comprovados com redis-cli; matriz indica testes reais, limitações e referência; teste externo ausente ou ignorado bloqueia a entrega."]
+          "id": "R01-05", "title": "Differential tests and robustness", "area": "testing", "depends_on": ["R01-04"],
+          "objective": "Demonstrate the 0.1 subset against Redis 8.10.1 and turn adversarial inputs into reproducible regressions.",
+          "deliverables": ["Differential suite independent of the codec under test and separate integration with redis-cli RESP2.", "Robustness tests for truncated, concatenated, and malformed inputs; the runner produces compatibility gate evidence."],
+          "tests": ["Deterministic and generated sequences on disposable instances; compare bytes, response type, and observed state.", "Cover limits, fragmentation, and rejections; convert findings into reproducible regressions."],
+          "acceptance": ["Five commands verified with redis-cli; the matrix identifies actual tests, limitations, and reference; a missing or ignored external test blocks delivery."]
         }
       ],
-      "gate": {"id":"R01-GATE","title":"Validar marco interno 0.1.0","acceptance":["Todas as tarefas R01 concluídas com PR e verificação manual registrada; PING, ECHO, GET, SET básico e DEL funcionam via redis-cli.","Gates native, compatibility e tcp_smoke aprovados no SHA exato; fragmentação, binários, limites e ordenação cobertos.","Conferir os critérios técnicos e registrar evidências locais; encerrar este marco interno sem candidata, tag ou release publicada. Artefatos usados em migração ficam congelados por SHA e hashes."]}
+      "gate": {"id":"R01-GATE","title":"Validate internal milestone 0.1.0","acceptance":["All R01 tasks completed with a PR and recorded manual verification; PING, ECHO, GET, basic SET, and DEL work through redis-cli.","native, compatibility, and tcp_smoke gates passed at the exact SHA; fragmentation, binary data, limits, and ordering covered.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
     },
     {
-      "id": "R02", "version": "0.2.0", "title": "Strings, TTL e memória", "publication": false,
-      "scope": ["Adicionar EXISTS, INCR, DECR, MGET, MSET, EXPIRE, PEXPIRE, TTL, PTTL e PERSIST.", "SET aceita NX, XX, EX, PX, GET e KEEPTTL; expiração passiva/ativa e quota com rejeição de crescimento."],
+      "id": "R02", "version": "0.2.0", "title": "Strings, TTL, and memory", "publication": false,
+      "scope": ["Add EXISTS, INCR, DECR, MGET, MSET, EXPIRE, PEXPIRE, TTL, PTTL, and PERSIST.", "SET accepts NX, XX, EX, PX, GET, and KEEPTTL; passive/active expiration and quota enforcement that rejects growth."],
       "required_gates": ["native","compatibility","tcp_smoke"],
       "tasks": [
         {
-          "id": "R02-01", "title": "Comandos adicionais de strings", "area": "commands", "depends_on": ["R01-GATE"],
-          "objective": "Ampliar strings com EXISTS, INCR, DECR, MGET e MSET preservando atomicidade do worker.",
-          "deliverables": ["Parsing, respostas e execução dos cinco comandos com dados binários e validação antes da mutação.", "Documentar formas suportadas e limites de quantidade/bytes aplicados aos comandos multichave."],
-          "tests": ["Overflow de i64, inteiros inválidos, duplicatas, chaves ausentes, aridade e atomicidade de MSET rejeitado.", "Comparar respostas e estado com Redis 8.10.1, incluindo multiplicidade de EXISTS e ordem de MGET."],
-          "acceptance": ["Comandos adicionais passam nos testes nativos e diferenciais; overflow e rejeição não corrompem estado."]
+          "id": "R02-01", "title": "Additional string commands", "area": "commands", "depends_on": ["R01-GATE"],
+          "objective": "Extend strings with EXISTS, INCR, DECR, MGET, and MSET while preserving worker atomicity.",
+          "deliverables": ["Parsing, responses, and execution of all five commands with binary data and validation before mutation.", "Document supported forms and count/byte limits applied to multi-key commands."],
+          "tests": ["i64 overflow, invalid integers, duplicates, missing keys, arity, and atomicity of rejected MSET.", "Compare responses and state with Redis 8.10.1, including EXISTS multiplicity and MGET ordering."],
+          "acceptance": ["Additional commands pass native and differential tests; overflow and rejection do not corrupt state."]
         },
         {
-          "id": "R02-02", "title": "Opções de SET", "area": "commands", "depends_on": ["R02-01"],
-          "objective": "Implementar as formas de SET com NX, XX, EX, PX, GET e KEEPTTL e fechar as combinações aceitas no subconjunto.",
-          "deliverables": ["Parser validando combinações, argumentos e overflow antes do efeito; representar deadline/retorno do valor anterior no comando resolvido.", "Integrar as opções temporais à representação de entrada que será consumida pela expiração na tarefa seguinte; manter etapa compilável."],
-          "tests": ["Combinações válidas e incompatíveis, duração zero/negativa/excessiva, valor anterior, chave ausente e condição não satisfeita.", "Diferenciais contra Redis para a matriz de combinações suportadas; rejeição preserva valor e metadados."],
-          "acceptance": ["Todas as formas declaradas de SET têm testes; sem promessa de expiração completa antes de R02-03."]
+          "id": "R02-02", "title": "SET options", "area": "commands", "depends_on": ["R02-01"],
+          "objective": "Implement SET forms with NX, XX, EX, PX, GET, and KEEPTTL and finalize the combinations accepted by the subset.",
+          "deliverables": ["Parser validates combinations, arguments, and overflow before effects; represent the deadline/previous-value return in the resolved command.", "Integrate timing options into the entry representation consumed by expiration in the next task; keep the stage buildable."],
+          "tests": ["Valid and incompatible combinations, zero/negative/excessive duration, previous value, missing key, and unmet condition.", "Differential tests against Redis for the supported combination matrix; rejection preserves values and metadata."],
+          "acceptance": ["All declared SET forms have tests; no promise of complete expiration before R02-03."]
         },
         {
-          "id": "R02-03", "title": "Expiração passiva e ativa", "area": "storage", "depends_on": ["R02-02"],
-          "objective": "Implementar EXPIRE, PEXPIRE, TTL, PTTL e PERSIST com expiração em acesso e limpeza ativa limitada.",
-          "deliverables": ["Relógio monotônico injetável, gerações de expiração e orçamento limitado por rodada de limpeza.", "Integrar os prazos definidos por SET e distinguir chave ausente, persistente e expirada; definir conversão futura para prazo absoluto em persistência."],
-          "tests": ["Tempo controlado sem alterar ambiente global, fronteira exata da expiração, PERSIST e atualização antes de expiração antiga.", "Expiração ativa de chaves não acessadas, remoção/reescrita repetida e semântica temporal comparada com Redis com tolerância declarada."],
-          "acceptance": ["Evento de expiração antigo nunca apaga valor novo; SET temporal e os cinco comandos TTL funcionam com leitura e limpeza ativa."]
+          "id": "R02-03", "title": "Passive and active expiration", "area": "storage", "depends_on": ["R02-02"],
+          "objective": "Implement EXPIRE, PEXPIRE, TTL, PTTL, and PERSIST with expiration on access and bounded active cleanup.",
+          "deliverables": ["Injectable monotonic clock, expiration generations, and a bounded budget per cleanup round.", "Integrate deadlines set by SET and distinguish missing, persistent, and expired keys; define future conversion to absolute deadlines for persistence."],
+          "tests": ["Controlled time without changing the global environment, exact expiration boundary, PERSIST, and updates before stale expiration.", "Active expiration of unaccessed keys, repeated deletion/rewriting, and timing semantics compared with Redis using declared tolerances."],
+          "acceptance": ["A stale expiration event never deletes a new value; timed SET and all five TTL commands work with reads and active cleanup."]
         },
         {
-          "id": "R02-04", "title": "Quota do dataset", "area": "storage", "depends_on": ["R02-03"],
-          "objective": "Limitar crescimento contabilizado do dataset com rejeição atômica, sem eviction automática.",
-          "deliverables": ["Configuração e contabilidade documentada de memória do dataset, distinta de RSS e buffers de rede.", "Pré-validação de crescimento em SET, MSET e incrementos; liberação consistente em DEL, expiração e substituições menores."],
-          "tests": ["Limite exato/excedido, substituição maior/menor, lote parcialmente admissível e recuperação de espaço após expiração.", "Operação rejeitada preserva dados e contadores; configuração inválida falha antes de abrir o servidor."],
-          "acceptance": ["Crescimento acima da quota é recusado sem efeitos parciais; contabilidade e divergências estão documentadas."]
+          "id": "R02-04", "title": "Dataset quota", "area": "storage", "depends_on": ["R02-03"],
+          "objective": "Limit accounted dataset growth with atomic rejection, without automatic eviction.",
+          "deliverables": ["Documented dataset memory configuration and accounting, distinct from RSS and network buffers.", "Prevalidate growth in SET, MSET, and increments; release memory consistently on DEL, expiration, and smaller replacements."],
+          "tests": ["Exact/exceeded limit, larger/smaller replacement, partially admissible batch, and space recovery after expiration.", "Rejected operations preserve data and counters; invalid configuration fails before opening the server."],
+          "acceptance": ["Growth above the quota is rejected without partial effects; accounting and differences are documented."]
         }
       ],
-      "gate": {"id":"R02-GATE","title":"Validar marco interno 0.2.0","acceptance":["Marco R01 validado e tarefas R02 concluídas; overflow, expiração antiga e rejeições preservam estado.","Gates locais aprovados; quota recusa crescimento e opções de SET/TTL têm evidência diferencial.","Conferir os critérios técnicos e registrar evidências locais; encerrar este marco interno sem candidata, tag ou release publicada. Artefatos usados em migração ficam congelados por SHA e hashes."]}
+      "gate": {"id":"R02-GATE","title":"Validate internal milestone 0.2.0","acceptance":["R01 milestone validated and R02 tasks completed; overflow, stale expiration, and rejections preserve state.","Local gates passed; quota rejects growth and SET/TTL options have differential evidence.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
     },
     {
-      "id": "R03", "version": "0.3.0", "title": "Persistência AOF", "publication": false,
-      "scope": ["AOF com formato versionado, checksum e escritor global de mutações resolvidas.", "Políticas de durabilidade explícitas, replay seguro, compactação e testes de crash em Linux e Windows."],
+      "id": "R03", "version": "0.3.0", "title": "AOF persistence", "publication": false,
+      "scope": ["AOF with a versioned format, checksum, and global writer of resolved mutations.", "Explicit durability policies, safe replay, compaction, and crash tests on Linux and Windows."],
       "required_gates": ["native","compatibility","tcp_smoke","crash","recovery","migration"],
       "tasks": [
         {
-          "id": "R03-01", "title": "Formato AOF versionado e checksum", "area": "persistence", "depends_on": ["R02-04"],
-          "objective": "Definir e implementar um formato durável independente de versões do produto, capaz de detectar truncamento e corrupção.",
-          "deliverables": ["Especificação de cabeçalho, versão, framing de registros, checksum e limites; registros e lotes contêm mutações resolvidas e deadlines absolutos.", "Leitor/escritor de formato testável sem servidor e fixtures binárias da versão inicial do AOF."],
-          "tests": ["Round trip de binários, tamanho/versão desconhecidos, checksum incorreto, overflow e truncamento em todos os limites do registro.", "Gate migration inicial lê fixtures do primeiro formato e recusa versões desconhecidas explicitamente."],
-          "acceptance": ["Formato inicial documentado e reproduzível; dado parcial ou inválido não vira mutação aplicável."]
+          "id": "R03-01", "title": "Versioned AOF format and checksum", "area": "persistence", "depends_on": ["R02-04"],
+          "objective": "Define and implement a durable format independent of product versions, capable of detecting truncation and corruption.",
+          "deliverables": ["Specification of header, version, record framing, checksum, and limits; records and batches contain resolved mutations and absolute deadlines.", "Format reader/writer testable without a server and binary fixtures for the initial AOF version."],
+          "tests": ["Binary round trips, unknown size/version, incorrect checksum, overflow, and truncation at every record boundary.", "The initial migration gate reads fixtures from the first format and explicitly rejects unknown versions."],
+          "acceptance": ["Initial format documented and reproducible; partial or invalid data does not become an applicable mutation."]
         },
         {
-          "id": "R03-02", "title": "Append e fsync", "area": "persistence", "depends_on": ["R03-01"],
-          "objective": "Integrar escritor AOF global com ordem explícita entre validação, registro, aplicação e resposta.",
-          "deliverables": ["Políticas fsync por escrita e periódico com garantias de confirmação documentadas.", "Canais limitados, registro de operações condicionais já resolvidas e tratamento de falha de append/fsync que impede confirmar durabilidade inexistente."],
-          "tests": ["Falhas injetadas em escrita curta, append, flush e fsync; comandos rejeitados não entram como mutações no log.", "Conferir ordem das respostas/log/estado e operação durável cuja resposta foi perdida."],
-          "acceptance": ["Cada política declara a possível perda após crash; sucesso respeita a garantia escolhida e falha do escritor é supervisionada."]
+          "id": "R03-02", "title": "Append and fsync", "area": "persistence", "depends_on": ["R03-01"],
+          "objective": "Integrate a global AOF writer with explicit ordering between validation, logging, application, and response.",
+          "deliverables": ["Per-write and periodic fsync policies with documented acknowledgment guarantees.", "Bounded channels, logging of resolved conditional operations, and append/fsync failure handling that prevents acknowledgment of durability not achieved."],
+          "tests": ["Injected failures in short writes, append, flush, and fsync; rejected commands do not enter the log as mutations.", "Check response/log/state ordering and durable operations whose responses were lost."],
+          "acceptance": ["Each policy declares possible loss after a crash; success respects the selected guarantee and writer failure is supervised."]
         },
         {
-          "id": "R03-03", "title": "Recuperação AOF", "area": "persistence", "depends_on": ["R03-02"],
-          "objective": "Recuperar estado persistido antes de aceitar conexões, aplicando apenas registros completos e validados.",
-          "deliverables": ["Replay determinístico com política explícita para cauda truncada versus corrupção interna, preservando arquivo original em caso de erro.", "Reconstituição de TTL absoluto, quota e metadados; recuperação trata entradas já expiradas."],
-          "tests": ["Reiniciar após cada prefixo de log, corrupção no meio, cauda incompleta, mudança de relógio e expiração durante indisponibilidade.", "Comparar estado antes/depois e verificar que nenhum registro parcial é aplicado."],
-          "acceptance": ["Gate recovery demonstra estado recuperado esperado; corrupção não passa silenciosamente e listener abre apenas após recovery aprovado."]
+          "id": "R03-03", "title": "AOF recovery", "area": "persistence", "depends_on": ["R03-02"],
+          "objective": "Recover persisted state before accepting connections, applying only complete and validated records.",
+          "deliverables": ["Deterministic replay with an explicit policy for truncated tails versus internal corruption, preserving the original file on error.", "Reconstruct absolute TTL, quota, and metadata; recovery handles already expired entries."],
+          "tests": ["Restart after every log prefix, internal corruption, incomplete tail, clock change, and expiration during downtime.", "Compare before/after state and verify that no partial record is applied."],
+          "acceptance": ["The recovery gate demonstrates the expected recovered state; corruption is not silently accepted and the listener opens only after successful recovery."]
         },
         {
-          "id": "R03-04", "title": "Compactação AOF", "area": "persistence", "depends_on": ["R03-03"],
-          "objective": "Compactar o AOF preservando mutações concorrentes e substituindo o arquivo com segurança por plataforma.",
-          "deliverables": ["Snapshot consistente de mutações resolvidas, captura limitada do delta e protocolo de troca de arquivos com cleanup recuperável.", "Documentação de garantias da substituição e sincronização de arquivos/diretório aplicáveis em Linux e Windows."],
-          "tests": ["Escritas e expirações durante compactação, falha de disco, interrupção antes/depois de cada passo de troca.", "Reinício seleciona um arquivo íntegro; comparação do estado após compactação nas duas plataformas."],
-          "acceptance": ["Compactação não perde mutações confirmadas além da política de fsync; arquivo original permanece recuperável até a troca segura."]
+          "id": "R03-04", "title": "AOF compaction", "area": "persistence", "depends_on": ["R03-03"],
+          "objective": "Compact the AOF while preserving concurrent mutations and replacing the file safely on each platform.",
+          "deliverables": ["Consistent snapshot of resolved mutations, bounded delta capture, and file replacement protocol with recoverable cleanup.", "Documentation of replacement and file/directory synchronization guarantees applicable on Linux and Windows."],
+          "tests": ["Writes and expirations during compaction, disk failure, and interruptions before/after each replacement step.", "Restart selects an intact file; compare state after compaction on both platforms."],
+          "acceptance": ["Compaction does not lose acknowledged mutations beyond the fsync policy; the original file remains recoverable until safe replacement."]
         },
         {
-          "id": "R03-05", "title": "Testes de crash e durabilidade", "area": "testing", "depends_on": ["R03-04"],
-          "objective": "Comprovar as garantias AOF com processos reais interrompidos e falhas determinísticas de I/O.",
-          "deliverables": ["Runners crash, recovery e migration com relatórios ligados ao SHA e à política de durabilidade.", "Matriz Linux/Windows de falhas, tempo e perda permitida; preservar corpus de arquivos de regressão."],
-          "tests": ["Terminar processos entre append/fsync/resposta e durante compactação; recuperar cada arquivo resultante.", "Verificar ausência de meia mutação, respeito ao fsync por escrita e limite documentado da política periódica."],
-          "acceptance": ["Gates de crash/recovery/migration executam casos reais, sem contar testes ignorados como sucesso."]
+          "id": "R03-05", "title": "Crash and durability tests", "area": "testing", "depends_on": ["R03-04"],
+          "objective": "Verify AOF guarantees with interrupted real processes and deterministic I/O failures.",
+          "deliverables": ["crash, recovery, and migration runners with reports tied to the SHA and durability policy.", "Linux/Windows matrix of failures, timing, and permitted loss; preserve the regression file corpus."],
+          "tests": ["Terminate processes between append/fsync/response and during compaction; recover every resulting file.", "Verify absence of partial mutations, adherence to per-write fsync, and the documented periodic policy limit."],
+          "acceptance": ["crash/recovery/migration gates execute real cases without counting ignored tests as success."]
         }
       ],
-      "gate": {"id":"R03-GATE","title":"Validar marco interno 0.3.0","acceptance":["Nenhum registro parcial aplicado; garantias de fsync e recuperação comprovadas em Linux e Windows.","Gates locais incluem crash, recovery e migration; na primeira AOF, migration usa fixtures do formato inicial.","Conferir os critérios técnicos e registrar evidências locais; encerrar este marco interno sem candidata, tag ou release publicada. Artefatos usados em migração ficam congelados por SHA e hashes."]}
+      "gate": {"id":"R03-GATE","title":"Validate internal milestone 0.3.0","acceptance":["No partial record applied; fsync and recovery guarantees verified on Linux and Windows.","Local gates include crash, recovery, and migration; for the first AOF, migration uses initial-format fixtures.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
     },
     {
       "id": "R04", "version": "0.4.0", "title": "Shards", "publication": false,
-      "scope": ["Roteamento determinístico com hash tags e número fixo de workers proprietários.", "Operações multichave exigem mesmo shard; AOF inicialmente mantém escritor global e ordem recuperável."],
+      "scope": ["Deterministic routing with hash tags and a fixed number of owning workers.", "Multi-key operations require the same shard; AOF initially retains a global writer and recoverable ordering."],
       "required_gates": ["native","compatibility","tcp_smoke","sharding"],
       "tasks": [
         {
-          "id": "R04-01", "title": "Roteamento estável e hash tags", "area": "storage", "depends_on": ["R01-04"],
-          "objective": "Definir roteamento binário estável entre sistemas operacionais e hash tags sem anunciar Redis Cluster.",
-          "deliverables": ["Algoritmo de hash e extração de tags documentados com vetores de teste; número de shards validado na inicialização.", "Interface de roteador preservando o handle de execução; configuração fixa durante o processo."],
-          "tests": ["Vetores Linux/Windows, bytes não UTF-8, tags vazias/aninhadas, ausência de tag e números distintos de shards."],
-          "acceptance": ["Mesma chave e configuração sempre escolhem o mesmo shard nas duas plataformas; resharding online permanece fora do escopo."]
+          "id": "R04-01", "title": "Stable routing and hash tags", "area": "storage", "depends_on": ["R01-04"],
+          "objective": "Define binary routing stable across operating systems and hash tags without claiming Redis Cluster support.",
+          "deliverables": ["Hash algorithm and tag extraction documented with test vectors; shard count validated at startup.", "Router interface preserving the execution handle; configuration fixed for the lifetime of the process."],
+          "tests": ["Linux/Windows vectors, non-UTF-8 bytes, empty/nested tags, missing tags, and different shard counts."],
+          "acceptance": ["The same key and configuration always select the same shard on both platforms; online resharding remains out of scope."]
         },
         {
-          "id": "R04-02", "title": "Workers independentes", "area": "storage", "depends_on": ["R04-01","R02-04"],
-          "objective": "Particionar armazenamento entre workers proprietários sem compartilhamento concorrente direto dos mapas.",
-          "deliverables": ["Fila limitada por worker e roteamento de pedidos; shutdown, TTL e quota coerentes com a configuração particionada.", "Supervisão de worker e política de indisponibilidade que não aceita pedidos sem armazenamento funcional."],
-          "tests": ["Trabalho em shards distintos progride independentemente, hot shard, saturação de fila e falha/encerramento coordenado."],
-          "acceptance": ["Cada chave possui um único worker; ordem por conexão é preservada e backpressure continua limitado."]
+          "id": "R04-02", "title": "Independent workers", "area": "storage", "depends_on": ["R04-01","R02-04"],
+          "objective": "Partition storage among owning workers without direct concurrent sharing of maps.",
+          "deliverables": ["Bounded queue per worker and request routing; shutdown, TTL, and quota consistent with the partitioned configuration.", "Worker supervision and an unavailability policy that rejects requests without functioning storage."],
+          "tests": ["Independent progress on different shards, a hot shard, queue saturation, and coordinated failure/shutdown."],
+          "acceptance": ["Each key has a single worker; per-connection order is preserved and backpressure remains bounded."]
         },
         {
-          "id": "R04-03", "title": "Operações multichave restritas", "area": "commands", "depends_on": ["R04-02","R02-01"],
-          "objective": "Validar todas as chaves de DEL, MGET e MSET antes de enviar operação ao shard.",
-          "deliverables": ["Rejeição determinística de operação entre shards antes de qualquer efeito.", "Documentar incompatibilidade introduzida na minor 0.4 e exemplos de hash tags para manter colocalização."],
-          "tests": ["Lotes no mesmo shard, lotes cruzados, duplicatas, chaves ausentes e bytes binários; comparar estado completo após rejeição."],
-          "acceptance": ["Nenhuma operação multichave cruza shards parcialmente; comportamento restrito aparece na matriz e nas notas."]
+          "id": "R04-03", "title": "Restricted multi-key operations", "area": "commands", "depends_on": ["R04-02","R02-01"],
+          "objective": "Validate all DEL, MGET, and MSET keys before sending an operation to the shard.",
+          "deliverables": ["Deterministic rejection of cross-shard operations before any effect.", "Document the incompatibility introduced in minor version 0.4 and hash tag examples that preserve colocation."],
+          "tests": ["Same-shard batches, cross-shard batches, duplicates, missing keys, and binary bytes; compare complete state after rejection."],
+          "acceptance": ["No multi-key operation partially crosses shards; the restricted behavior appears in the matrix and notes."]
         },
         {
-          "id": "R04-04", "title": "Integração de shards com AOF", "area": "persistence", "depends_on": ["R04-03","R03-04"],
-          "objective": "Manter replay e compactação consistentes com múltiplos workers e escritor AOF global.",
-          "deliverables": ["Coordenação de sequência durável, checkpoint e roteamento durante recuperação.", "Validação de metadados/configuração de shards ao abrir AOF e procedimento de migração offline quando necessário."],
-          "tests": ["Escritas concorrentes entre shards, crash e compactação; recuperar a baseline AOF interna R03 identificada por SHA e hashes e comparar estado sob configuração suportada."],
-          "acceptance": ["Estado e prazos são preservados após recovery; configuração incompatível é detectada antes de aceitar clientes."]
+          "id": "R04-04", "title": "Shard integration with AOF", "area": "persistence", "depends_on": ["R04-03","R03-04"],
+          "objective": "Keep replay and compaction consistent with multiple workers and a global AOF writer.",
+          "deliverables": ["Coordinate durable sequencing, checkpoints, and routing during recovery.", "Validate shard metadata/configuration when opening AOF and provide an offline migration procedure when needed."],
+          "tests": ["Concurrent writes across shards, crashes, and compaction; recover the internal R03 AOF baseline identified by SHA and hashes, and compare state under a supported configuration."],
+          "acceptance": ["State and deadlines are preserved after recovery; incompatible configuration is detected before accepting clients."]
         },
         {
-          "id": "R04-05", "title": "Medições iniciais de shards", "area": "testing", "depends_on": ["R04-04"],
-          "objective": "Registrar custo e benefício do particionamento com carga reproduzível, sem meta inventada de superar Redis.",
-          "deliverables": ["Runner sharding e benchmark exploratório com configuração, hardware, seeds e resultados brutos.", "Cenários com quantidades distintas de shards, hot keys, pipelines e AOF ligado/desligado."],
-          "tests": ["Conferir invariantes de dados durante carga e medir throughput, latências e memória sem misturar plataformas/configurações."],
-          "acceptance": ["Distribuição e correção comprovadas; resultados reproduzíveis registram gargalos, inclusive possível custo do escritor global."]
+          "id": "R04-05", "title": "Initial shard measurements", "area": "testing", "depends_on": ["R04-04"],
+          "objective": "Record partitioning costs and benefits with a reproducible workload, without an invented target for outperforming Redis.",
+          "deliverables": ["sharding runner and exploratory benchmark with configuration, hardware, seeds, and raw results.", "Scenarios with different shard counts, hot keys, pipelines, and AOF enabled/disabled."],
+          "tests": ["Check data invariants under load and measure throughput, latency, and memory without mixing platforms/configurations."],
+          "acceptance": ["Distribution and correctness verified; reproducible results record bottlenecks, including potential global writer costs."]
         }
       ],
-      "gate": {"id":"R04-GATE","title":"Validar marco interno 0.4.0","acceptance":["Mesma distribuição em Linux e Windows; rejeição entre shards comprovada antes de qualquer mutação.","AOF e migração preservam recuperação; gate sharding passa e medições iniciais estão registradas como evidência local.","Conferir os critérios técnicos e registrar evidências locais; encerrar este marco interno sem candidata, tag ou release publicada. Artefatos usados em migração ficam congelados por SHA e hashes."]}
+      "gate": {"id":"R04-GATE","title":"Validate internal milestone 0.4.0","acceptance":["Same distribution on Linux and Windows; cross-shard rejection verified before any mutation.","AOF and migration preserve recovery; the sharding gate passes and initial measurements are recorded as local evidence.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
     },
     {
-      "id": "R05", "version": "0.5.0", "title": "Coleções básicas", "publication": false,
-      "scope": ["Adicionar hashes, listas e sets tipados com o subconjunto de comandos registrado em contracts.commands_added.", "LPOP e RPOP inicialmente sem count; preservar TTL, quota, AOF e roteamento."],
+      "id": "R05", "version": "0.5.0", "title": "Basic collections", "publication": false,
+      "scope": ["Add typed hashes, lists, and sets with the command subset recorded in contracts.commands_added.", "LPOP and RPOP initially omit count; preserve TTL, quota, AOF, and routing."],
       "required_gates": ["native","compatibility","tcp_smoke","types"],
       "tasks": [
         {
-          "id": "R05-01", "title": "Valores tipados", "area": "storage", "depends_on": ["R02-04"],
-          "objective": "Evoluir entradas do armazenamento para tipos explícitos e erro WRONGTYPE uniforme.",
-          "deliverables": ["Representação de strings e coleções com metadados compartilhados de expiração e memória.", "Adaptação dos comandos existentes à entrada tipada; a integração AOF e a leitura de dados anteriores são concluídas em R05-05."],
-          "tests": ["Strings existentes, substituição de tipo por SET, WRONGTYPE sem mutação e replay do formato anterior."],
-          "acceptance": ["Base tipada compilável sem anunciar comandos futuros; comportamento de strings continua verificado."]
+          "id": "R05-01", "title": "Typed values", "area": "storage", "depends_on": ["R02-04"],
+          "objective": "Evolve storage entries to explicit types and a uniform WRONGTYPE error.",
+          "deliverables": ["Representation of strings and collections with shared expiration and memory metadata.", "Adapt existing commands to typed entries; AOF integration and reading of earlier data are completed in R05-05."],
+          "tests": ["Existing strings, type replacement by SET, WRONGTYPE without mutation, and replay of the previous format."],
+          "acceptance": ["Buildable typed foundation without claiming future commands; string behavior remains verified."]
         },
         {
           "id": "R05-02", "title": "Hashes", "area": "commands", "depends_on": ["R05-01"],
-          "objective": "Implementar HSET, HGET, HDEL, HEXISTS, HLEN e HGETALL sobre campos e valores binários.",
-          "deliverables": ["Parsing e execução dos seis comandos, contagem de campos criados/removidos e eliminação de hash vazio.", "Respostas e atualização de metadados com validação de aridade e tipo antes da mutação."],
-          "tests": ["Campos repetidos, vazios, ausentes e binários; WRONGTYPE e HSET multcampo.", "Diferenciais normalizam pares de HGETALL sem descartar associação campo/valor."],
-          "acceptance": ["Seis comandos de hash testados e documentados com respostas, limites e semântica de contagem."]
+          "objective": "Implement HSET, HGET, HDEL, HEXISTS, HLEN, and HGETALL on binary fields and values.",
+          "deliverables": ["Parsing and execution of all six commands, counts of created/removed fields, and deletion of empty hashes.", "Responses and metadata updates with arity and type validation before mutation."],
+          "tests": ["Repeated, empty, missing, and binary fields; WRONGTYPE and multi-field HSET.", "Differential tests normalize HGETALL pairs without discarding field/value associations."],
+          "acceptance": ["Six hash commands tested and documented with responses, limits, and counting semantics."]
         },
         {
-          "id": "R05-03", "title": "Listas", "area": "commands", "depends_on": ["R05-01"],
-          "objective": "Implementar LPUSH, RPUSH, LPOP, RPOP, LLEN e LRANGE mantendo ordem binária dos elementos.",
-          "deliverables": ["Pops sem count, remoção de lista vazia e normalização de índices/ranges negativos.", "Integração com valores tipados e limites de resposta para LRANGE."],
-          "tests": ["Ordem de múltiplos pushes, lista ausente/vazia, índices negativos/extremos e aridade extra de pop.", "Diferenciais preservam ordem exata das respostas e verificam WRONGTYPE."],
-          "acceptance": ["Seis comandos de lista têm casos diferenciais e nativos; limites evitam resposta parcial ou mutação indevida."]
+          "id": "R05-03", "title": "Lists", "area": "commands", "depends_on": ["R05-01"],
+          "objective": "Implement LPUSH, RPUSH, LPOP, RPOP, LLEN, and LRANGE while preserving the order of binary elements.",
+          "deliverables": ["Pops without count, deletion of empty lists, and normalization of negative indices/ranges.", "Integration with typed values and LRANGE response limits."],
+          "tests": ["Ordering of multiple pushes, missing/empty lists, negative/extreme indices, and extra pop arguments.", "Differential tests preserve exact response ordering and check WRONGTYPE."],
+          "acceptance": ["Six list commands have differential and native cases; limits prevent partial responses or unintended mutation."]
         },
         {
           "id": "R05-04", "title": "Sets", "area": "commands", "depends_on": ["R05-01"],
-          "objective": "Implementar SADD, SREM, SISMEMBER, SCARD e SMEMBERS com unicidade por bytes.",
-          "deliverables": ["Operações de conjunto, contagem apenas de alterações reais e remoção de set vazio.", "Comparação diferencial por conteúdo normalizado para SMEMBERS, sem prometer ordem de iteração."],
-          "tests": ["Duplicatas, dados binários, remoções repetidas, chaves ausentes, cardinalidade e WRONGTYPE."],
-          "acceptance": ["Cinco comandos de set demonstram unicidade e semântica de contagem compatíveis no subconjunto."]
+          "objective": "Implement SADD, SREM, SISMEMBER, SCARD, and SMEMBERS with byte-based uniqueness.",
+          "deliverables": ["Set operations, counting only actual changes, and deletion of empty sets.", "Differential comparison by normalized content for SMEMBERS, without promising iteration order."],
+          "tests": ["Duplicates, binary data, repeated removals, missing keys, cardinality, and WRONGTYPE."],
+          "acceptance": ["Five set commands demonstrate compatible uniqueness and counting semantics within the subset."]
         },
         {
-          "id": "R05-05", "title": "Integração de coleções com TTL, quota e AOF", "area": "persistence", "depends_on": ["R05-02","R05-03","R05-04","R03-04","R04-04"],
-          "objective": "Comprovar que todas as coleções respeitam expiração, memória e durabilidade nas operações simples e em lote.",
-          "deliverables": ["Contabilidade de crescimento dos novos tipos, mutações resolvidas persistíveis e replay/compactação de coleções.", "Runner types e matriz de comandos por tipo com evidências e limites."],
-          "tests": ["Quota recusando lote sem efeito parcial, expiração após mutações, crash, recuperação e migração da 0.4.", "WRONGTYPE em cada família e equivalência do estado após compactação."],
-          "acceptance": ["Todos os tipos recuperam os mesmos dados e TTL; erros de tipo e quota preservam estado."]
+          "id": "R05-05", "title": "Collection integration with TTL, quota, and AOF", "area": "persistence", "depends_on": ["R05-02","R05-03","R05-04","R03-04","R04-04"],
+          "objective": "Verify that all collections respect expiration, memory, and durability in single and batch operations.",
+          "deliverables": ["Growth accounting for new types, persistable resolved mutations, and collection replay/compaction.", "types runner and per-type command matrix with evidence and limits."],
+          "tests": ["Quota rejecting a batch without partial effects, expiration after mutations, crashes, recovery, and migration from 0.4.", "WRONGTYPE in each family and state equivalence after compaction."],
+          "acceptance": ["All types recover the same data and TTL; type and quota errors preserve state."]
         }
       ],
-      "gate": {"id":"R05-GATE","title":"Validar marco interno 0.5.0","acceptance":["Hashes, listas e sets têm semântica, persistência e WRONGTYPE verificados por família.","Gate types e verificações locais aprovados, incluindo migração AOF e contabilidade de memória.","Conferir os critérios técnicos e registrar evidências locais; encerrar este marco interno sem candidata, tag ou release publicada. Artefatos usados em migração ficam congelados por SHA e hashes."]}
+      "gate": {"id":"R05-GATE","title":"Validate internal milestone 0.5.0","acceptance":["Hashes, lists, and sets have semantics, persistence, and WRONGTYPE verified per family.","types gate and local checks passed, including AOF migration and memory accounting.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
     },
     {
       "id": "R06", "version": "0.6.0", "title": "Sorted sets", "publication": false,
-      "scope": ["Adicionar ZADD básico, ZREM, ZCARD, ZSCORE e ZRANGE start stop [WITHSCORES].", "Ordenar por score e desempatar por bytes do membro; manter persistência e limites."],
+      "scope": ["Add basic ZADD, ZREM, ZCARD, ZSCORE, and ZRANGE start stop [WITHSCORES].", "Order by score and break ties by member bytes; retain persistence and limits."],
       "required_gates": ["native","compatibility","tcp_smoke","sorted_sets"],
       "tasks": [
         {
-          "id": "R06-01", "title": "Armazenamento ordenado", "area": "storage", "depends_on": ["R05-01"],
-          "objective": "Representar sorted sets com busca por membro e ordenação coerente por score e bytes.",
-          "deliverables": ["Estrutura com atualização e remoção consistentes entre índices; regras explícitas para scores e desempates.", "Integração com entrada tipada, contabilidade e metadados de expiração."],
-          "tests": ["Scores repetidos, atualização de score, bytes não UTF-8, remoções e invariantes dos índices sob operações geradas."],
-          "acceptance": ["Membro aparece uma vez e ambos os índices concordam; desempate não depende de locale ou plataforma."]
+          "id": "R06-01", "title": "Ordered storage", "area": "storage", "depends_on": ["R05-01"],
+          "objective": "Represent sorted sets with member lookup and consistent ordering by score and bytes.",
+          "deliverables": ["Structure with consistent updates and deletions across indexes; explicit rules for scores and tie-breaking.", "Integration with typed entries, accounting, and expiration metadata."],
+          "tests": ["Repeated scores, score updates, non-UTF-8 bytes, removals, and index invariants under generated operations."],
+          "acceptance": ["A member appears once and both indexes agree; tie-breaking does not depend on locale or platform."]
         },
         {
-          "id": "R06-02", "title": "Comandos básicos de sorted sets", "area": "commands", "depends_on": ["R06-01"],
-          "objective": "Expor ZADD básico, ZREM, ZCARD, ZSCORE e ZRANGE start stop [WITHSCORES] no RESP2.",
-          "deliverables": ["Parsing de scores e ranges com validação de aridade e rejeição explícita de opções fora do subconjunto.", "Formatação de scores e respostas ordenadas compatíveis com a referência registrada."],
-          "tests": ["NaN/scores inválidos, infinitos conforme referência, índices negativos e extremos, desempate binário e WITHSCORES.", "Casos diferenciais de update, cardinalidade, ausentes, duplicatas e WRONGTYPE."],
-          "acceptance": ["Cinco comandos verificados; rejeições não deixam atualização parcial dos índices."]
+          "id": "R06-02", "title": "Basic sorted set commands", "area": "commands", "depends_on": ["R06-01"],
+          "objective": "Expose basic ZADD, ZREM, ZCARD, ZSCORE, and ZRANGE start stop [WITHSCORES] over RESP2.",
+          "deliverables": ["Score and range parsing with arity validation and explicit rejection of options outside the subset.", "Score formatting and ordered responses compatible with the recorded reference."],
+          "tests": ["NaN/invalid scores, infinities according to the reference, negative and extreme indices, binary tie-breaking, and WITHSCORES.", "Differential cases for updates, cardinality, missing values, duplicates, and WRONGTYPE."],
+          "acceptance": ["Five commands verified; rejections do not leave partial index updates."]
         },
         {
-          "id": "R06-03", "title": "Integração de sorted sets com persistência e limites", "area": "persistence", "depends_on": ["R06-02","R05-05"],
-          "objective": "Preservar scores, membros e ordem ao aplicar quota, TTL, replay e compactação.",
-          "deliverables": ["Registro AOF e recuperação de sorted sets, migração da baseline interna R05 identificada por SHA e hashes e runner sorted_sets.", "Matriz de limites de membros/resposta/memória e atualização das notas de compatibilidade."],
-          "tests": ["Crash durante atualização, compactação, quota rejeitando crescimento e TTL; comparar ZRANGE completo antes/depois do recovery."],
-          "acceptance": ["Recuperação mantém ordenação e scores; índices e memória permanecem consistentes após falhas e rejeições."]
+          "id": "R06-03", "title": "Sorted set integration with persistence and limits", "area": "persistence", "depends_on": ["R06-02","R05-05"],
+          "objective": "Preserve scores, members, and ordering when applying quota, TTL, replay, and compaction.",
+          "deliverables": ["AOF logging and recovery of sorted sets, migration from the internal R05 baseline identified by SHA and hashes, and a sorted_sets runner.", "Member/response/memory limit matrix and updated compatibility notes."],
+          "tests": ["Crash during updates, compaction, quota rejecting growth, and TTL; compare full ZRANGE before/after recovery."],
+          "acceptance": ["Recovery retains ordering and scores; indexes and memory remain consistent after failures and rejections."]
         }
       ],
-      "gate": {"id":"R06-GATE","title":"Validar marco interno 0.6.0","acceptance":["Scores inválidos tratados, desempate binário e índices negativos verificados.","Gate sorted_sets e verificações locais aprovados; recovery preserva scores e ordenação.","Conferir os critérios técnicos e registrar evidências locais; encerrar este marco interno sem candidata, tag ou release publicada. Artefatos usados em migração ficam congelados por SHA e hashes."]}
+      "gate": {"id":"R06-GATE","title":"Validate internal milestone 0.6.0","acceptance":["Invalid scores handled, binary tie-breaking and negative indices verified.","sorted_sets gate and local checks passed; recovery preserves scores and ordering.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
     },
     {
-      "id": "R07", "version": "0.7.0", "title": "Transações", "publication": false,
-      "scope": ["Adicionar MULTI, EXEC, DISCARD, WATCH e UNWATCH limitados a um shard.", "Separar erros de enfileiramento de erros individuais de execução sem rollback; persistir o lote atomicamente."],
+      "id": "R07", "version": "0.7.0", "title": "Transactions", "publication": false,
+      "scope": ["Add MULTI, EXEC, DISCARD, WATCH, and UNWATCH restricted to one shard.", "Separate queueing errors from individual execution errors without rollback; persist the batch atomically."],
       "required_gates": ["native","compatibility","tcp_smoke","transactions"],
       "tasks": [
         {
-          "id": "R07-01", "title": "Estado transacional por conexão", "area": "network", "depends_on": ["R04-03","R03-02"],
-          "objective": "Adicionar MULTI, EXEC e DISCARD como estado isolado da conexão, com fila transacional limitada.",
-          "deliverables": ["Estado de transação ativa, comandos enfileirados e erro de enfileiramento; limites de bytes e comandos.", "Parsing e respostas QUEUED/erros, cleanup em desconexão e rejeição de MULTI aninhado."],
-          "tests": ["Conexões independentes, EXEC/DISCARD sem MULTI, erro antes do EXEC, limites e desconexão com fila pendente."],
-          "acceptance": ["Comando enfileirado não altera banco antes de EXEC; estado é liberado ao descartar ou desconectar."]
+          "id": "R07-01", "title": "Per-connection transaction state", "area": "network", "depends_on": ["R04-03","R03-02"],
+          "objective": "Add MULTI, EXEC, and DISCARD as isolated connection state, with a bounded transaction queue.",
+          "deliverables": ["Active transaction state, queued commands, and queueing error; byte and command limits.", "Parsing and QUEUED/error responses, cleanup on disconnection, and rejection of nested MULTI."],
+          "tests": ["Independent connections, EXEC/DISCARD without MULTI, errors before EXEC, limits, and disconnection with a pending queue."],
+          "acceptance": ["Queued commands do not change the database before EXEC; state is released on discard or disconnection."]
         },
         {
-          "id": "R07-02", "title": "Execução transacional em lote", "area": "storage", "depends_on": ["R07-01"],
-          "objective": "Executar o lote inteiro em um worker, sem intercalar comandos externos e com validação prévia do shard.",
-          "deliverables": ["Envelope de lote e respostas por comando; regra documentada para transação sem chaves.", "Rejeitar cruzamento de shards antes de efeitos; erro individual de execução aparece na resposta e não causa rollback dos outros comandos."],
-          "tests": ["Outro cliente não observa estado intermediário; transação multishard rejeitada sem efeitos.", "Diferenciais com erro de aridade enfileirado, WRONGTYPE durante EXEC e comandos válidos antes/depois do erro."],
-          "acceptance": ["Atomicidade de execução no shard e distinção entre classes de erro comprovadas; sem promessa de rollback individual."]
+          "id": "R07-02", "title": "Batch transaction execution", "area": "storage", "depends_on": ["R07-01"],
+          "objective": "Execute the entire batch in one worker, without interleaving external commands and with prior shard validation.",
+          "deliverables": ["Batch envelope and per-command responses; documented rule for transactions without keys.", "Reject cross-shard access before effects; individual execution errors appear in the response and do not roll back other commands."],
+          "tests": ["Other clients cannot observe intermediate state; multi-shard transactions are rejected without effects.", "Differential tests with queued arity errors, WRONGTYPE during EXEC, and valid commands before/after the error."],
+          "acceptance": ["Atomic execution within the shard and distinction between error classes verified; no promise of individual rollback."]
         },
         {
-          "id": "R07-03", "title": "WATCH e UNWATCH", "area": "storage", "depends_on": ["R07-02","R02-03"],
-          "objective": "Implementar controle otimista com versões de chaves observadas e invalidação por mutação ou expiração.",
-          "deliverables": ["Registro WATCH limitado por conexão e limpeza em UNWATCH, EXEC, DISCARD e desconexão.", "Validação das observações no mesmo worker que executa o lote, cobrindo chaves ausentes e expiração."],
-          "tests": ["Conflito entre clientes, criação/remoção da mesma chave, expiração ativa/passiva, UNWATCH e limpeza de conexões."],
-          "acceptance": ["Conflito e expiração invalidam EXEC antes de qualquer efeito; versões antigas não permitem confirmar transação obsoleta."]
+          "id": "R07-03", "title": "WATCH and UNWATCH", "area": "storage", "depends_on": ["R07-02","R02-03"],
+          "objective": "Implement optimistic concurrency control with watched key versions and invalidation by mutation or expiration.",
+          "deliverables": ["Per-connection bounded WATCH registry and cleanup on UNWATCH, EXEC, DISCARD, and disconnection.", "Validate watches in the same worker that executes the batch, covering missing keys and expiration."],
+          "tests": ["Conflicts between clients, creation/removal of the same key, active/passive expiration, UNWATCH, and connection cleanup."],
+          "acceptance": ["Conflicts and expiration invalidate EXEC before any effect; old versions do not allow a stale transaction to commit."]
         },
         {
-          "id": "R07-04", "title": "Persistência atômica do lote", "area": "persistence", "depends_on": ["R07-03","R04-04"],
-          "objective": "Garantir que AOF aplica todas ou nenhuma das mutações resolvidas de um EXEC confirmado, incluindo respostas com erros individuais.",
-          "deliverables": ["Framing/checksum de lote durável, replay atômico e compactação compatível com transações.", "Runner transactions, atualização de migration e documentação da fronteira de durabilidade."],
-          "tests": ["Truncamento em cada fronteira do lote, crash durante append/fsync/resposta e replay com erro individual previamente resolvido.", "WATCH abortado e EXEC descartado não produzem lote de mutações."],
-          "acceptance": ["Replay nunca aplica meia transação; ordem das mutações bem-sucedidas é preservada conforme a política de durabilidade."]
+          "id": "R07-04", "title": "Atomic batch persistence", "area": "persistence", "depends_on": ["R07-03","R04-04"],
+          "objective": "Ensure AOF applies all or none of the resolved mutations from an acknowledged EXEC, including responses with individual errors.",
+          "deliverables": ["Durable batch framing/checksum, atomic replay, and transaction-compatible compaction.", "transactions runner, migration updates, and durability boundary documentation."],
+          "tests": ["Truncation at every batch boundary, crash during append/fsync/response, and replay with a previously resolved individual error.", "Aborted WATCH and discarded EXEC do not produce mutation batches."],
+          "acceptance": ["Replay never applies a partial transaction; successful mutation order is preserved according to the durability policy."]
         }
       ],
-      "gate": {"id":"R07-GATE","title":"Validar marco interno 0.7.0","acceptance":["Transações de um shard, conflitos e expiração de WATCH verificados; erros seguem o subconjunto Redis declarado.","Gate transactions e verificações locais aprovados; replay não aplica meia transação.","Conferir os critérios técnicos e registrar evidências locais; encerrar este marco interno sem candidata, tag ou release publicada. Artefatos usados em migração ficam congelados por SHA e hashes."]}
+      "gate": {"id":"R07-GATE","title":"Validate internal milestone 0.7.0","acceptance":["Single-shard transactions, conflicts, and WATCH expiration verified; errors follow the declared Redis subset.","transactions gate and local checks passed; replay does not apply partial transactions.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
     },
     {
       "id": "R08", "version": "0.8.0", "title": "Pub/Sub", "publication": false,
-      "scope": ["Adicionar SUBSCRIBE, UNSUBSCRIBE, PUBLISH e PING no modo assinante RESP2.", "Inscrições e mensagens são efêmeras; filas limitadas e clientes lentos não bloqueiam o banco."],
+      "scope": ["Add SUBSCRIBE, UNSUBSCRIBE, PUBLISH, and PING in RESP2 subscriber mode.", "Subscriptions and messages are ephemeral; bounded queues and slow clients do not block the database."],
       "required_gates": ["native","compatibility","tcp_smoke","pubsub"],
       "tasks": [
         {
-          "id": "R08-01", "title": "Registro de assinaturas", "area": "network", "depends_on": ["R01-04"],
-          "objective": "Criar registro efêmero de canais binários e assinantes com ownership e limites explícitos.",
-          "deliverables": ["Inscrição/desinscrição idempotentes, limite de canais por conexão e remoção no encerramento.", "Separar registro Pub/Sub de dados persistidos e de filas de comandos dos shards."],
-          "tests": ["Canais binários/vazios, inscrição repetida, múltiplos assinantes, limite exato/excedido e liberação após desconexão."],
-          "acceptance": ["Contagem de inscrições consistente e memória liberada; inscrições não reaparecem via AOF."]
+          "id": "R08-01", "title": "Subscription registry", "area": "network", "depends_on": ["R01-04"],
+          "objective": "Create an ephemeral registry of binary channels and subscribers with explicit ownership and limits.",
+          "deliverables": ["Idempotent subscription/unsubscription, per-connection channel limit, and removal on shutdown.", "Separate the Pub/Sub registry from persisted data and shard command queues."],
+          "tests": ["Binary/empty channels, repeated subscriptions, multiple subscribers, exact/exceeded limits, and release after disconnection."],
+          "acceptance": ["Consistent subscription counts and released memory; subscriptions do not reappear through AOF."]
         },
         {
-          "id": "R08-02", "title": "Publicação de mensagens", "area": "commands", "depends_on": ["R08-01"],
-          "objective": "Implementar PUBLISH entregando mensagens binárias aos assinantes ativos e contando destinatários conforme o contrato.",
-          "deliverables": ["Distribuição por filas limitadas, resposta ao publicador e framing das notificações RESP2.", "Documentar entrega efêmera sem replay e ordem de mensagens por conexão."],
-          "tests": ["Zero/um/vários assinantes, payload binário e vazio, mensagens sucessivas e distribuição sem duplicatas."],
-          "acceptance": ["Clientes recebem bytes e ordem esperados; PUBLISH não grava mensagens no dataset/AOF."]
+          "id": "R08-02", "title": "Message publication", "area": "commands", "depends_on": ["R08-01"],
+          "objective": "Implement PUBLISH to deliver binary messages to active subscribers and count recipients according to the contract.",
+          "deliverables": ["Distribution through bounded queues, publisher response, and RESP2 notification framing.", "Document ephemeral delivery without replay and per-connection message ordering."],
+          "tests": ["Zero/one/multiple subscribers, binary and empty payloads, successive messages, and distribution without duplicates."],
+          "acceptance": ["Clients receive the expected bytes and ordering; PUBLISH does not write messages to the dataset/AOF."]
         },
         {
-          "id": "R08-03", "title": "Modo assinante", "area": "protocol", "depends_on": ["R08-02"],
-          "objective": "Integrar SUBSCRIBE, UNSUBSCRIBE e PING às restrições e respostas do modo assinante RESP2.",
-          "deliverables": ["Transição entre modo normal e assinante, confirmações por canal e saída do modo após última inscrição.", "Matriz explícita de comandos permitidos e interação com transações."],
-          "tests": ["UNSUBSCRIBE sem argumentos, canal desconhecido, PING com/sem mensagem e comando não permitido no modo assinante.", "Diferenciais das confirmações, contagens e mensagens contra Redis 8.10.1."],
-          "acceptance": ["Respostas RESP2 e transições verificadas; nenhuma mistura de framing de comando e notificação."]
+          "id": "R08-03", "title": "Subscriber mode", "area": "protocol", "depends_on": ["R08-02"],
+          "objective": "Integrate SUBSCRIBE, UNSUBSCRIBE, and PING with RESP2 subscriber mode restrictions and responses.",
+          "deliverables": ["Transitions between normal and subscriber mode, per-channel acknowledgments, and mode exit after the last subscription.", "Explicit matrix of allowed commands and transaction interactions."],
+          "tests": ["UNSUBSCRIBE without arguments, unknown channels, PING with/without a message, and commands disallowed in subscriber mode.", "Differential tests of acknowledgments, counts, and messages against Redis 8.10.1."],
+          "acceptance": ["RESP2 responses and transitions verified; no mixing of command and notification framing."]
         },
         {
-          "id": "R08-04", "title": "Controle de clientes lentos", "area": "network", "depends_on": ["R08-03"],
-          "objective": "Garantir que assinantes sem leitura não bloqueiam publicadores, armazenamento ou outros assinantes.",
-          "deliverables": ["Política documentada de desconexão por fila cheia/timeout, limites por conexão e cleanup centralizado.", "Runner pubsub com teste de carga limitada e recursos após reconexões."],
-          "tests": ["Assinante lento com buffer pequeno, assinante rápido paralelo, publicação concorrente, timeout e shutdown."],
-          "acceptance": ["Banco permanece responsivo, filas nunca crescem sem limite e desconexão remove todas as inscrições."]
+          "id": "R08-04", "title": "Slow client handling", "area": "network", "depends_on": ["R08-03"],
+          "objective": "Ensure subscribers that do not read cannot block publishers, storage, or other subscribers.",
+          "deliverables": ["Documented full-queue/timeout disconnection policy, per-connection limits, and centralized cleanup.", "pubsub runner with bounded load testing and resource checks after reconnections."],
+          "tests": ["Slow subscriber with a small buffer, concurrent fast subscriber, concurrent publication, timeout, and shutdown."],
+          "acceptance": ["The database remains responsive, queues never grow without bounds, and disconnection removes all subscriptions."]
         }
       ],
-      "gate": {"id":"R08-GATE","title":"Validar marco interno 0.8.0","acceptance":["Assinantes lentos não bloqueiam banco ou assinantes saudáveis; filas limitadas e cleanup comprovados.","Gate pubsub e verificações locais aprovados, incluindo comportamento de PING no modo assinante.","Conferir os critérios técnicos e registrar evidências locais; encerrar este marco interno sem candidata, tag ou release publicada. Artefatos usados em migração ficam congelados por SHA e hashes."]}
+      "gate": {"id":"R08-GATE","title":"Validate internal milestone 0.8.0","acceptance":["Slow subscribers do not block the database or healthy subscribers; bounded queues and cleanup verified.","pubsub gate and local checks passed, including PING behavior in subscriber mode.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
     },
     {
-      "id": "R09", "version": "0.9.0", "title": "Replicação", "publication": false,
-      "scope": ["Replicação assíncrona Sider→Sider da mesma versão e configuração de shards.", "Sincronização completa e incremental, reconexão, réplicas somente leitura e promoção manual; sem failover automático."],
+      "id": "R09", "version": "0.9.0", "title": "Replication", "publication": false,
+      "scope": ["Asynchronous Sider→Sider replication with the same version and shard configuration.", "Full and incremental synchronization, reconnection, read-only replicas, and manual promotion; no automatic failover."],
       "required_gates": ["native","compatibility","tcp_smoke","replication"],
       "tasks": [
         {
-          "id": "R09-01", "title": "Protocolo interno versionado", "area": "replication", "depends_on": ["R03-04","R04-04","R07-04"],
-          "objective": "Definir transporte de replicação interno com identidade, versão, sequência e limites de recursos.",
-          "deliverables": ["Handshake validando versão Sider, formato de replicação e configuração de shards.", "Mensagens versionadas e limitadas de snapshot, mutação resolvida e lote transacional; réplica rejeita escritas de clientes."],
-          "tests": ["Versão/configuração incompatíveis, mensagem parcial/malformada, overflow, conexão perdida e tentativa de escrita na réplica."],
-          "acceptance": ["Incompatibilidade é rejeitada antes de aplicar estado; protocolo não anuncia compatibilidade com replicação Redis."]
+          "id": "R09-01", "title": "Versioned internal protocol", "area": "replication", "depends_on": ["R03-04","R04-04","R07-04"],
+          "objective": "Define internal replication transport with identity, version, sequence, and resource limits.",
+          "deliverables": ["Handshake validating the Sider version, replication format, and shard configuration.", "Versioned, bounded snapshot, resolved mutation, and transaction batch messages; replica rejects client writes."],
+          "tests": ["Incompatible version/configuration, partial/malformed messages, overflow, lost connection, and attempted writes on the replica."],
+          "acceptance": ["Incompatibility is rejected before applying state; the protocol does not claim compatibility with Redis replication."]
         },
         {
-          "id": "R09-02", "title": "Sincronização completa", "area": "replication", "depends_on": ["R09-01","R05-05","R06-03"],
-          "objective": "Transferir snapshot consistente entre shards com ponto de sequência que permita acompanhar mutações posteriores.",
-          "deliverables": ["Captura coordenada do estado, transferência limitada e instalação que só expõe snapshot completo.", "Preservar todos os tipos, deadlines absolutos e lotes; tratar arquivos temporários em falha/reinício."],
-          "tests": ["Escritas e expirações durante snapshot, interrupção no meio da transferência e réplica vazia/com estado anterior."],
-          "acceptance": ["Réplica nunca expõe mistura parcial de snapshots; dados de todos os shards correspondem ao ponto consistente declarado."]
+          "id": "R09-02", "title": "Full synchronization", "area": "replication", "depends_on": ["R09-01","R05-05","R06-03"],
+          "objective": "Transfer a cross-shard consistent snapshot with a sequence position that allows subsequent mutations to be followed.",
+          "deliverables": ["Coordinated state capture, bounded transfer, and installation that exposes only complete snapshots.", "Preserve all types, absolute deadlines, and batches; handle temporary files on failure/restart."],
+          "tests": ["Writes and expirations during snapshots, interruptions mid-transfer, and empty replicas/replicas with previous state."],
+          "acceptance": ["Replica never exposes a partial mixture of snapshots; data from every shard corresponds to the declared consistent point."]
         },
         {
-          "id": "R09-03", "title": "Acompanhamento incremental", "area": "replication", "depends_on": ["R09-02"],
-          "objective": "Aplicar mutações posteriores ao snapshot por sequência contínua com backlog limitado.",
-          "deliverables": ["Histórico limitado de replicação, confirmação de posição e aplicação ordenada de mutações resolvidas.", "Preservar TTL e atomicidade dos lotes; documentar replicação assíncrona e possível perda em promoção."],
-          "tests": ["Duplicatas, lacunas e sequência incorreta, transações com erros individuais, expiração e várias réplicas com velocidades distintas."],
-          "acceptance": ["Estado converge ao primário após alcançar a sequência; nenhuma meia transação fica visível."]
+          "id": "R09-03", "title": "Incremental replication", "area": "replication", "depends_on": ["R09-02"],
+          "objective": "Apply mutations after the snapshot in a continuous sequence with a bounded backlog.",
+          "deliverables": ["Bounded replication history, position acknowledgments, and ordered application of resolved mutations.", "Preserve TTL and batch atomicity; document asynchronous replication and possible loss on promotion."],
+          "tests": ["Duplicates, gaps and incorrect sequences, transactions with individual errors, expiration, and multiple replicas at different speeds."],
+          "acceptance": ["State converges with the primary after catching up to the sequence; no partial transaction becomes visible."]
         },
         {
-          "id": "R09-04", "title": "Reconexão de réplicas", "area": "replication", "depends_on": ["R09-03"],
-          "objective": "Retomar replicação pelo histórico disponível ou solicitar nova sincronização completa com fallback explícito.",
-          "deliverables": ["Retomada autenticada pela identidade/época e posição do fluxo, backoff limitado e cleanup de conexão antiga.", "Histórico insuficiente ou identidade alterada força sincronização completa, sem fingir continuidade."],
-          "tests": ["Desconexão curta/longa, backlog ultrapassado, reinício do primário/réplica e falhas durante ressincronização."],
-          "acceptance": ["Reconexão não duplica nem ignora mutações; falta de histórico sempre produz ressincronização verificável."]
+          "id": "R09-04", "title": "Replica reconnection", "area": "replication", "depends_on": ["R09-03"],
+          "objective": "Resume replication from available history or request a new full synchronization with explicit fallback.",
+          "deliverables": ["Resumption verified by stream identity/epoch and position, bounded backoff, and old connection cleanup.", "Insufficient history or changed identity forces full synchronization, without claiming continuity."],
+          "tests": ["Short/long disconnection, exceeded backlog, primary/replica restart, and failures during resynchronization."],
+          "acceptance": ["Reconnection neither duplicates nor skips mutations; missing history always produces verifiable resynchronization."]
         },
         {
-          "id": "R09-05", "title": "Promoção manual", "area": "operations", "depends_on": ["R09-04"],
-          "objective": "Permitir promover réplica explicitamente e documentar troca de papéis sem failover automático.",
-          "deliverables": ["Operação administrativa de promoção com transição de identidade/época e corte do upstream antigo.", "Procedimento de recuperação e prevenção de reconexão indevida; runner replication registra consistência e atraso."],
-          "tests": ["Promoção sincronizada e atrasada, escrita após promoção, upstream reaparecendo e reinício do novo primário."],
-          "acceptance": ["Promoção é manual e observável; limite de perda assíncrona explícito e réplica permanece somente leitura até a transição."]
+          "id": "R09-05", "title": "Manual promotion", "area": "operations", "depends_on": ["R09-04"],
+          "objective": "Allow explicit replica promotion and document role changes without automatic failover.",
+          "deliverables": ["Administrative promotion operation with identity/epoch transition and disconnection from the old upstream.", "Recovery procedure and prevention of unintended reconnection; the replication runner records consistency and lag."],
+          "tests": ["Promotion of caught-up and lagging replicas, writes after promotion, upstream reappearance, and restart of the new primary."],
+          "acceptance": ["Promotion is manual and observable; asynchronous loss limit is explicit and the replica remains read-only until transition."]
         }
       ],
-      "gate": {"id":"R09-GATE","title":"Validar marco interno 0.9.0","acceptance":["Sincronização consistente entre shards, réplicas somente leitura, TTL e transações preservados.","Gate replication e verificações locais aprovados; backlog insuficiente força sincronização completa e promoção é manual.","Conferir os critérios técnicos e registrar evidências locais; encerrar este marco interno sem candidata, tag ou release publicada. Artefatos usados em migração ficam congelados por SHA e hashes."]}
+      "gate": {"id":"R09-GATE","title":"Validate internal milestone 0.9.0","acceptance":["Consistent synchronization across shards, read-only replicas, TTL and transactions preserved.","replication gate and local checks passed; insufficient backlog forces full synchronization and promotion is manual.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
     },
     {
-      "id": "R10", "version": "0.10.0", "title": "Operação e distribuição", "publication": false,
-      "scope": ["Métricas, diagnóstico e procedimentos reproduzíveis de backup e restauração.", "Distribuir imagem Docker Linux amd64 como arquivo anexado à release privada; comprovar operação e encerramento."],
+      "id": "R10", "version": "0.10.0", "title": "Operations and distribution", "publication": false,
+      "scope": ["Metrics, diagnostics, and reproducible backup and restore procedures.", "Distribute a Linux amd64 Docker image as an archive attached to the private release; verify operation and shutdown."],
       "required_gates": ["native","compatibility","tcp_smoke","docker"],
       "tasks": [
         {
-          "id": "R10-01", "title": "Métricas", "area": "operations", "depends_on": ["R01-04"],
-          "objective": "Expor métricas operacionais verificáveis sem registrar chaves, valores ou canais dos usuários.",
-          "deliverables": ["Contadores/gauges de conexões, comandos, erros e filas; instrumentar dataset, expiração, AOF e atraso da replicação conforme cada subsistema for integrado, com cobertura completa conferida em R10-05.", "Contrato de leitura, unidades e cardinalidade limitada; configuração e documentação da exposição no ambiente controlado."],
-          "tests": ["Carga conhecida produz contagens esperadas, concorrência não perde atualizações e rótulos não crescem por chave/canal."],
-          "acceptance": ["Métricas têm definições e testes; não há dados do usuário em labels nem alegação de RSS a partir da quota lógica."]
+          "id": "R10-01", "title": "Metrics", "area": "operations", "depends_on": ["R01-04"],
+          "objective": "Expose verifiable operational metrics without logging user keys, values, or channels.",
+          "deliverables": ["Counters/gauges for connections, commands, errors, and queues; instrument dataset, expiration, AOF, and replication lag as each subsystem is integrated, with full coverage verified in R10-05.", "Read contract, units, and bounded cardinality; configuration and documentation of exposure in the controlled environment."],
+          "tests": ["Known load produces expected counts, concurrency does not lose updates, and labels do not grow per key/channel."],
+          "acceptance": ["Metrics have definitions and tests; no user data in labels or RSS claims derived from logical quota."]
         },
         {
-          "id": "R10-02", "title": "Diagnóstico operacional", "area": "operations", "depends_on": ["R10-01"],
-          "objective": "Permitir diagnosticar configuração, saturação e falhas de persistência/replicação com informações acionáveis.",
-          "deliverables": ["Saída administrativa de versão e configuração efetiva não sensível; integrar papel de replicação e estado do AOF quando disponíveis, com cobertura completa conferida em R10-05.", "Runbook para fila cheia, disco indisponível, clientes lentos e atraso de réplica com logs de eventos relevantes."],
-          "tests": ["Falhas injetadas geram diagnóstico coerente e código de saída adequado; saídas não expõem payloads dos clientes."],
-          "acceptance": ["Operador identifica estado e causa sem inferir implementação interna; diagnóstico corresponde às métricas."]
+          "id": "R10-02", "title": "Operational diagnostics", "area": "operations", "depends_on": ["R10-01"],
+          "objective": "Enable diagnosis of configuration, saturation, and persistence/replication failures with actionable information.",
+          "deliverables": ["Administrative output of version and nonsensitive effective configuration; integrate replication role and AOF state when available, with full coverage verified in R10-05.", "Runbook for full queues, unavailable disks, slow clients, and replica lag with logs of relevant events."],
+          "tests": ["Injected failures produce consistent diagnostics and appropriate exit codes; output does not expose client payloads."],
+          "acceptance": ["The operator identifies state and cause without inferring internal implementation; diagnostics match metrics."]
         },
         {
-          "id": "R10-03", "title": "Procedimentos de backup e restauração", "area": "documentation", "depends_on": ["R03-04","R04-04","R05-05","R06-03","R07-04"],
-          "objective": "Fornecer um procedimento testado para capturar backup consistente e restaurar uma instância Sider.",
-          "deliverables": ["Guia de backup com ponto consistente, checksums, versão/formato/configuração e preservação de TTL.", "Roteiro automatizado de restauração em diretório e instância isolados, sem sobrescrever dataset em uso."],
-          "tests": ["Backup com tráfego, restauração de tipos/transações/shards e comparação do estado; arquivo corrompido ou configuração incompatível falha explicitamente."],
-          "acceptance": ["Restauração reproduzível a partir do arquivo distribuído, incluindo tempo transcorrido para TTL e limites de durabilidade."]
+          "id": "R10-03", "title": "Backup and restore procedures", "area": "documentation", "depends_on": ["R03-04","R04-04","R05-05","R06-03","R07-04"],
+          "objective": "Provide a tested procedure to capture a consistent backup and restore a Sider instance.",
+          "deliverables": ["Backup guide with a consistent point, checksums, version/format/configuration, and TTL preservation.", "Automated restore procedure in an isolated directory and instance, without overwriting a dataset in use."],
+          "tests": ["Backup under traffic, restore of types/transactions/shards, and state comparison; corrupted archives or incompatible configuration fail explicitly."],
+          "acceptance": ["Reproducible restore from the distributed archive, accounting for elapsed TTL time and durability limits."]
         },
         {
-          "id": "R10-04", "title": "Imagem Docker", "area": "distribution", "depends_on": ["R03-03"],
-          "objective": "Empacotar Sider Linux amd64 em imagem executável e validar sua exportação como arquivo para a publicação privada da 1.0.",
-          "deliverables": ["Dockerfile reproduzível com versão/SHA, usuário não privilegiado, diretório persistente e sinal de parada correto.", "Build, docker save compactado, checksum e inclusão no manifesto de release; runner docker testa imagem exportada após load."],
-          "tests": ["--version, smoke TCP, persistência em volume, reinício, configuração inválida e encerramento do contêiner."],
-          "acceptance": ["Imagem exportada e recarregada executa os testes; distribuição não depende de registry público nem expõe o repositório."]
+          "id": "R10-04", "title": "Docker image", "area": "distribution", "depends_on": ["R03-03"],
+          "objective": "Package Sider Linux amd64 in a runnable image and validate its archive export for the private 1.0 publication.",
+          "deliverables": ["Reproducible Dockerfile with version/SHA, unprivileged user, persistent directory, and correct stop signal.", "Build, compressed docker save, checksum, and release manifest inclusion; the docker runner tests the exported image after load."],
+          "tests": ["--version, TCP smoke, volume persistence, restart, invalid configuration, and container shutdown."],
+          "acceptance": ["Exported and reloaded image runs the tests; distribution neither depends on a public registry nor exposes the repository."]
         },
         {
-          "id": "R10-05", "title": "Ensaios operacionais", "area": "testing", "depends_on": ["R10-01","R10-02","R10-03","R10-04","R01-GATE","R02-GATE","R03-GATE","R04-GATE","R05-GATE","R06-GATE","R07-GATE","R08-GATE","R09-GATE"],
-          "objective": "Validar operação completa com limites e procedimentos documentados usando os artefatos distribuídos.",
-          "deliverables": ["Ensaios de inicialização, saturação, disk failure, backup/restauração, replicação e shutdown em ambientes suportados.", "Relatório com comandos, artefatos, configuração, resultados e limitações do ambiente controlado."],
-          "tests": ["Pacotes extraídos em Linux/Windows e imagem recarregada; testar sinais, drenagem, retomada e métricas durante falhas."],
-          "acceptance": ["Documentação reproduz resultados; métricas, restauração e encerramento verificados nos canais de distribuição."]
+          "id": "R10-05", "title": "Operational tests", "area": "testing", "depends_on": ["R10-01","R10-02","R10-03","R10-04","R01-GATE","R02-GATE","R03-GATE","R04-GATE","R05-GATE","R06-GATE","R07-GATE","R08-GATE","R09-GATE"],
+          "objective": "Validate complete operation with documented limits and procedures using distributed artifacts.",
+          "deliverables": ["Startup, saturation, disk failure, backup/restore, replication, and shutdown tests in supported environments.", "Report with commands, artifacts, configuration, results, and controlled environment limitations."],
+          "tests": ["Packages extracted on Linux/Windows and reloaded image; test signals, draining, resumption, and metrics during failures."],
+          "acceptance": ["Documentation reproduces results; metrics, restore, and shutdown verified across distribution channels."]
         }
       ],
-      "gate": {"id":"R10-GATE","title":"Validar marco interno 0.10.0","acceptance":["Métricas verificadas, restauração reproduzível, encerramento e limites documentados.","Gate docker e verificações locais aprovados; imagem executável exportada acompanha os pacotes e checksums privados.","Conferir os critérios técnicos e registrar evidências locais; encerrar este marco interno sem candidata, tag ou release publicada. Artefatos usados em migração ficam congelados por SHA e hashes."]}
+      "gate": {"id":"R10-GATE","title":"Validate internal milestone 0.10.0","acceptance":["Metrics verified, restore reproducible, shutdown and limits documented.","docker gate and local checks passed; the exported runnable image accompanies the private packages and checksums.","Verify technical criteria and record local evidence; close this internal milestone without a candidate, tag, or published release. Artifacts used in migration remain frozen by SHA and hashes."]}
     },
     {
-      "id": "R11", "version": "1.0.0", "title": "Estabilização", "publication": true,
-      "scope": ["Congelar o subconjunto compatível, comprovar recuperação e migração, executar carga prolongada e benchmarks reproduzíveis.", "Incluir sorted sets, transações e replicação Sider→Sider; documentar garantias sem prometer capacidades fora do escopo."],
+      "id": "R11", "version": "1.0.0", "title": "Stabilization", "publication": true,
+      "scope": ["Freeze the compatible subset, verify recovery and migration, and run sustained load tests and reproducible benchmarks.", "Include sorted sets, transactions, and Sider→Sider replication; document guarantees without promising out-of-scope capabilities."],
       "required_gates": ["native", "compatibility", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions", "pubsub", "replication", "docker", "soak", "benchmarks"],
       "tasks": [
         {
-          "id": "R11-01", "title": "Congelamento do subconjunto", "area": "documentation", "depends_on": ["R10-GATE"],
-          "objective": "Fechar o contrato 1.0 de comandos, protocolo, persistência, operação e replicação com matriz de suporte explícita.",
-          "deliverables": ["Matriz completa com forma de comando, limitação, versão de referência e teste comprobatório.", "Política de compatibilidade após 1.0 e garantias de durabilidade por configuração; lista explícita das funcionalidades posteriores."],
-          "tests": ["Revisar cada alegação contra teste/relatório e identificar lacunas como bloqueantes, sem converter itens planejados em suporte comprovado."],
-          "acceptance": ["Nenhuma capacidade não verificada aparece como suportada; todos os itens do subconjunto 1.0 têm evidência prevista e responsável."]
+          "id": "R11-01", "title": "Subset freeze", "area": "documentation", "depends_on": ["R10-GATE"],
+          "objective": "Finalize the 1.0 contract for commands, protocol, persistence, operations, and replication with an explicit support matrix.",
+          "deliverables": ["Complete matrix with command form, limitation, reference version, and supporting test.", "Post-1.0 compatibility policy and per-configuration durability guarantees; explicit list of later features."],
+          "tests": ["Review each claim against a test/report and identify gaps as blockers, without converting planned items into verified support."],
+          "acceptance": ["No unverified capability appears as supported; every item in the 1.0 subset has planned evidence and an owner."]
         },
         {
-          "id": "R11-02", "title": "Auditoria diferencial", "area": "testing", "depends_on": ["R11-01"],
-          "objective": "Auditar todo o subconjunto Redis com sequências variadas e comparação independente de protocolo e estado.",
-          "deliverables": ["Corpus por família e sequências cruzadas de tipos, TTL, transações e Pub/Sub com seeds reproduzíveis.", "Relatório de divergências intencionais versus defeitos e regressões para todos os achados corrigidos."],
-          "tests": ["Redis/CLI 8.10.1 fixados; normalização apenas de respostas sem ordem garantida, sem mascarar scores, pares ou ordem de listas.", "Aridade, binários, ausência, rejeições, limites e falhas recuperáveis em cada forma suportada."],
-          "acceptance": ["Auditoria passa sem divergência não declarada; matriz relaciona toda forma suportada aos resultados."]
+          "id": "R11-02", "title": "Differential audit", "area": "testing", "depends_on": ["R11-01"],
+          "objective": "Audit the entire Redis subset with varied sequences and independent protocol and state comparison.",
+          "deliverables": ["Per-family corpus and cross-family sequences of types, TTL, transactions, and Pub/Sub with reproducible seeds.", "Report distinguishing intentional differences from defects, with regressions for every corrected finding."],
+          "tests": ["Redis/CLI 8.10.1 pinned; normalize only responses without guaranteed ordering, without masking scores, pairs, or list order.", "Arity, binary data, missing values, rejections, limits, and recoverable failures in every supported form."],
+          "acceptance": ["Audit passes without undeclared differences; the matrix links every supported form to results."]
         },
         {
-          "id": "R11-03", "title": "Testes prolongados", "area": "testing", "depends_on": ["R11-01"],
-          "objective": "Detectar corrupção, vazamentos e problemas de progresso sob carga longa e falhas combinadas.",
-          "deliverables": ["Runner soak com pelo menos 3600 segundos, dataset/seed/configuração registrados e checagem contínua de invariantes.", "Cenários de desconexão, TTL, AOF/compactação, transações, assinantes lentos e replicação com recursos observados."],
-          "tests": ["Uma hora de carga contínua sem falhas não explicadas; coleta de memória, filas, erro e progresso.", "Crash/recovery e regressões de todos os achados em cada candidata."],
-          "acceptance": ["Nenhuma falha conhecida de corrupção ou perda além das garantias declaradas; relatório distingue OOM/configuração e defeito do produto."]
+          "id": "R11-03", "title": "Sustained load tests", "area": "testing", "depends_on": ["R11-01"],
+          "objective": "Detect corruption, leaks, and progress issues under sustained load and combined failures.",
+          "deliverables": ["soak runner lasting at least 3600 seconds, with recorded dataset/seed/configuration and continuous invariant checks.", "Disconnection, TTL, AOF/compaction, transaction, slow subscriber, and replication scenarios with resource monitoring."],
+          "tests": ["One hour of continuous load without unexplained failures; collect memory, queue, error, and progress measurements.", "Crash/recovery and regressions for all findings in each candidate."],
+          "acceptance": ["No known corruption or loss beyond declared guarantees; the report distinguishes OOM/configuration issues from product defects."]
         },
         {
-          "id": "R11-04", "title": "Migração da baseline interna R10", "area": "persistence", "depends_on": ["R10-GATE"],
-          "objective": "Demonstrar atualização da baseline interna R10, congelada por SHA e hashes, para 1.0 preservando dataset e contratos de persistência.",
-          "deliverables": ["Procedimento de backup, parada, atualização e verificação; estratégia de restauração do backup caso necessário.", "Fixtures e executáveis da baseline interna R10 usados no gate migration, com SHA, metadados e hashes."],
-          "tests": ["Criar dados de todos os tipos no executável congelado da baseline interna R10, incluir TTL e transações, atualizar e verificar estado/recovery.", "Configurações de shards suportadas, arquivo danificado, expiração durante parada e recriação de réplica conforme contrato de mesma versão."],
-          "acceptance": ["Migração reproduzível da baseline interna R10 para a 1.0 documentada; nenhuma promessa de replicação entre versões distintas."]
+          "id": "R11-04", "title": "Migration from the internal R10 baseline", "area": "persistence", "depends_on": ["R10-GATE"],
+          "objective": "Demonstrate upgrading the internal R10 baseline, frozen by SHA and hashes, to 1.0 while preserving the dataset and persistence contracts.",
+          "deliverables": ["Backup, shutdown, upgrade, and verification procedure; backup restoration strategy if needed.", "Internal R10 baseline fixtures and executables used in the migration gate, with SHA, metadata, and hashes."],
+          "tests": ["Create data of all types using the frozen internal R10 baseline executable, include TTL and transactions, upgrade, and verify state/recovery.", "Supported shard configurations, damaged archive, expiration during downtime, and replica recreation under the same-version contract."],
+          "acceptance": ["Reproducible migration from the internal R10 baseline to 1.0 documented; no promise of replication between different versions."]
         },
         {
-          "id": "R11-05", "title": "Benchmarks e documentação final", "area": "documentation", "depends_on": ["R11-01"],
-          "objective": "Publicar resultados reproduzíveis e documentação suficiente para instalar, operar e avaliar a Sider 1.0.",
-          "deliverables": ["Runner benchmarks com throughput, p50/p95/p99 e memória, cobrindo pipelines, hot keys e quantidades distintas de shards.", "Resultados brutos, hardware/toolchain/configuração, guias de instalação/operação/recuperação e notas finais de limitações."],
-          "tests": ["Reexecutar comandos documentados usando pacotes extraídos e imagem exportada; conferir métricas e unidades.", "Comparações, quando presentes, usam condições declaradas e não convertem benchmark exploratório em garantia de desempenho."],
-          "acceptance": ["Benchmarks reproduzíveis sem limiar artificial de superar Redis; documentação final corresponde ao artefato e às evidências da 1.0."]
+          "id": "R11-05", "title": "Benchmarks and final documentation", "area": "documentation", "depends_on": ["R11-01"],
+          "objective": "Publish reproducible results and sufficient documentation to install, operate, and evaluate Sider 1.0.",
+          "deliverables": ["benchmarks runner with throughput, p50/p95/p99, and memory, covering pipelines, hot keys, and different shard counts.", "Raw results, hardware/toolchain/configuration, installation/operation/recovery guides, and final limitation notes."],
+          "tests": ["Rerun documented commands using extracted packages and the exported image; verify metrics and units.", "Comparisons, when present, use declared conditions and do not turn an exploratory benchmark into a performance guarantee."],
+          "acceptance": ["Reproducible benchmarks without an artificial threshold for outperforming Redis; final documentation matches the 1.0 artifact and evidence."]
         }
       ],
-      "gate": {"id":"R11-GATE","title":"Validar e publicar a 1.0.0","acceptance":["Sorted sets, transações e replicação incluídos; matriz completa sem falha conhecida de corrupção ou perda além das garantias declaradas.","Todos os gates aprovados, incluindo soak de 3600 segundos, migração da baseline interna R10 identificada por SHA e hashes e benchmarks.","Candidata aprovada no SHA e bundle imutáveis; final promove os mesmos arquivos e o mesmo SHA, sem recompilação. Qualquer mudança no bundle exige outra candidata; encerrar o milestone após conferir a publicação final."]}
+      "gate": {"id":"R11-GATE","title":"Validate and publish 1.0.0","acceptance":["Sorted sets, transactions, and replication included; complete matrix without known corruption or loss beyond declared guarantees.","All gates passed, including a 3600-second soak, migration from the internal R10 baseline identified by SHA and hashes, and benchmarks.","Candidate approved with an immutable SHA and bundle; the final release promotes the same files and SHA without rebuilding. Any bundle change requires another candidate; close the milestone after verifying final publication."]}
     }
   ]
 }

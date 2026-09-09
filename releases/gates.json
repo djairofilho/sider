@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Gates de produto pendentes falham explicitamente até a implementação dos testes. Comandos são arrays argv sem shell e devem falhar se nenhum teste executar.",
+  "description": "Pending product gates fail explicitly until tests are implemented. Commands are argv arrays without a shell and must fail if no test runs.",
   "gates": {
     "compatibility": {"command": ["cargo", "test", "--locked", "--test", "compatibility", "--", "--ignored", "--exact", "release_compatibility_gate", "--nocapture"], "timeout_seconds": 600},
     "crash": {"command": ["cargo", "test", "--locked", "--test", "persistence", "--", "--ignored", "--exact", "release_crash_gate", "--nocapture"], "timeout_seconds": 600},

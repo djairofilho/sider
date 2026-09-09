@@ -1,4 +1,4 @@
-//! Reconciliação do backlog: simulação por padrão, preservando conteúdo humano.
+//! Backlog reconciliation: dry run by default, preserving human content.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -18,7 +18,7 @@ fn text<'a>(record: &'a Value, field: &str) -> Result<&'a str, String> {
     record
         .get(field)
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("Campo textual inválido: {field}"))
+        .ok_or_else(|| format!("Invalid text field: {field}"))
 }
 
 fn array<'a>(record: &'a Value, field: &str) -> Result<&'a [Value], String> {
@@ -26,7 +26,7 @@ fn array<'a>(record: &'a Value, field: &str) -> Result<&'a [Value], String> {
         .get(field)
         .and_then(Value::as_array)
         .map(Vec::as_slice)
-        .ok_or_else(|| format!("Lista inválida: {field}"))
+        .ok_or_else(|| format!("Invalid list: {field}"))
 }
 
 fn strings(record: &Value, field: &str) -> Result<Vec<String>, String> {
@@ -36,7 +36,7 @@ fn strings(record: &Value, field: &str) -> Result<Vec<String>, String> {
             value
                 .as_str()
                 .map(str::to_owned)
-                .ok_or_else(|| format!("Texto inválido em {field}"))
+                .ok_or_else(|| format!("Invalid text in {field}"))
         })
         .collect()
 }
@@ -45,7 +45,7 @@ fn body_text<'a>(record: &'a Value, field: &str) -> Result<&'a str, String> {
     match record.get(field) {
         None | Some(Value::Null) => Ok(""),
         Some(Value::String(value)) => Ok(value),
-        _ => Err(format!("Corpo GitHub inválido: {field}")),
+        _ => Err(format!("Invalid GitHub body: {field}")),
     }
 }
 
@@ -54,13 +54,13 @@ fn number(record: &Value) -> Result<u64, String> {
         .get("number")
         .and_then(Value::as_u64)
         .filter(|number| *number > 0)
-        .ok_or_else(|| "Número de recurso GitHub inválido".into())
+        .ok_or_else(|| "Invalid GitHub resource number".into())
 }
 
 fn state(record: &Value) -> Result<&str, String> {
     match text(record, "state")? {
         value @ ("open" | "closed") => Ok(value),
-        _ => Err("Estado GitHub inválido".into()),
+        _ => Err("Invalid GitHub state".into()),
     }
 }
 
@@ -72,12 +72,12 @@ fn block(body: &str) -> Result<Option<(usize, usize)>, String> {
         || body.matches(END).count() != 1
         || body.matches("sider:managed").count() != 2
     {
-        return Err("Bloco gerenciado ausente, duplicado ou ambíguo".into());
+        return Err("Managed block missing, duplicated, or ambiguous".into());
     }
-    let first = body.find(START).ok_or("Bloco gerenciado ausente")?;
-    let last = body.find(END).ok_or("Bloco gerenciado ausente")?;
+    let first = body.find(START).ok_or("Missing managed block")?;
+    let last = body.find(END).ok_or("Missing managed block")?;
     if first >= last {
-        return Err("Bloco gerenciado fora de ordem".into());
+        return Err("Managed block out of order".into());
     }
     Ok(Some((first, last + END.len())))
 }
@@ -113,23 +113,23 @@ fn marker<'a>(body: &'a str, kind: &str) -> Result<Option<&'a str>, String> {
     }
     let prefix = format!("<!-- {keyword} ");
     if body.matches(&keyword).count() != 1 {
-        return Err(format!("Marcador {kind} ambíguo"));
+        return Err(format!("Ambiguous {kind} marker"));
     }
     let start = body
         .find(&prefix)
-        .ok_or_else(|| format!("Marcador {kind} inválido"))?;
+        .ok_or_else(|| format!("Invalid {kind} marker"))?;
     let rest = &body[start + prefix.len()..];
     let end = rest
         .find(" -->")
-        .ok_or_else(|| format!("Marcador {kind} inválido"))?;
+        .ok_or_else(|| format!("Invalid {kind} marker"))?;
     let id = &rest[..end];
-    let bounds = block(body)?.ok_or("Marcador sem bloco gerenciado")?;
+    let bounds = block(body)?.ok_or("Marker without a managed block")?;
     if !valid_id(id, kind)
         || start < bounds.0 + START.len()
         || start + prefix.len() + end + 4 > bounds.1 - END.len()
     {
         return Err(format!(
-            "Marcador {kind} inválido ou fora do bloco gerenciado"
+            "Invalid {kind} marker or marker outside the managed block"
         ));
     }
     Ok(Some(id))
@@ -139,7 +139,7 @@ fn check_generated(body: &str, kind: &str, id: &str) -> Result<(), String> {
     if marker(body, kind)? != Some(id)
         || marker(body, if kind == "task" { "release" } else { "task" })?.is_some()
     {
-        return Err("Texto do manifesto invade marcadores reservados".into());
+        return Err("Manifest text overlaps reserved markers".into());
     }
     Ok(())
 }
@@ -154,10 +154,10 @@ fn labels(issue: &Value) -> Result<Vec<String>, String> {
                     .as_str()
                     .or_else(|| label.get("name").and_then(Value::as_str))
                     .map(str::to_owned)
-                    .ok_or_else(|| "Label GitHub inválido".into())
+                    .ok_or_else(|| "Invalid GitHub label".into())
             })
             .collect(),
-        _ => Err("Labels GitHub inválidos".into()),
+        _ => Err("Invalid GitHub labels".into()),
     }
 }
 
@@ -175,7 +175,7 @@ struct Item {
 
 fn descriptors(plan: &Value) -> Result<Vec<Item>, String> {
     let releases = array(plan, "releases")?;
-    let first_version = text(releases.first().ok_or("Plano sem releases")?, "version")?;
+    let first_version = text(releases.first().ok_or("Plan has no releases")?, "version")?;
     let mut items = Vec::new();
     for data in array(plan, "bootstrap")? {
         items.push(Item {
@@ -222,7 +222,7 @@ fn descriptors(plan: &Value) -> Result<Vec<Item>, String> {
 
 fn paragraphs(values: &[String]) -> String {
     if values.is_empty() {
-        "- Nenhum.".into()
+        "- None.".into()
     } else {
         values
             .iter()
@@ -249,37 +249,37 @@ fn render(item: &Item, issues: &Index) -> Result<String, String> {
         START.into(),
         format!("<!-- sider:task {} -->", item.id),
         "".into(),
-        "## Objetivo".into(),
+        "## Objective".into(),
         "".into(),
         objective.into(),
         "".into(),
         if item.publication {
-            format!("Versão publicável: `v{}`.", item.version)
+            format!("Publishable version: `v{}`.", item.version)
         } else {
             format!(
-                "Marco interno: `{}`. Não cria candidata, tag ou release.",
+                "Internal milestone: `{}`. Does not create a candidate, tag, or release.",
                 item.version
             )
         },
     ];
     let (deliverables, tests) = match item.kind {
         "bootstrap" => (
-            vec!["Fundação existente registrada pelos commits vinculados.".into()],
-            vec!["CI concluída com sucesso no SHA de um commit vinculado.".into()],
+            vec!["Existing foundation recorded by the linked commits.".into()],
+            vec!["CI completed successfully at the SHA of a linked commit.".into()],
         ),
         "release" => (
             vec![
-                "Validar uma candidata em SHA e bundle imutáveis e promover a final com o mesmo SHA e os mesmos assets, sem recompilar.".into(),
-                "Qualquer mudança no bundle exige outra candidata; conferir todos os marcos internos antes de publicar.".into(),
-                "Até e incluindo a 1.0, verificar e publicar manualmente; CI e publicação automática ficam para depois da 1.0.".into(),
-                "Manter esta issue e o milestone abertos até a publicação final confirmada.".into(),
+                "Validate a candidate with an immutable SHA and bundle, then promote the final release with the same SHA and assets, without rebuilding.".into(),
+                "Any bundle change requires another candidate; verify all internal milestones before publishing.".into(),
+                "Through and including 1.0, verify and publish manually; CI and automatic publication are deferred until after 1.0.".into(),
+                "Keep this issue and milestone open until final publication is confirmed.".into(),
             ],
             strings(&item.data, "required_gates")?,
         ),
         "checkpoint" => (
             vec![
-                "Conferir as tarefas e os critérios técnicos deste marco com evidências locais.".into(),
-                "Encerrar o marco sem candidata, tag ou publicação; baselines de migração permanecem congeladas por SHA e hashes.".into(),
+                "Verify this milestone's tasks and technical criteria using local evidence.".into(),
+                "Close the milestone without a candidate, tag, or publication; migration baselines remain frozen by SHA and hashes.".into(),
             ],
             strings(&item.data, "required_gates")?,
         ),
@@ -290,25 +290,25 @@ fn render(item: &Item, issues: &Index) -> Result<String, String> {
     };
     lines.extend([
         "".into(),
-        "## Entregáveis".into(),
+        "## Deliverables".into(),
         "".into(),
         paragraphs(&deliverables),
         "".into(),
-        "## Testes exigidos".into(),
+        "## Required tests".into(),
         "".into(),
         paragraphs(&tests),
     ]);
     if item.kind == "bootstrap" {
         lines.extend([
             "".into(),
-            "## Evidências do bootstrap".into(),
+            "## Bootstrap evidence".into(),
             "".into(),
             paragraphs(&strings(&item.data, "evidence")?),
         ]);
     }
-    lines.extend(["".into(), "## Dependências".into(), "".into()]);
+    lines.extend(["".into(), "## Dependencies".into(), "".into()]);
     if item.dependencies.is_empty() {
-        lines.push("- Nenhuma.".into());
+        lines.push("- None.".into());
     }
     for dependency in &item.dependencies {
         let issue = issues.get(dependency);
@@ -327,13 +327,13 @@ fn render(item: &Item, issues: &Index) -> Result<String, String> {
         lines.push(format!("- [{checked}] [{dependency}]({url})"));
     }
     let acceptance = if item.kind == "bootstrap" && item.data.get("acceptance").is_none() {
-        vec!["Bootstrap comprovado pelos commits e pela CI vinculada.".into()]
+        vec!["Bootstrap verified by the linked commits and CI.".into()]
     } else {
         strings(&item.data, "acceptance")?
     };
     lines.extend([
         "".into(),
-        "## Critério de conclusão".into(),
+        "## Completion criterion".into(),
         "".into(),
         paragraphs(&acceptance),
         "".into(),
@@ -353,13 +353,13 @@ fn index_issues(raw: &[Value], ids: &BTreeSet<String>) -> Result<Index, String> 
         }
         let number = number(issue)?;
         if !numbers.insert(number) {
-            return Err("Número de issue duplicado".into());
+            return Err("Duplicate issue number".into());
         }
         let body = body_text(issue, "body")?;
         let marked = marker(body, "task")?;
         if marker(body, "release")?.is_some() || (block(body)?.is_some() && marked.is_none()) {
             return Err(format!(
-                "Bloco reservado sem identidade de tarefa na issue #{number}"
+                "Reserved block without task identity in issue #{number}"
             ));
         }
         let title = text(issue, "title")?;
@@ -370,7 +370,7 @@ fn index_issues(raw: &[Value], ids: &BTreeSet<String>) -> Result<Index, String> 
             && marked != Some(title_id)
         {
             return Err(format!(
-                "Issue #{number} usa ID reservado sem marcador correspondente"
+                "Issue #{number} uses a reserved ID without the corresponding marker"
             ));
         }
         if let Some(id) = marked {
@@ -380,7 +380,7 @@ fn index_issues(raw: &[Value], ids: &BTreeSet<String>) -> Result<Index, String> 
                 self::number(milestone)?;
             }
             if issues.insert(id.into(), issue.clone()).is_some() {
-                return Err(format!("Identificador duplicado no GitHub: {id}"));
+                return Err(format!("Duplicate identifier on GitHub: {id}"));
             }
         }
     }
@@ -403,7 +403,7 @@ fn index_milestones(raw: &[Value], releases: &[Value]) -> Result<Index, String> 
     for milestone in raw {
         let title = text(milestone, "title")?;
         if !numbers.insert(number(milestone)?) || milestones.contains_key(title) {
-            return Err(format!("Título ou número de milestone duplicado: {title}"));
+            return Err(format!("Duplicate milestone title or number: {title}"));
         }
         state(milestone)?;
         let description = body_text(milestone, "description")?;
@@ -412,20 +412,20 @@ fn index_milestones(raw: &[Value], releases: &[Value]) -> Result<Index, String> 
             || (block(description)?.is_some() && marked.is_none())
         {
             return Err(format!(
-                "Bloco reservado sem identidade de milestone: {title}"
+                "Reserved block without milestone identity: {title}"
             ));
         }
         if let Some(id) = marked {
             if !ids.insert(id.to_owned()) {
-                return Err(format!("ID de milestone duplicado: {id}"));
+                return Err(format!("Duplicate milestone ID: {id}"));
             }
             if expected.get(id).is_some_and(|version| version != title) {
-                return Err(format!("ID de milestone com versão divergente: {id}"));
+                return Err(format!("Milestone ID with mismatched version: {id}"));
             }
             if expected.values().any(|version| version == title)
                 && expected.get(id).map(String::as_str) != Some(title)
             {
-                return Err(format!("Milestone reservado com ID divergente: {title}"));
+                return Err(format!("Reserved milestone with mismatched ID: {title}"));
             }
         }
         milestones.insert(title.into(), milestone.clone());
@@ -440,7 +440,7 @@ fn prove_bootstrap(item: &Item, client: &mut impl GitHub, cache: &mut Index) -> 
     for evidence in strings(&item.data, "evidence")? {
         let suffix = evidence
             .strip_prefix(&prefix)
-            .ok_or("Evidência bootstrap fora do repositório")?;
+            .ok_or("Bootstrap evidence outside the repository")?;
         let (path, commit) = if let Some(sha) = suffix.strip_prefix("commit/").filter(|sha| {
             (7..=40).contains(&sha.len())
                 && sha
@@ -455,7 +455,7 @@ fn prove_bootstrap(item: &Item, client: &mut impl GitHub, cache: &mut Index) -> 
         }) {
             (repo_path(&format!("actions/runs/{run}")), None)
         } else {
-            return Err(format!("Evidência bootstrap não reconhecida: {}", item.id));
+            return Err(format!("Unrecognized bootstrap evidence: {}", item.id));
         };
         if !cache.contains_key(&path) {
             cache.insert(path.clone(), client.request("GET", &path, None)?);
@@ -469,20 +469,20 @@ fn prove_bootstrap(item: &Item, client: &mut impl GitHub, cache: &mut Index) -> 
                     .bytes()
                     .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
             {
-                return Err("SHA de evidência bootstrap divergente".into());
+                return Err("Bootstrap evidence SHA mismatch".into());
             }
             commits.insert(sha.to_owned());
         } else {
             if result.get("status").and_then(Value::as_str) != Some("completed")
                 || result.get("conclusion").and_then(Value::as_str) != Some("success")
             {
-                return Err("CI bootstrap não aprovada".into());
+                return Err("Bootstrap CI did not pass".into());
             }
             runs.push(text(result, "head_sha")?.to_owned());
         }
     }
     if commits.is_empty() || runs.is_empty() || runs.iter().any(|sha| !commits.contains(sha)) {
-        return Err("Bootstrap exige commit e CI aprovada no mesmo SHA".into());
+        return Err("Bootstrap requires a commit and passing CI at the same SHA".into());
     }
     Ok(())
 }
@@ -544,17 +544,17 @@ fn patch_path(category: &str, record: &Value, id: &str, apply: bool) -> Result<S
 fn sync_plan(plan: &Value, client: &mut impl GitHub, apply: bool) -> Result<Value, String> {
     crate::plan::validate(plan)?;
     if text(plan, "repository")? != REPOSITORY {
-        return Err("Repositório do manifesto não é o Sider".into());
+        return Err("Manifest repository is not Sider".into());
     }
     let repository = client.request("GET", &repo_path(""), None)?;
     if repository.get("private").and_then(Value::as_bool) != Some(true) {
-        return Err("O backlog Sider deve permanecer privado".into());
+        return Err("The Sider backlog must remain private".into());
     }
     if repository
         .get("full_name")
         .is_some_and(|name| name.as_str() != Some(REPOSITORY))
     {
-        return Err("Resposta de repositório divergente".into());
+        return Err("Repository response mismatch".into());
     }
     let raw_milestones = client.paginate(&repo_path("milestones?state=all&per_page=100"))?;
     let raw_issues = client.paginate(&repo_path("issues?state=all&per_page=100"))?;
@@ -571,39 +571,45 @@ fn sync_plan(plan: &Value, client: &mut impl GitHub, apply: bool) -> Result<Valu
     let mut definitions = BTreeMap::from([
         (
             "type:task".into(),
-            ("1d76db", "Entrega funcional do plano de releases".into()),
+            (
+                "1d76db",
+                "Functional deliverable from the release plan".into(),
+            ),
         ),
         (
             "type:release".into(),
-            ("5319e7", "Validação e publicação de uma versão".into()),
+            ("5319e7", "Validation and publication of a version".into()),
         ),
         (
             "type:checkpoint".into(),
             (
                 "7057ff",
-                "Validação de um marco interno sem publicação".into(),
+                "Validation of an internal milestone without publication".into(),
             ),
         ),
         (
             "type:bootstrap".into(),
-            ("0e8a16", "Fundação já comprovada por commits e CI".into()),
+            (
+                "0e8a16",
+                "Foundation already verified by commits and CI".into(),
+            ),
         ),
         (
             "status:blocked".into(),
-            ("d93f0b", "Aguarda uma dependência ainda aberta".into()),
+            ("d93f0b", "Waiting for an open dependency".into()),
         ),
         (
             "compatibility:breaking".into(),
             (
                 "b60205",
-                "Mudança incompatível a documentar nas notas".into(),
+                "Breaking change to document in the release notes".into(),
             ),
         ),
     ]);
     for item in &items {
         definitions.insert(
             format!("area:{}", item.area),
-            ("c5def5", format!("Área de responsabilidade: {}", item.area)),
+            ("c5def5", format!("Area of responsibility: {}", item.area)),
         );
     }
     let managed = definitions
@@ -612,7 +618,7 @@ fn sync_plan(plan: &Value, client: &mut impl GitHub, apply: bool) -> Result<Valu
         .cloned()
         .collect::<BTreeSet<_>>();
     let mut descriptions = BTreeMap::new();
-    // Toda colisão, corpo gerenciado e evidência é validada antes da primeira escrita.
+    // Every collision, managed body, and evidence item is validated before the first write.
     for item in &items {
         let generated = render(item, &issues)?;
         let existing = issues
@@ -632,9 +638,9 @@ fn sync_plan(plan: &Value, client: &mut impl GitHub, apply: bool) -> Result<Valu
         let id = text(release, "id")?;
         let title = format!("v{}", text(release, "version")?);
         let publication = if release["publication"] == true {
-            "Publicação manual: candidata e final usam o mesmo SHA e os mesmos assets. CI e publicação automática ficam para depois da 1.0."
+            "Manual publication: candidate and final releases use the same SHA and assets. CI and automatic publication are deferred until after 1.0."
         } else {
-            "Marco interno: validação local e encerramento sem candidata, tag ou release publicada."
+            "Internal milestone: local validation and closure without a candidate, tag, or published release."
         };
         let generated = format!(
             "{START}\n<!-- sider:release {id} -->\n\n{}\n\n{publication}\n\n{}\n\n{END}",
@@ -701,7 +707,7 @@ fn sync_plan(plan: &Value, client: &mut impl GitHub, apply: bool) -> Result<Valu
                 number(&milestone)?;
                 state(&milestone)?;
                 if text(&milestone, "title")? != title {
-                    return Err("Criação retornou milestone divergente".into());
+                    return Err("Creation returned a mismatched milestone".into());
                 }
             } else {
                 milestone["number"] = Value::Null;
@@ -709,7 +715,7 @@ fn sync_plan(plan: &Value, client: &mut impl GitHub, apply: bool) -> Result<Valu
             milestones.insert(title, milestone);
         }
     }
-    // Criar todos os IDs primeiro permite resolver links sem adivinhar números.
+    // Creating all IDs first allows links to be resolved without guessing numbers.
     for item in &items {
         if issues.contains_key(&item.id) {
             continue;
@@ -730,7 +736,7 @@ fn sync_plan(plan: &Value, client: &mut impl GitHub, apply: bool) -> Result<Valu
             state(&issue)?;
             labels(&issue)?;
             if marker(body_text(&issue, "body")?, "task")? != Some(&item.id) {
-                return Err("Criação retornou identidade de issue divergente".into());
+                return Err("Creation returned a mismatched issue identity".into());
             }
             issue
         } else {
@@ -746,7 +752,7 @@ fn sync_plan(plan: &Value, client: &mut impl GitHub, apply: bool) -> Result<Valu
         if item.kind != "bootstrap" {
             continue;
         }
-        let issue = issues.get_mut(&item.id).ok_or("Bootstrap sem issue")?;
+        let issue = issues.get_mut(&item.id).ok_or("Bootstrap has no issue")?;
         if state(issue)? != "closed" {
             mutate(
                 client,
@@ -768,7 +774,7 @@ fn sync_plan(plan: &Value, client: &mut impl GitHub, apply: bool) -> Result<Valu
         let current = json!({"title":issue["title"],"body":issue["body"],"labels":current_labels,"milestone":issue["milestone"]["number"]});
         let update = desired
             .as_object()
-            .ok_or("Atualização inválida")?
+            .ok_or("Invalid update")?
             .iter()
             .filter(|(key, value)| current.get(*key) != Some(*value))
             .map(|(key, value)| (key.clone(), value.clone()))
@@ -811,12 +817,12 @@ mod tests {
     fn example_plan() -> Value {
         let mut plan: Value =
             serde_json::from_str(include_str!("../../releases/plan.json")).unwrap();
-        plan["bootstrap"] = json!([{"id":"B00-01","title":"Fundação","status":"completed","evidence":[format!("https://github.com/{REPOSITORY}/commit/{SHA}"),format!("https://github.com/{REPOSITORY}/actions/runs/7")]}]);
+        plan["bootstrap"] = json!([{"id":"B00-01","title":"Foundation","status":"completed","evidence":[format!("https://github.com/{REPOSITORY}/commit/{SHA}"),format!("https://github.com/{REPOSITORY}/actions/runs/7")]}]);
         plan["contracts"]["commands_added"] = json!({});
         let mut releases = Vec::new();
         for index in 1..=2 {
             let id = format!("R{index:02}");
-            releases.push(json!({"id":id,"version":format!("0.{index}.0"),"title":format!("Versão {index}"),"publication":false,"scope":["Escopo"],"required_gates":["native","compatibility","tcp_smoke"],"tasks":[{"id":format!("{id}-01"),"title":"Implementar operação","area":"storage","objective":"Comportamento binário.","deliverables":["Implementação"],"tests":["Regressão"],"acceptance":["Estado correto"],"depends_on":if index == 1 {vec!["B00-01"]} else {vec!["R01-GATE"]}}],"gate":{"id":format!("{id}-GATE"),"title":"Validar marco interno","acceptance":["Critérios locais conferidos"]}}));
+            releases.push(json!({"id":id,"version":format!("0.{index}.0"),"title":format!("Version {index}"),"publication":false,"scope":["Scope"],"required_gates":["native","compatibility","tcp_smoke"],"tasks":[{"id":format!("{id}-01"),"title":"Implement operation","area":"storage","objective":"Binary behavior.","deliverables":["Implementation"],"tests":["Regression"],"acceptance":["Correct state"],"depends_on":if index == 1 {vec!["B00-01"]} else {vec!["R01-GATE"]}}],"gate":{"id":format!("{id}-GATE"),"title":"Validate internal milestone","acceptance":["Local criteria verified"]}}));
         }
         plan["releases"] = json!(releases);
         plan
@@ -895,7 +901,7 @@ mod tests {
                     "/labels" => Ok(json!(self.labels)),
                     value if value.starts_with("/commits/") => Ok(self.commit.clone()),
                     value if value.starts_with("/actions/runs/") => Ok(self.run.clone()),
-                    _ => panic!("GET inesperado: {path}"),
+                    _ => panic!("Unexpected GET: {path}"),
                 };
             }
             let body = body.unwrap();
@@ -905,7 +911,7 @@ mod tests {
                 "issues" => &mut self.issues,
                 "milestones" => &mut self.milestones,
                 "labels" => &mut self.labels,
-                _ => panic!("Escrita fora do contrato"),
+                _ => panic!("Write outside the contract"),
             };
             let result = if method == "POST" {
                 let mut row = body.clone();
@@ -940,7 +946,7 @@ mod tests {
             };
             if self.lose_response == Some(category) {
                 self.lose_response = None;
-                return Err("Resposta perdida depois da escrita".into());
+                return Err("Response lost after the write".into());
             }
             Ok(result)
         }
@@ -974,28 +980,28 @@ mod tests {
         let issue = client.issue_mut("R01-GATE");
         issue["labels"] = json!(["type:release", "area:release", "priority:high"]);
         issue["state"] = json!("closed");
-        issue["comments"] = json!(["Aprovação humana preservada"]);
+        issue["comments"] = json!(["Human approval preserved: café"]);
         issue["body"] = json!(format!(
-            "Contexto anterior.\n\n{}",
+            "Previous context.\n\n{}",
             issue["body"].as_str().unwrap()
         ));
         client.apply(&plan).unwrap();
         assert!(
             body_text(client.issue("R01-GATE"), "body")
                 .unwrap()
-                .contains("Encerrar o marco sem candidata, tag ou publicação")
+                .contains("Close the milestone without a candidate, tag, or publication")
         );
         assert!(body_text(&client.milestones[0], "description").unwrap().contains(
-            "Marco interno: validação local e encerramento sem candidata, tag ou release publicada."
+            "Internal milestone: local validation and closure without a candidate, tag, or published release."
         ));
         let issue = client.issue("R01-GATE");
         assert!(
             body_text(issue, "body")
                 .unwrap()
-                .starts_with("Contexto anterior.")
+                .starts_with("Previous context.")
         );
         assert_eq!(issue["state"], "closed");
-        assert_eq!(issue["comments"], json!(["Aprovação humana preservada"]));
+        assert_eq!(issue["comments"], json!(["Human approval preserved: café"]));
         assert!(labels(issue).unwrap().contains(&"type:checkpoint".into()));
         assert!(labels(issue).unwrap().contains(&"priority:high".into()));
         assert!(!labels(issue).unwrap().contains(&"type:release".into()));
@@ -1019,38 +1025,38 @@ mod tests {
         assert_eq!(item("R11-GATE").kind, "release");
         assert_eq!(item("R11-GATE").dependencies.len(), 15);
         let rendered = render(item("R11-GATE"), &Index::new()).unwrap();
-        assert!(rendered.contains("mesmo SHA e os mesmos assets"));
-        assert!(rendered.contains("sem recompilar"));
+        assert!(rendered.contains("same SHA and assets"));
+        assert!(rendered.contains("without rebuilding"));
     }
 
     #[test]
     fn human_text_comments_labels_and_milestone_state_survive() {
         let mut plan = example_plan();
         let mut client = FakeGitHub::default();
-        client.milestones.push(json!({"number":1,"title":"v0.1.0","description":"Data acordada em reunião.","state":"closed","due_on":"2026-12-01T00:00:00Z"}));
+        client.milestones.push(json!({"number":1,"title":"v0.1.0","description":"Date agreed at the café meeting.","state":"closed","due_on":"2026-12-01T00:00:00Z"}));
         client.apply(&plan).unwrap();
         let issue = client.issue_mut("R01-01");
         issue["body"] = json!(format!(
-            "Nota humana: revisão técnica.\n\n{}\n\nNão apagar.",
+            "Human note: technical review of the café.\n\n{}\n\nDo not delete.",
             issue["body"].as_str().unwrap()
         ));
-        issue["comments"] = json!(["Discussão intacta"]);
+        issue["comments"] = json!(["Discussion preserved: café"]);
         issue["labels"].as_array_mut().unwrap().extend([
             json!("priority:high"),
             json!("area:custom"),
             json!("compatibility:breaking"),
         ]);
         issue["state"] = json!("closed");
-        plan["releases"][0]["tasks"][0]["objective"] = json!("Novo objetivo com acentuação.");
+        plan["releases"][0]["tasks"][0]["objective"] = json!("New objective with Unicode: café.");
         client.apply(&plan).unwrap();
         let issue = client.issue("R01-01");
         let body = body_text(issue, "body").unwrap();
         assert!(
-            body.starts_with("Nota humana: revisão técnica.\n\n")
-                && body.ends_with("\n\nNão apagar.")
+            body.starts_with("Human note: technical review of the café.\n\n")
+                && body.ends_with("\n\nDo not delete.")
         );
-        assert!(body.contains("Novo objetivo com acentuação."));
-        assert_eq!(issue["comments"], json!(["Discussão intacta"]));
+        assert!(body.contains("New objective with Unicode: café."));
+        assert_eq!(issue["comments"], json!(["Discussion preserved: café"]));
         for label in ["priority:high", "area:custom", "compatibility:breaking"] {
             assert!(labels(issue).unwrap().contains(&label.into()));
         }
@@ -1061,7 +1067,7 @@ mod tests {
             client.milestones[0]["description"]
                 .as_str()
                 .unwrap()
-                .starts_with("Data acordada em reunião.\n\n")
+                .starts_with("Date agreed at the café meeting.\n\n")
         );
         assert!(
             !client
@@ -1118,12 +1124,7 @@ mod tests {
                 lose_response: Some(category),
                 ..FakeGitHub::default()
             };
-            assert!(
-                client
-                    .apply(&plan)
-                    .unwrap_err()
-                    .contains("Resposta perdida")
-            );
+            assert!(client.apply(&plan).unwrap_err().contains("Response lost"));
             assert_eq!(client.calls.last().unwrap().0, "POST");
             client.apply(&plan).unwrap();
             assert_eq!(client.issues.len(), 5);
@@ -1148,9 +1149,9 @@ mod tests {
                     let issue = client.issue_mut("R02-01");
                     issue["body"] = json!(format!("{}\n{START}", issue["body"].as_str().unwrap()));
                 }
-                2 => client.issues.push(
-                    json!({"number":77,"title":"[R01-01] Issue humana","body":"Texto humano"}),
-                ),
+                2 => client
+                    .issues
+                    .push(json!({"number":77,"title":"[R01-01] Human issue","body":"Human text"})),
                 3 => {
                     let mut duplicate = client.milestones[0].clone();
                     duplicate["number"] = json!(77);
@@ -1165,15 +1166,15 @@ mod tests {
                     client.issue_mut("R01-01")["body"] =
                         json!(format!("<!-- sider:task R01-01 -->\n{START}\n{END}"))
                 }
-                7 => client.issue_mut("R01-01")["title"] = json!("[R02-01] Identidade divergente"),
+                7 => client.issue_mut("R01-01")["title"] = json!("[R02-01] Identity mismatch"),
                 _ => {
                     client.milestones[1]["description"] =
                         json!(format!("{START}\n<!-- sider:release R99 -->\n{END}"))
                 }
             }
             let writes = client.writes();
-            assert!(client.apply(&plan).is_err(), "mutação {mutation}");
-            assert_eq!(client.writes(), writes, "mutação {mutation}");
+            assert!(client.apply(&plan).is_err(), "mutation {mutation}");
+            assert_eq!(client.writes(), writes, "mutation {mutation}");
         }
     }
 
@@ -1181,7 +1182,7 @@ mod tests {
     fn generated_marker_injection_and_public_repository_fail_before_writes() {
         let mut plan = example_plan();
         let mut client = FakeGitHub::default();
-        plan["releases"][1]["tasks"][0]["objective"] = json!(format!("Acrescentar {END}"));
+        plan["releases"][1]["tasks"][0]["objective"] = json!(format!("Append {END}"));
         assert!(client.apply(&plan).is_err());
         assert_eq!(client.writes(), 0);
         for private in [json!(false), json!("true"), Value::Null] {

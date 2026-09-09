@@ -1,4 +1,4 @@
-//! Transporte restrito ao backlog privado do Sider, usando a sessão da CLI gh.
+//! Transport restricted to the private Sider backlog, using the gh CLI session.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
@@ -26,7 +26,7 @@ pub fn repo_path(suffix: &str) -> String {
     }
 }
 
-/// Não oferece endpoints de publicação, comentários, exclusão ou autenticação.
+/// Does not provide publication, comment, deletion, or authentication endpoints.
 pub trait GitHub {
     fn request(&mut self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String>;
 
@@ -34,7 +34,7 @@ pub trait GitHub {
         let (endpoint, mut query) = endpoint(path)?;
         if !matches!(endpoint, "/issues" | "/milestones" | "/labels") || query.contains_key("page")
         {
-            return Err("Endpoint inicial de paginação inválido".into());
+            return Err("Invalid initial pagination endpoint".into());
         }
         query.insert("per_page".into(), PAGE_SIZE.to_string());
         let mut rows = Vec::new();
@@ -47,31 +47,30 @@ pub trait GitHub {
                 .map(|(key, value)| format!("{key}={value}"))
                 .collect::<Vec<_>>()
                 .join("&");
-            // Nunca seguir URLs ou Link fornecidos pela resposta remota.
+            // Never follow URLs or Link headers supplied by the remote response.
             let result = self.request("GET", &format!("{PREFIX}{endpoint}?{query}"), None)?;
             let values = result
                 .as_array()
-                .ok_or("Endpoint paginado não retornou uma lista")?;
+                .ok_or("Paginated endpoint did not return a list")?;
             if values.len() > PAGE_SIZE {
-                return Err("Página GitHub excedeu per_page".into());
+                return Err("GitHub page exceeded per_page".into());
             }
-            let fingerprint =
-                serde_json::to_string(values).map_err(|_| "Página GitHub inválida")?;
+            let fingerprint = serde_json::to_string(values).map_err(|_| "Invalid GitHub page")?;
             total_bytes = total_bytes
                 .checked_add(fingerprint.len())
-                .ok_or("Paginação excessiva")?;
+                .ok_or("Excessive pagination")?;
             if total_bytes > MAX_PAGINATION {
-                return Err("Paginação GitHub excedeu limite de bytes".into());
+                return Err("GitHub pagination exceeded the byte limit".into());
             }
             if !values.is_empty() && !seen_pages.insert(fingerprint) {
-                return Err("Paginação GitHub repetida".into());
+                return Err("Repeated GitHub pagination".into());
             }
             rows.extend(values.iter().cloned());
             if values.len() < PAGE_SIZE {
                 return Ok(rows);
             }
         }
-        Err("Paginação GitHub excessiva".into())
+        Err("Excessive GitHub pagination".into())
     }
 }
 
@@ -84,7 +83,7 @@ fn endpoint(path: &str) -> Result<(&str, BTreeMap<String, String>), String> {
     let (path, query) = path.split_once('?').unwrap_or((path, ""));
     let suffix = path
         .strip_prefix(PREFIX)
-        .ok_or("Destino fora do repositório Sider")?;
+        .ok_or("Destination outside the Sider repository")?;
     let components = suffix.split('/').collect::<Vec<_>>();
     let allowed = match components.as_slice() {
         [""] | ["", "issues" | "milestones" | "labels"] => true,
@@ -99,15 +98,15 @@ fn endpoint(path: &str) -> Result<(&str, BTreeMap<String, String>), String> {
         _ => false,
     };
     if !allowed {
-        return Err("Endpoint GitHub fora do backlog permitido".into());
+        return Err("GitHub endpoint outside the allowed backlog".into());
     }
     let mut parameters = BTreeMap::new();
     if !query.is_empty() {
         if !matches!(suffix, "/issues" | "/milestones" | "/labels") {
-            return Err("Query não permitida neste endpoint".into());
+            return Err("Query not allowed on this endpoint".into());
         }
         for parameter in query.split('&') {
-            let (key, value) = parameter.split_once('=').ok_or("Query GitHub inválida")?;
+            let (key, value) = parameter.split_once('=').ok_or("Invalid GitHub query")?;
             let valid = match key {
                 "state" => value == "all" && suffix != "/labels",
                 "per_page" => value == "100",
@@ -117,7 +116,7 @@ fn endpoint(path: &str) -> Result<(&str, BTreeMap<String, String>), String> {
                 _ => false,
             };
             if !valid || parameters.insert(key.into(), value.into()).is_some() {
-                return Err("Query GitHub inválida ou duplicada".into());
+                return Err("Invalid or duplicate GitHub query".into());
             }
         }
     }
@@ -154,10 +153,10 @@ impl<T: Transport> GitHub for GhClient<T> {
         if !allowed
             || (method != "GET" && (!query.is_empty() || !body.is_some_and(Value::is_object)))
         {
-            return Err("Método ou corpo GitHub fora do contrato".into());
+            return Err("GitHub method or body outside the contract".into());
         }
         if method != "GET" && !self.allow_writes {
-            return Err("Escrita GitHub exige --apply explícito".into());
+            return Err("GitHub writes require explicit --apply".into());
         }
         let mut arguments = [
             "api",
@@ -176,20 +175,20 @@ impl<T: Transport> GitHub for GhClient<T> {
         let input = body
             .map(serde_json::to_vec)
             .transpose()
-            .map_err(|_| "Corpo GitHub não serializável")?;
+            .map_err(|_| "GitHub body cannot be serialized")?;
         if input.as_ref().is_some_and(|bytes| bytes.len() > MAX_OUTPUT) {
-            return Err("Corpo GitHub excedeu limite de bytes".into());
+            return Err("GitHub body exceeded the byte limit".into());
         }
         if input.is_some() {
             arguments.extend(["--input".into(), "-".into()]);
         }
-        // Uma tentativa apenas. O sincronizador relê o estado numa nova execução.
+        // One attempt only. The synchronizer rereads state on a new run.
         let output = self.transport.execute(&arguments, input)?;
         if output.len() > MAX_OUTPUT {
-            return Err("Resposta GitHub excedeu limite de bytes".into());
+            return Err("GitHub response exceeded the byte limit".into());
         }
         serde_json::from_slice(&output)
-            .map_err(|_| "Resposta GitHub não contém JSON UTF-8 válido".into())
+            .map_err(|_| "GitHub response does not contain valid UTF-8 JSON".into())
     }
 }
 
@@ -217,7 +216,7 @@ fn capture(mut stream: impl Read, exceeded: &AtomicBool) -> Result<Vec<u8>, Stri
     loop {
         let count = stream
             .read(&mut buffer)
-            .map_err(|_| "Falha ao capturar saída da CLI GitHub")?;
+            .map_err(|_| "Failed to capture GitHub CLI output")?;
         if count == 0 {
             return Ok(output);
         }
@@ -239,14 +238,14 @@ fn capture_thread(
         .spawn(move || {
             let _ = sender.send(capture(stream, &exceeded));
         })
-        .map_err(|_| "Não foi possível criar leitor da CLI GitHub")?;
+        .map_err(|_| "Could not create GitHub CLI reader")?;
     Ok(receiver)
 }
 
 fn receive(capture: Capture, deadline: Instant) -> Result<Vec<u8>, String> {
     capture
         .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-        .map_err(|_| "Prazo de captura da CLI GitHub excedido")?
+        .map_err(|_| "GitHub CLI capture deadline exceeded")?
 }
 
 impl Transport for NativeTransport {
@@ -267,64 +266,64 @@ impl Transport for NativeTransport {
         let mut owned = OwnedChild(
             command
                 .spawn()
-                .map_err(|_| "Não foi possível iniciar gh; confira instalação e autenticação")?,
+                .map_err(|_| "Could not start gh; check installation and authentication")?,
         );
         let exceeded = Arc::new(AtomicBool::new(false));
         let stdout = capture_thread(
-            owned.0.stdout.take().ok_or("stdout GitHub ausente")?,
+            owned.0.stdout.take().ok_or("missing GitHub stdout")?,
             exceeded.clone(),
         )?;
         let stderr = capture_thread(
-            owned.0.stderr.take().ok_or("stderr GitHub ausente")?,
+            owned.0.stderr.take().ok_or("missing GitHub stderr")?,
             exceeded.clone(),
         )?;
         let writer = if let Some(input) = input {
-            let mut stdin = owned.0.stdin.take().ok_or("stdin GitHub ausente")?;
+            let mut stdin = owned.0.stdin.take().ok_or("missing GitHub stdin")?;
             let (sender, receiver) = mpsc::sync_channel(1);
             thread::Builder::new()
                 .name("sider-gh-input".into())
                 .spawn(move || {
                     let result = stdin
                         .write_all(&input)
-                        .map_err(|_| "Falha ao enviar JSON à CLI GitHub".to_owned());
+                        .map_err(|_| "Failed to send JSON to the GitHub CLI".to_owned());
                     drop(stdin);
                     let _ = sender.send(result);
                 })
-                .map_err(|_| "Não foi possível criar escritor da CLI GitHub")?;
+                .map_err(|_| "Could not create GitHub CLI writer")?;
             Some(receiver)
         } else {
             None
         };
         let status = loop {
             if exceeded.load(Ordering::Relaxed) {
-                return Err("CLI GitHub excedeu limite de saída".into());
+                return Err("GitHub CLI exceeded the output limit".into());
             }
             if Instant::now() >= deadline {
-                return Err("CLI GitHub excedeu prazo; releia o estado antes de repetir".into());
+                return Err("GitHub CLI timed out; reread state before retrying".into());
             }
             if let Some(status) = owned
                 .0
                 .try_wait()
-                .map_err(|_| "Falha ao aguardar CLI GitHub")?
+                .map_err(|_| "Failed to wait for GitHub CLI")?
             {
                 break status;
             }
             thread::sleep(Duration::from_millis(10));
         };
         let output = receive(stdout, deadline)?;
-        // Nunca incluir stderr no erro: pode conter credenciais, URLs ou corpo privado.
+        // Never include stderr in the error: it may contain credentials, URLs, or a private body.
         let _ = receive(stderr, deadline)?;
         if let Some(writer) = writer {
             writer
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                .map_err(|_| "Prazo de envio à CLI GitHub excedido")??;
+                .map_err(|_| "GitHub CLI send deadline exceeded")??;
         }
         if exceeded.load(Ordering::Relaxed) {
-            return Err("CLI GitHub excedeu limite de saída".into());
+            return Err("GitHub CLI exceeded the output limit".into());
         }
         if !status.success() {
             return Err(format!(
-                "CLI GitHub falhou ({status}); confira acesso e releia o estado antes de repetir"
+                "GitHub CLI failed ({status}); check access and reread state before retrying"
             ));
         }
         Ok(output)
@@ -370,7 +369,7 @@ mod tests {
                 .request(
                     "POST",
                     &repo_path("issues"),
-                    Some(&json!({"title":"Título"}))
+                    Some(&json!({"title":"Title: café"}))
                 )
                 .is_err()
         );
@@ -398,7 +397,7 @@ mod tests {
     #[test]
     fn json_utf8_uses_stdin_and_literal_arguments() {
         let mut client = client(true);
-        let body = json!({"body":"Publicação `sider`\nNão executar $(comando)."});
+        let body = json!({"body":"Publication `sider`: café\nDo not execute $(command)."});
         client
             .request("POST", &repo_path("issues"), Some(&body))
             .unwrap();
@@ -412,14 +411,14 @@ mod tests {
         assert!(
             !arguments
                 .iter()
-                .any(|value| value.contains("Publicação") || value.contains("token"))
+                .any(|value| value.contains("Publication") || value.contains("token"))
         );
     }
 
     #[test]
     fn write_failure_is_not_retried_and_bad_json_is_rejected() {
         let mut client = client(true);
-        client.transport.responses = vec![Err("Resposta perdida".into())];
+        client.transport.responses = vec![Err("Response lost".into())];
         assert!(
             client
                 .request("POST", &repo_path("issues"), Some(&json!({})))
@@ -457,7 +456,7 @@ mod tests {
             client
                 .paginate(&repo_path("issues"))
                 .unwrap_err()
-                .contains("repetida")
+                .contains("Repeated")
         );
         client.transport.responses = vec![Ok(b"{}".to_vec())];
         assert!(client.paginate(&repo_path("issues")).is_err());

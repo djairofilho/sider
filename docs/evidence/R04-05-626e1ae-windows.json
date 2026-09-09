@@ -4,10 +4,10 @@
   "compiler": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.97.1\nLLVM version: 22.1.6",
   "hardware": "{\"Name\":\"Intel(R) Core(TM) i5-9300H CPU @ 2.40GHz\",\"NumberOfCores\":4,\"NumberOfLogicalProcessors\":8}",
   "limitations": [
-    "loopback local; clientes compartilham a máquina",
-    "RSS amostrado antes/depois, não pico",
-    "RTT por lote, não latência individual de cada comando",
-    "sem aquecimento; ensaio exploratório"
+    "local loopback; clients share the machine",
+    "RSS sampled before/after, not peak RSS",
+    "RTT per batch, not individual command latency",
+    "no warmup; exploratory test"
   ],
   "os": "windows",
   "rows": [

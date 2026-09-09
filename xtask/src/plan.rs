@@ -1,4 +1,4 @@
-//! Manifesto de releases e projeção Markdown, sem acesso ao GitHub ou publicação.
+//! Release manifest and Markdown projection, without GitHub access or publication.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
@@ -41,7 +41,7 @@ fn text<'a>(record: &'a Value, key: &str, context: &str) -> Result<&'a str, Stri
         .get(key)
         .and_then(Value::as_str)
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| format!("{context}.{key}: texto não vazio obrigatório"))
+        .ok_or_else(|| format!("{context}.{key}: nonempty text required"))
 }
 
 fn array<'a>(value: &'a Value, name: &str, empty: bool) -> Result<&'a [Value], String> {
@@ -51,8 +51,8 @@ fn array<'a>(value: &'a Value, name: &str, empty: bool) -> Result<&'a [Value], S
         .map(Vec::as_slice)
         .ok_or_else(|| {
             format!(
-                "{name}: lista {}obrigatória",
-                if empty { "" } else { "não vazia " }
+                "{name}: {}list required",
+                if empty { "" } else { "nonempty " }
             )
         })
 }
@@ -65,9 +65,9 @@ fn strings<'a>(value: &'a Value, name: &str, empty: bool) -> Result<Vec<&'a str>
             let value = value
                 .as_str()
                 .filter(|s| !s.trim().is_empty())
-                .ok_or_else(|| format!("{name}: valores devem ser textos não vazios"))?;
+                .ok_or_else(|| format!("{name}: values must be nonempty strings"))?;
             if !unique.insert(value) {
-                return Err(format!("{name}: valores duplicados"));
+                return Err(format!("{name}: duplicate values"));
             }
             Ok(value)
         })
@@ -77,7 +77,7 @@ fn strings<'a>(value: &'a Value, name: &str, empty: bool) -> Result<Vec<&'a str>
 fn object<'a>(value: &'a Value, name: &str) -> Result<&'a serde_json::Map<String, Value>, String> {
     value
         .as_object()
-        .ok_or_else(|| format!("{name}: objeto obrigatório"))
+        .ok_or_else(|| format!("{name}: object required"))
 }
 
 fn number(value: &str) -> Option<u64> {
@@ -104,14 +104,14 @@ fn release_base(value: &str) -> Result<&str, String> {
     let without_tag = value.strip_prefix('v').unwrap_or(value);
     let base = if let Some((base, rc)) = without_tag.split_once("-rc.") {
         if number(rc).is_none_or(|number| number == 0) {
-            return Err(format!("Versão de release inválida: {value}"));
+            return Err(format!("Invalid release version: {value}"));
         }
         base
     } else {
         without_tag
     };
     if base_version(base).is_none() {
-        return Err(format!("Versão de release inválida: {value}"));
+        return Err(format!("Invalid release version: {value}"));
     }
     Ok(base)
 }
@@ -144,8 +144,8 @@ impl Graph {
         prefix: &str,
         dependencies: Vec<String>,
     ) -> Result<String, String> {
-        object(record, "registro")?;
-        let id = text(record, "id", "registro")?;
+        object(record, "record")?;
+        let id = text(record, "id", "record")?;
         let bytes = id.as_bytes();
         let two_digits = |value: &[u8]| value.len() == 2 && value.iter().all(u8::is_ascii_digit);
         let valid = match kind {
@@ -163,10 +163,10 @@ impl Graph {
             Kind::Gate => id == format!("{prefix}-GATE"),
         };
         if !valid {
-            return Err(format!("ID inválido: {id}"));
+            return Err(format!("Invalid ID: {id}"));
         }
         if self.positions.contains_key(id) {
-            return Err(format!("ID duplicado: {id}"));
+            return Err(format!("Duplicate ID: {id}"));
         }
         text(record, "title", id)?;
         self.positions.insert(id.to_owned(), self.nodes.len());
@@ -184,11 +184,11 @@ impl Graph {
         for (position, node) in self.nodes.iter().enumerate() {
             for dependency in &node.dependencies {
                 let Some(&index) = self.positions.get(dependency) else {
-                    return Err(format!("{}: dependência inexistente {dependency}", node.id));
+                    return Err(format!("{}: nonexistent dependency {dependency}", node.id));
                 };
                 if node.kind == Kind::Task && self.nodes[index].kind == Kind::Release {
                     return Err(format!(
-                        "{}: tarefa deve depender de tarefa, bootstrap ou gate",
+                        "{}: task must depend on a task, bootstrap, or gate",
                         node.id
                     ));
                 }
@@ -196,7 +196,7 @@ impl Graph {
                 consumers[index].push(position);
             }
         }
-        // A remoção topológica evita recursão proporcional ao tamanho do manifesto.
+        // Topological removal avoids recursion proportional to manifest size.
         let mut ready: VecDeque<_> = remaining
             .iter()
             .enumerate()
@@ -213,26 +213,26 @@ impl Graph {
             }
         }
         if visited != self.nodes.len() {
-            return Err("Ciclo de dependências no manifesto".into());
+            return Err("Dependency cycle in manifest".into());
         }
         Ok(())
     }
 }
 
-/// Lê UTF-8 e rejeita um manifesto inválido antes de qualquer ação externa.
+/// Reads UTF-8 and rejects an invalid manifest before any external action.
 pub fn load(path: &Path) -> Result<Value, String> {
     let contents =
         fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
     let plan = serde_json::from_str(&contents)
-        .map_err(|error| format!("{}: JSON inválido: {error}", path.display()))?;
+        .map_err(|error| format!("{}: invalid JSON: {error}", path.display()))?;
     validate(&plan)?;
     Ok(plan)
 }
 
-/// Valida o DAG, gates locais dos marcos e cobertura cumulativa da publicação.
+/// Validates the DAG, local milestone gates, and cumulative publication coverage.
 pub fn validate(plan: &Value) -> Result<(), String> {
     if plan.get("schema_version").and_then(Value::as_u64) != Some(2) {
-        return Err("schema_version deve ser 2".into());
+        return Err("schema_version must be 2".into());
     }
     let repository = text(plan, "repository", "plan")?;
     let parts: Vec<_> = repository.split('/').collect();
@@ -244,7 +244,7 @@ pub fn validate(plan: &Value) -> Result<(), String> {
                     .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
         })
     {
-        return Err("repository deve ter formato owner/repo".into());
+        return Err("repository must have the owner/repo format".into());
     }
     let reference = &plan["reference"];
     object(reference, "reference")?;
@@ -253,13 +253,13 @@ pub fn validate(plan: &Value) -> Result<(), String> {
     let image = text(reference, "image", "reference")?;
     let platform = text(reference, "platform", "reference")?;
     if redis != cli {
-        return Err("Redis e redis-cli devem usar a mesma versão".into());
+        return Err("Redis and redis-cli must use the same version".into());
     }
     if base_version(redis).is_none() {
-        return Err("reference.redis_version inválida".into());
+        return Err("invalid reference.redis_version".into());
     }
     if platform != "linux/amd64" {
-        return Err("reference.platform deve ser linux/amd64".into());
+        return Err("reference.platform must be linux/amd64".into());
     }
     let digest = image.strip_prefix(&format!("redis:{redis}@sha256:"));
     if !digest.is_some_and(|digest| {
@@ -268,7 +268,7 @@ pub fn validate(plan: &Value) -> Result<(), String> {
                 .bytes()
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     }) {
-        return Err("reference.image deve fixar tag Redis e digest sha256 consistentes".into());
+        return Err("reference.image must pin a consistent Redis tag and sha256 digest".into());
     }
     let contracts = &plan["contracts"];
     object(contracts, "contracts")?;
@@ -278,7 +278,7 @@ pub fn validate(plan: &Value) -> Result<(), String> {
     let commands = object(&contracts["commands_added"], "contracts.commands_added")?;
     for (version, forms) in commands {
         if base_version(version).is_none() {
-            return Err("contracts.commands_added tem versão inválida".into());
+            return Err("contracts.commands_added has an invalid version".into());
         }
         strings(forms, &format!("commands_added.{version}"), false)?;
     }
@@ -294,10 +294,10 @@ pub fn validate(plan: &Value) -> Result<(), String> {
         "final_promotion": "same_sha_same_assets",
         "targets": ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
     });
-    for (field, expected) in object(&expected, "política interna")? {
+    for (field, expected) in object(&expected, "internal policy")? {
         if policy.get(field) != Some(expected) {
             return Err(format!(
-                "release_policy.{field} diverge do contrato suportado"
+                "release_policy.{field} differs from the supported contract"
             ));
         }
     }
@@ -305,7 +305,7 @@ pub fn validate(plan: &Value) -> Result<(), String> {
         .as_u64()
         .is_none_or(|value| value < 3600)
     {
-        return Err("release_policy.stable_soak_seconds deve ser inteiro >= 3600".into());
+        return Err("release_policy.stable_soak_seconds must be an integer >= 3600".into());
     }
     let releases = array(&plan["releases"], "releases", false)?;
     let bootstrap = array(&plan["bootstrap"], "bootstrap", true)?;
@@ -314,7 +314,7 @@ pub fn validate(plan: &Value) -> Result<(), String> {
         let id = graph.register(item, Kind::Bootstrap, "", vec![])?;
         if item["status"] != "completed" {
             return Err(format!(
-                "{id}: bootstrap deve conter somente entregas comprovadas"
+                "{id}: bootstrap must contain only verified deliverables"
             ));
         }
         strings(&item["evidence"], &format!("{id}.evidence"), false)?;
@@ -326,24 +326,24 @@ pub fn validate(plan: &Value) -> Result<(), String> {
         object(release, "release")?;
         if release.get("depends_on").is_some() {
             return Err(
-                "release.depends_on não existe no schema 2; declare dependências nas tarefas"
+                "release.depends_on does not exist in schema 2; declare dependencies on tasks"
                     .into(),
             );
         }
         let id = graph.register(release, Kind::Release, "", Vec::new())?;
         let version = text(release, "version", &id)?;
         let numbers =
-            base_version(version).ok_or_else(|| format!("Versão-base inválida: {version}"))?;
+            base_version(version).ok_or_else(|| format!("Invalid base version: {version}"))?;
         if release["publication"].as_bool() != Some(numbers >= (1, 0, 0)) {
             return Err(format!(
-                "{id}: publication deve ser false antes da 1.0 e true a partir dela"
+                "{id}: publication must be false before 1.0 and true from 1.0 onward"
             ));
         }
         if !versions.insert(version) {
-            return Err(format!("Versão duplicada: {version}"));
+            return Err(format!("Duplicate version: {version}"));
         }
         if previous_version.is_some_and(|previous| numbers <= previous) {
-            return Err("As releases devem estar em ordem semântica crescente".into());
+            return Err("Releases must be in ascending semantic version order".into());
         }
         previous_version = Some(numbers);
         strings(&release["scope"], &format!("{id}.scope"), false)?;
@@ -355,7 +355,7 @@ pub fn validate(plan: &Value) -> Result<(), String> {
         .into_iter()
         .collect();
         if required.iter().any(|gate| !GATES.contains(gate)) {
-            return Err(format!("{id}: gate de evidência desconhecido"));
+            return Err(format!("{id}: unknown evidence gate"));
         }
         let publication = release["publication"] == true;
         let mut expected: BTreeSet<_> = GATES[..3].iter().copied().collect();
@@ -368,17 +368,17 @@ pub fn validate(plan: &Value) -> Result<(), String> {
             expected.extend(previous_gates.iter().copied());
             if !expected.is_subset(&required) {
                 return Err(format!(
-                    "{id}: publicação exige a união cumulativa dos gates de todas as capacidades"
+                    "{id}: publication requires the cumulative union of gates for all capabilities"
                 ));
             }
         } else if required != expected {
             return Err(format!(
-                "{id}: gates internos devem corresponder à capacidade local"
+                "{id}: internal gates must match the local capability"
             ));
         }
         previous_gates.extend(required);
         for task in array(&release["tasks"], &format!("{id}.tasks"), false)? {
-            object(task, &format!("{id}: tarefa"))?;
+            object(task, &format!("{id}: task"))?;
             let dependencies = strings(&task["depends_on"], "task.depends_on", true)?;
             let task_id = graph.register(
                 task,
@@ -409,12 +409,12 @@ pub fn validate(plan: &Value) -> Result<(), String> {
         .keys()
         .any(|version| !versions.contains(version.as_str()))
     {
-        return Err("commands_added referencia versão sem release".into());
+        return Err("commands_added references a version without a release".into());
     }
     graph.validate()
 }
 
-/// Gates internos dependem das tarefas locais; publicação agrega todos os marcos internos.
+/// Internal gates depend on local tasks; publication aggregates all internal milestones.
 pub fn gate_dependencies(plan: &Value, release: &Value) -> Result<Vec<String>, String> {
     let mut dependencies = array(&release["tasks"], "tasks", false)?
         .iter()
@@ -430,17 +430,17 @@ pub fn gate_dependencies(plan: &Value, release: &Value) -> Result<Vec<String>, S
     Ok(dependencies)
 }
 
-/// Resolve uma final ou RC publicável. Marcos internos não são versões publicáveis.
+/// Resolves a publishable final release or RC. Internal milestones are not publishable versions.
 pub fn release_for_version<'a>(plan: &'a Value, version: &str) -> Result<&'a Value, String> {
     let base = release_base(version)?;
     validate(plan)?;
     let release = array(&plan["releases"], "releases", false)?
         .iter()
         .find(|release| release["version"] == base)
-        .ok_or_else(|| format!("Versão {base} sem milestone no manifesto"))?;
+        .ok_or_else(|| format!("Version {base} has no milestone in the manifest"))?;
     if release["publication"] != true {
         return Err(format!(
-            "Marco interno {base} não permite publicação de RC ou final"
+            "Internal milestone {base} does not allow RC or final publication"
         ));
     }
     Ok(release)
@@ -450,7 +450,7 @@ fn append(lines: &mut Vec<String>, values: &[&str]) {
     lines.extend(values.iter().map(|value| (*value).to_owned()));
 }
 
-/// Gera Markdown determinístico. O estado externo das issues não altera o arquivo.
+/// Generates deterministic Markdown. External issue state does not change the file.
 pub fn render(plan: &Value) -> Result<String, String> {
     validate(plan)?;
     let releases = array(&plan["releases"], "releases", false)?;
@@ -464,40 +464,40 @@ pub fn render(plan: &Value) -> Result<String, String> {
     append(
         &mut lines,
         &[
-            "# Roadmap de marcos internos e publicação do Sider",
+            "# Sider internal milestone and publication roadmap",
             "",
-            "<!-- Gerado por cargo xtask roadmap --write; editar releases/plan.json. -->",
+            "<!-- Generated by cargo xtask roadmap --write; edit releases/plan.json. -->",
             "",
-            "Este roteiro organiza as entregas até a 1.0. R01 a R10 são marcos internos;",
-            "R11 reúne a estabilização e a publicação da 1.0, sem retirar funcionalidades do escopo.",
-            "O estado operacional das tarefas está nas issues do GitHub, sem duplicar o estado neste arquivo.",
+            "This roadmap organizes deliverables through 1.0. R01 through R10 are internal milestones;",
+            "R11 combines stabilization and publication of 1.0, without removing features from scope.",
+            "Operational task status lives in GitHub issues and is not duplicated in this file.",
             "",
         ],
     );
     lines.push(format!(
-        "São {} milestones e {count} issues: um bootstrap, tarefas funcionais e um gate por marco.",
+        "There are {} milestones and {count} issues: one bootstrap, functional tasks, and one gate per milestone.",
         releases.len()
     ));
     append(
         &mut lines,
         &[
-            "O repositório e os artefatos permanecem privados; a crate usa `publish = false`.",
+            "The repository and artifacts remain private; the crate uses `publish = false`.",
             "",
-            "CI e publicação automática estão desativadas até e incluindo a 1.0.",
-            "Uma retomada posterior exige implementação e alteração explícitas da política.",
-            "Até lá, execute e registre manualmente as verificações e a publicação; os critérios de qualidade permanecem.",
+            "CI and automatic publication are disabled through and including 1.0.",
+            "Resuming them later requires implementation and an explicit policy change.",
+            "Until then, run and record checks and publication manually; quality criteria remain in effect.",
             "",
-            "## Índice",
+            "## Contents",
             "",
-            "- [Marcos e publicação](#marcos-e-publicação)",
-            "- [Bootstrap comprovado](#bootstrap-comprovado)",
-            "- [Contratos transversais](#contratos-transversais)",
-            "- [Tarefas por marco](#tarefas-por-marco)",
-            "- [Execução e publicação](#execução-e-publicação)",
+            "- [Milestones and publication](#milestones-and-publication)",
+            "- [Verified bootstrap](#verified-bootstrap)",
+            "- [Cross-cutting contracts](#cross-cutting-contracts)",
+            "- [Tasks by milestone](#tasks-by-milestone)",
+            "- [Execution and publication](#execution-and-publication)",
             "",
-            "## Marcos e publicação",
+            "## Milestones and publication",
             "",
-            "| Milestone | Entrega | Tarefas | Encerramento |",
+            "| Milestone | Deliverable | Tasks | Completion |",
             "| --- | --- | --- | --- |",
         ],
     );
@@ -508,13 +508,13 @@ pub fn render(plan: &Value) -> Result<String, String> {
             text(release, "title", "release")?,
             array(&release["tasks"], "tasks", false)?.len(),
             if release["publication"] == true {
-                "Candidata e final com o mesmo SHA e os mesmos assets"
+                "Candidate and final with the same SHA and assets"
             } else {
-                "Validação interna, sem publicação"
+                "Internal validation, without publication"
             }
         ));
     }
-    append(&mut lines, &["", "## Bootstrap comprovado", ""]);
+    append(&mut lines, &["", "## Verified bootstrap", ""]);
     for item in bootstrap {
         lines.push(format!(
             "- [x] `{}`: {}.",
@@ -525,21 +525,21 @@ pub fn render(plan: &Value) -> Result<String, String> {
             .iter()
             .enumerate()
         {
-            lines.push(format!("  [Evidência {}]({url})", index + 1));
+            lines.push(format!("  [Evidence {}]({url})", index + 1));
         }
     }
-    append(&mut lines, &["", "## Contratos transversais", ""]);
+    append(&mut lines, &["", "## Cross-cutting contracts", ""]);
     for decision in strings(&plan["contracts"]["decisions"], "decisions", false)? {
         lines.push(format!("- {decision}"));
     }
     lines.push(String::new());
     lines.push(format!(
-        "Fora do escopo até a 1.0: {}.",
+        "Out of scope through 1.0: {}.",
         strings(&plan["contracts"]["after_1_0"], "after_1_0", false)?.join("; ")
     ));
     lines.push(String::new());
     lines.push(format!(
-        "Referência fixada: Redis e `redis-cli` {}, plataforma `{}`.",
+        "Pinned reference: Redis and `redis-cli` {}, platform `{}`.",
         text(&plan["reference"], "redis_version", "reference")?,
         text(&plan["reference"], "platform", "reference")?
     ));
@@ -551,13 +551,13 @@ pub fn render(plan: &Value) -> Result<String, String> {
             text(&plan["reference"], "image", "reference")?,
             "```",
             "",
-            "A imagem fixada é uma entrada da suíte; só uma execução registrada constitui evidência de compatibilidade.",
+            "The pinned image is a suite input; only a recorded run constitutes compatibility evidence.",
             "",
-            "## Tarefas por marco",
+            "## Tasks by milestone",
             "",
-            "Objetivos, entregáveis, testes e critérios completos de cada issue estão no",
-            "[manifesto versionado](releases/plan.json). Somente as dependências técnicas das tarefas",
-            "limitam o paralelismo; a ordem dos marcos neste documento não cria dependências.",
+            "The full objectives, deliverables, tests, and criteria for each issue are in the",
+            "[versioned manifest](releases/plan.json). Only the technical dependencies of tasks",
+            "limit parallelism; milestone order in this document does not create dependencies.",
             "",
         ],
     );
@@ -573,7 +573,11 @@ pub fn render(plan: &Value) -> Result<String, String> {
         }
         append(
             &mut lines,
-            &["", "| ID | Entrega | Dependências |", "| --- | --- | --- |"],
+            &[
+                "",
+                "| ID | Deliverable | Dependencies |",
+                "| --- | --- | --- |",
+            ],
         );
         for task in array(&release["tasks"], "tasks", false)? {
             let dependencies = strings(&task["depends_on"], "depends_on", true)?.join(", ");
@@ -582,7 +586,7 @@ pub fn render(plan: &Value) -> Result<String, String> {
                 text(task, "id", "task")?,
                 text(task, "title", "task")?,
                 if dependencies.is_empty() {
-                    "Nenhuma"
+                    "None"
                 } else {
                     &dependencies
                 }
@@ -597,14 +601,14 @@ pub fn render(plan: &Value) -> Result<String, String> {
         ));
         lines.push(String::new());
         lines.push(format!(
-            "Evidências obrigatórias: {}.",
+            "Required evidence: {}.",
             strings(&release["required_gates"], "required_gates", false)?
                 .iter()
                 .map(|gate| format!("`{gate}`"))
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
-        append(&mut lines, &["", "Critérios para encerrar o marco:", ""]);
+        append(&mut lines, &["", "Milestone completion criteria:", ""]);
         for acceptance in strings(&gate["acceptance"], "acceptance", false)? {
             lines.push(format!("- {acceptance}"));
         }
@@ -613,39 +617,39 @@ pub fn render(plan: &Value) -> Result<String, String> {
     append(
         &mut lines,
         &[
-            "## Execução e publicação",
+            "## Execution and publication",
             "",
-            "1. Selecione tarefas desbloqueadas pelo DAG técnico; trilhas independentes podem avançar em paralelo.",
-            "2. Inclua testes e evidências; mantenha código compilável e commits atômicos em cada etapa.",
-            "3. Integre o PR vinculado à issue por merge commit após verificação manual registrada.",
-            "4. Encerre R01 a R10 após conferir os critérios locais; esses marcos não criam candidata, tag ou release.",
-            "5. Depois de validar todos os marcos, prepare a candidata 1.0 em um SHA e bundle imutáveis; o merge não dispara publicação.",
-            "6. A final promove exatamente o mesmo SHA e os mesmos assets aprovados na candidata, sem recompilar. Qualquer mudança no bundle exige outra candidata.",
-            "7. Encerre R11 somente após conferir a publicação final e seus artefatos.",
+            "1. Select tasks unblocked by the technical DAG; independent tracks may advance in parallel.",
+            "2. Include tests and evidence; keep code buildable and commits atomic at each stage.",
+            "3. Merge the issue-linked PR with a merge commit after recording manual verification.",
+            "4. Close R01 through R10 after checking local criteria; these milestones do not create a candidate, tag, or release.",
+            "5. After validating all milestones, prepare the 1.0 candidate with an immutable SHA and bundle; merging does not trigger publication.",
+            "6. The final release promotes exactly the same SHA and assets approved in the candidate, without rebuilding. Any bundle change requires another candidate.",
+            "7. Close R11 only after verifying final publication and its artifacts.",
             "",
-            "O fluxo completo e os comandos de preparação estão no [guia de releases](docs/releases.md).",
-            "Não há workflows de CI nem publicador automático neste repositório.",
-            "A candidata 1.0 exige uma hora de carga contínua, além de todos os gates das capacidades entregues.",
-            "Teste obrigatório ausente, ignorado, cancelado ou sem relatório bloqueia o encerramento do marco e a publicação.",
-            "Migração usa fixtures e executáveis das baselines internas congeladas por SHA e hashes; a 1.0 migra a baseline R10.",
+            "The complete workflow and preparation commands are in the [release guide](docs/releases.md).",
+            "This repository has no CI workflows or automatic publisher.",
+            "The 1.0 candidate requires one hour of continuous load, in addition to all gates for delivered capabilities.",
+            "A required test that is missing, ignored, cancelled, or lacks a report blocks milestone completion and publication.",
+            "Migration uses fixtures and executables from internal baselines frozen by SHA and hashes; 1.0 migrates the R10 baseline.",
             "",
-            "Os pacotes são Linux GNU x86_64 (`.tar.gz`, Ubuntu 24.04) e Windows MSVC x86_64 (`.zip`).",
-            "R10 valida a imagem Docker Linux amd64 exportada que acompanha a publicação privada da 1.0.",
-            "Checksums SHA-256, manifesto de build e notas acompanham os binários testados depois da extração.",
+            "The packages are Linux GNU x86_64 (`.tar.gz`, Ubuntu 24.04) and Windows MSVC x86_64 (`.zip`).",
+            "R10 validates the exported Linux amd64 Docker image accompanying the private 1.0 publication.",
+            "SHA-256 checksums, a build manifest, and notes accompany the binaries tested after extraction.",
             "",
-            "Patches publicáveis, como `1.0.1`, precisam de registro próprio no manifesto e de candidata.",
-            "Mudanças de compatibilidade dos marcos internos permanecem documentadas. Não há datas artificiais.",
+            "Publishable patches, such as `1.0.1`, need their own manifest entry and a candidate.",
+            "Compatibility changes in internal milestones remain documented. There are no artificial dates.",
             "",
-            "Na retomada manual, confira drafts e uploads existentes. Tag com SHA divergente ou artefato publicado diferente",
-            "interrompe o fluxo. Uma release publicada não é sobrescrita.",
+            "When resuming manually, check existing drafts and uploads. A tag with a mismatched SHA or a different published artifact",
+            "stops the workflow. A published release is not overwritten.",
             "",
-            "Para validar a fonte e a projeção sem alterar arquivos:",
+            "To validate the source and projection without changing files:",
             "",
             "```sh",
             "cargo xtask validate",
             "```",
             "",
-            "Para regenerar a projeção a partir do manifesto:",
+            "To regenerate the projection from the manifest:",
             "",
             "```sh",
             "cargo xtask roadmap --write",
@@ -668,10 +672,10 @@ mod tests {
     fn invalid(change: impl FnOnce(&mut Value), expected: &str) {
         let mut plan = real();
         change(&mut plan);
-        let error = validate(&plan).expect_err("manifesto alterado deve ser rejeitado");
+        let error = validate(&plan).expect_err("modified manifest must be rejected");
         assert!(
             error.contains(expected),
-            "esperado {expected:?}, recebido {error:?}"
+            "expected {expected:?}, received {error:?}"
         );
     }
 
@@ -710,17 +714,17 @@ mod tests {
         for text in [
             "cargo xtask validate",
             "cargo xtask roadmap --write",
-            "CI multiplataforma",
-            "Replicação",
-            "desativadas até e incluindo a 1.0",
-            "o merge não dispara publicação",
-            "verificação manual registrada",
-            "uma hora de carga contínua",
-            "mesmo SHA e os mesmos assets",
-            "sem recompilar",
+            "cross-platform CI",
+            "Replication",
+            "disabled through and including 1.0",
+            "merging does not trigger publication",
+            "recording manual verification",
+            "one hour of continuous load",
+            "same SHA and assets",
+            "without rebuilding",
             "34177280948",
         ] {
-            assert!(rendered.contains(text), "trecho ausente: {text}");
+            assert!(rendered.contains(text), "missing excerpt: {text}");
         }
         for text in [
             "python",
@@ -734,7 +738,7 @@ mod tests {
             "\r",
             "—",
         ] {
-            assert!(!rendered.contains(text), "trecho indevido: {text}");
+            assert!(!rendered.contains(text), "unexpected excerpt: {text}");
         }
         assert!(rendered.ends_with('\n'));
         for release in plan["releases"].as_array().unwrap() {
@@ -760,7 +764,7 @@ mod tests {
             assert!(
                 release_for_version(&plan, version)
                     .unwrap_err()
-                    .contains("sem milestone")
+                    .contains("no milestone")
             );
         }
     }
@@ -774,7 +778,7 @@ mod tests {
                 assert!(
                     release_for_version(&plan, &requested)
                         .unwrap_err()
-                        .contains("Marco interno")
+                        .contains("Internal milestone")
                 );
             }
         }
@@ -853,22 +857,22 @@ mod tests {
     fn duplicate_ids_wrong_prefixes_and_nonobjects_are_rejected() {
         invalid(
             |p| p["releases"][0]["tasks"][1]["id"] = json!("R01-01"),
-            "ID duplicado",
+            "Duplicate ID",
         );
         invalid(
             |p| p["releases"][0]["gate"]["id"] = json!("R01-01"),
-            "ID inválido",
+            "Invalid ID",
         );
         for id in ["R1", "r01", "R001", "R０1", "R01\n"] {
-            invalid(|p| p["releases"][0]["id"] = json!(id), "ID inválido");
+            invalid(|p| p["releases"][0]["id"] = json!(id), "Invalid ID");
         }
         invalid(
             |p| p["releases"][0]["tasks"][0]["id"] = json!("R02-01"),
-            "ID inválido",
+            "Invalid ID",
         );
-        invalid(|p| p["bootstrap"][0]["id"] = json!("B0-01"), "ID inválido");
+        invalid(|p| p["bootstrap"][0]["id"] = json!("B0-01"), "Invalid ID");
         for value in [Value::Null, json!(5), json!([]), json!("task")] {
-            invalid(|p| p["releases"][0]["tasks"][0] = value, "objeto");
+            invalid(|p| p["releases"][0]["tasks"][0] = value, "object");
         }
     }
 
@@ -876,23 +880,23 @@ mod tests {
     fn dependency_existence_types_and_cycles_are_checked() {
         invalid(
             |p| p["releases"][0]["tasks"][0]["depends_on"] = json!(["R99-01"]),
-            "inexistente",
+            "nonexistent",
         );
         invalid(
             |p| p["releases"][1]["tasks"][0]["depends_on"] = json!(["R01"]),
-            "tarefa deve depender",
+            "task must depend",
         );
         invalid(
             |p| p["releases"][0]["depends_on"] = json!(["B00-01"]),
-            "release.depends_on não existe",
+            "release.depends_on does not exist",
         );
         invalid(
             |p| p["releases"][0]["tasks"][0]["depends_on"] = json!(["R01-02"]),
-            "Ciclo",
+            "cycle",
         );
         invalid(
             |p| p["releases"][0]["tasks"][0]["depends_on"] = json!(["R01-GATE"]),
-            "Ciclo",
+            "cycle",
         );
     }
 
@@ -934,17 +938,17 @@ mod tests {
     fn release_versions_are_unique_base_versions_in_numeric_order() {
         invalid(
             |p| p["releases"][1]["version"] = json!("0.1.0"),
-            "Versão duplicada",
+            "Duplicate version",
         );
         for version in ["0.1.0-rc.1", "v0.1.0", "00.1.0"] {
             invalid(
                 |p| p["releases"][0]["version"] = json!(version),
-                "Versão-base inválida",
+                "Invalid base version",
             );
         }
         invalid(
             |p| p["releases"].as_array_mut().unwrap().swap(1, 2),
-            "ordem semântica",
+            "semantic version order",
         );
         assert!(base_version("0.10.0") > base_version("0.9.0"));
     }
@@ -983,7 +987,7 @@ mod tests {
                     .unwrap()
                     .push(json!("pretend_pass"))
             },
-            "desconhecido",
+            "unknown",
         );
         invalid(
             |p| {
@@ -992,7 +996,7 @@ mod tests {
                     .unwrap()
                     .push(json!("types"))
             },
-            "capacidade local",
+            "local capability",
         );
         invalid(
             |p| {
@@ -1001,7 +1005,7 @@ mod tests {
                     .unwrap()
                     .push(json!("native"))
             },
-            "duplicados",
+            "duplicate",
         );
     }
 
@@ -1033,7 +1037,7 @@ mod tests {
         );
         invalid(
             |p| p["releases"][0]["tasks"][0]["tests"] = json!(["same", "same"]),
-            "duplicados",
+            "duplicate",
         );
     }
 
@@ -1042,7 +1046,7 @@ mod tests {
         invalid(|p| p["bootstrap"][0]["evidence"] = json!([]), "evidence");
         invalid(
             |p| p["bootstrap"][0]["status"] = json!("planned"),
-            "comprovadas",
+            "verified",
         );
         invalid(|p| p["bootstrap"] = Value::Null, "bootstrap");
     }
@@ -1066,12 +1070,12 @@ mod tests {
             "/repo",
             "owner/",
             "owner with space/repo",
-            "usuário/repo",
+            "usér/repo",
         ] {
             invalid(
                 |p| p["repository"] = json!(repo),
                 if repo.is_empty() {
-                    "texto"
+                    "text"
                 } else {
                     "owner/repo"
                 },
@@ -1080,15 +1084,15 @@ mod tests {
         invalid(|p| p["contracts"] = json!([]), "contracts");
         invalid(
             |p| p["contracts"]["commands_added"]["9.0.0"] = json!(["FUTURE"]),
-            "sem release",
+            "without a release",
         );
         invalid(
             |p| p["contracts"]["commands_added"]["0.1.0-rc.1"] = json!(["PING"]),
-            "versão inválida",
+            "invalid version",
         );
         invalid(
             |p| p["contracts"]["decisions"] = json!([" "]),
-            "textos não vazios",
+            "nonempty strings",
         );
     }
 
@@ -1104,7 +1108,7 @@ mod tests {
             invalid(
                 |p| p["reference"][field] = json!(value),
                 if field.contains("version") {
-                    "mesma versão"
+                    "same version"
                 } else {
                     "reference"
                 },
@@ -1163,7 +1167,7 @@ mod tests {
             .unwrap()
             .retain(|version, _| version == "0.1.0" || version == "0.2.0");
         validate(&plan).unwrap();
-        assert!(render(&plan).unwrap().contains("São 2 milestones"));
+        assert!(render(&plan).unwrap().contains("There are 2 milestones"));
     }
 
     #[test]

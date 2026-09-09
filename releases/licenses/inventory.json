@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Avisos upstream preservados, sem seleção entre licenças alternativas ou interpretação jurídica.",
+  "description": "Upstream notices preserved, without selecting among alternative licenses or providing legal interpretation.",
   "targets": [
     "x86_64-pc-windows-msvc",
     "x86_64-unknown-linux-gnu"
@@ -18,7 +18,7 @@
     "runtime_crate_packages_without_proc_macro_edges": 32,
     "rust_version": "1.97.1",
     "additional_nested_notice": "crates/tracing-core-0.1.36/src/spin/LICENSE",
-    "note": "A seleção é conservadora por pacote/grafo, não uma atribuição de símbolos presentes no binário; o inventário Rust inclui plataformas adicionais."
+    "note": "Selection is conservative at the package/graph level, not an attribution of symbols present in the binary; the Rust inventory includes additional platforms."
   },
   "collection_commands": [
     "cargo metadata --locked --offline --format-version 1",
@@ -39,7 +39,7 @@
       "1.97.1-x86_64-pc-windows-msvc",
       "1.97.1-x86_64-unknown-linux-gnu"
     ],
-    "method": "SHA-256 e tamanho da origem e da cópia; COPYRIGHT-library.html foi comparado byte a byte com a origem seguida de um único LF."
+    "method": "SHA-256 and size of source and copy; COPYRIGHT-library.html was compared byte for byte with the source followed by a single LF."
   },
   "components": [
     {
