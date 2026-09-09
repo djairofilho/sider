@@ -25,6 +25,33 @@ const IMAGE: &str =
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+fn persistence_receipts_support_both_native_targets_without_cross_compilation() {
+    for gate in ["crash", "recovery", "migration"] {
+        for (target, os, env) in [
+            (TARGET, "linux", "gnu"),
+            ("x86_64-pc-windows-msvc", "windows", "msvc"),
+        ] {
+            let mut fixture = Fixture::new();
+            fixture.env.insert("SIDER_RELEASE_TARGET", target.into());
+            fixture.change(|state| {
+                state.plan["releases"][0]["required_gates"] = json!([gate]);
+                state.plan["release_policy"]["targets"] = json!([target]);
+                state.compiler = format!("rustc 1.97.1\nhost: {target}\nrelease: 1.97.1\n");
+                state.compiled_os = os.into();
+                state.compiled_env = env.into();
+            });
+            fixture.change(|state| state.compiled_os = "macos".into());
+            assert!(fixture.context(gate).is_err());
+            fixture.change(|state| state.compiled_os = os.into());
+            let context = fixture.context(gate).unwrap();
+            context
+                .publish(1, Duration::from_secs(1), json!({"suite":"contract"}))
+                .unwrap();
+        }
+    }
+}
+
+#[test]
 fn pubsub_receipt_requires_its_gate_in_the_plan() {
     let fixture = Fixture::new();
     assert!(fixture.context("pubsub").is_err());
