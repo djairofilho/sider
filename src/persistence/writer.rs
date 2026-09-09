@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, watch};
 
+use super::DurableLayout;
 use super::format::{self, FormatError, Limits, Next, Record};
 use crate::ConfigError;
 use crate::storage::{Clock, Mutation, ReplayError, ResolvedBatch, Store, StoreConfig};
@@ -32,6 +33,7 @@ pub enum SyncPolicy {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AofConfig {
     pub directory: PathBuf,
+    pub layout: DurableLayout,
     pub sync: SyncPolicy,
     pub queue_capacity: usize,
     pub limits: Limits,
@@ -43,6 +45,7 @@ impl AofConfig {
     pub fn new(directory: PathBuf) -> Self {
         Self {
             directory,
+            layout: DurableLayout::default(),
             sync: SyncPolicy::Always,
             queue_capacity: 32,
             limits: Limits::default(),
@@ -51,6 +54,7 @@ impl AofConfig {
         }
     }
     pub fn validate(&self) -> Result<(), ConfigError> {
+        self.layout.validate()?;
         let bad = |reason| ConfigError::InvalidServerLimits { reason };
         if self.directory.as_os_str().is_empty() {
             return Err(bad("SIDER_AOF_DIR não pode ser vazio"));
@@ -96,6 +100,23 @@ pub enum AofError {
     Compacting,
     #[error("delta da compactação excedeu o limite; AOF anterior preservado")]
     DeltaLimit,
+    #[error(
+        "configuração AOF divergente: esperado {expected:?}, encontrado {actual:?}; migração offline necessária"
+    )]
+    LayoutMismatch {
+        expected: DurableLayout,
+        actual: DurableLayout,
+    },
+    #[error("lote AOF cruza shards")]
+    CrossShard,
+    #[error("shard {shard} usa {used} bytes, excedendo a quota {quota}")]
+    ShardQuota {
+        shard: usize,
+        used: usize,
+        quota: usize,
+    },
+    #[error("migração offline recusada: {0}")]
+    Migration(&'static str),
 }
 
 /// Pontos de falha injetáveis para ensaios reproduzíveis. Produção usa NoFaults.
@@ -182,7 +203,18 @@ impl AofHandle {
 
 pub struct Recovered {
     pub store: Store,
+    pub metadata: RecoveryMetadata,
     writer: Writer,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecoveryMetadata {
+    pub layout: DurableLayout,
+    pub sequence: u64,
+    pub format_version: u32,
+    pub shard_usage: Vec<usize>,
+    pub valid_bytes: u64,
+    pub incomplete_tail_bytes: u64,
 }
 impl Recovered {
     /// Inicia somente após replay completo; o JoinHandle supervisiona sync, append e fechamento.
@@ -246,12 +278,34 @@ pub fn recover_with_faults(
     clock: Arc<dyn Clock>,
     faults: Arc<dyn FaultInjector>,
 ) -> Result<Recovered, AofError> {
+    load(config, store_config, clock, faults, false)
+}
+
+pub(super) fn recover_read_only(
+    config: AofConfig,
+    store_config: StoreConfig,
+    clock: Arc<dyn Clock>,
+) -> Result<Recovered, AofError> {
+    load(config, store_config, clock, Arc::new(NoFaults), true)
+}
+
+fn load(
+    config: AofConfig,
+    store_config: StoreConfig,
+    clock: Arc<dyn Clock>,
+    faults: Arc<dyn FaultInjector>,
+    read_only: bool,
+) -> Result<Recovered, AofError> {
     config.validate()?;
-    fs::create_dir_all(&config.directory)?;
+    store_config.validate()?;
+    config.layout.quota(store_config.max_dataset_bytes, 0)?;
+    if !read_only {
+        fs::create_dir_all(&config.directory)?;
+    }
     let lock = OpenOptions::new()
         .read(true)
         .write(true)
-        .create(true)
+        .create(!read_only)
         .truncate(false)
         .open(config.directory.join("writer.lock"))?;
     lock.try_lock().map_err(|error| match error {
@@ -276,13 +330,16 @@ pub fn recover_with_faults(
     let generation = generations.last().copied().unwrap_or(0);
     let path = generation_path(&config.directory, generation);
     if generations.is_empty() {
+        if read_only {
+            return Err(AofError::Sequence);
+        }
         // Publica somente o arquivo inicial completo; resíduos .tmp nunca são candidatos.
         let temporary = temporary_path(&config.directory, "initial");
         let mut initial = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&temporary)?;
-        format::write_header(&mut initial, 0)?;
+        format::write_header_with_layout(&mut initial, 0, config.layout)?;
         initial.write_all(&format::encode(
             &Record::Seal {
                 sequence: 0,
@@ -296,15 +353,26 @@ pub fn recover_with_faults(
         fs::rename(&temporary, &path)?;
         sync_directory(&config.directory)?;
     }
-    let mut file = OpenOptions::new().read(true).write(true).open(&path)?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(!read_only)
+        .open(&path)?;
     let mut store = Store::with_config(store_config, clock)?;
-    let base = format::read_header(&mut file)?;
+    let header = format::read_header_with_layout(&mut file)?;
+    if header.layout != config.layout {
+        return Err(AofError::LayoutMismatch {
+            expected: config.layout,
+            actual: header.layout,
+        });
+    }
+    let base = header.sequence;
+    let mut shard_usage = vec![0; config.layout.shard_count as usize];
     let mut sequence = base;
     let mut sealed = false;
     let mut previous_key = None;
     let mut snapshot_entries = 0u64;
     let mut snapshot_digest = 0u32;
-    let mut valid_bytes = format::HEADER_BYTES as u64;
+    let mut valid_bytes = header.bytes as u64;
     let incomplete = loop {
         match format::read_record(&mut file, config.limits)? {
             Next::End => break false,
@@ -322,7 +390,13 @@ pub fn recover_with_faults(
                     snapshot_digest,
                     &format::encode(&Record::Snapshot(mutation.clone()), config.limits)?,
                 );
-                store.replay(&[mutation])?;
+                replay_routed(
+                    &mut store,
+                    &[mutation],
+                    config.layout,
+                    store_config.max_dataset_bytes,
+                    &mut shard_usage,
+                )?;
             }
             Next::Record(Record::Seal {
                 sequence: seal,
@@ -339,7 +413,13 @@ pub fn recover_with_faults(
                 sequence: next,
                 batch,
             }) if sealed && sequence.checked_add(1) == Some(next) => {
-                store.replay(&batch.mutations)?;
+                replay_routed(
+                    &mut store,
+                    &batch.mutations,
+                    config.layout,
+                    store_config.max_dataset_bytes,
+                    &mut shard_usage,
+                )?;
                 sequence = next;
             }
             _ => return Err(AofError::Sequence),
@@ -349,7 +429,12 @@ pub fn recover_with_faults(
     if !sealed {
         return Err(AofError::Sequence);
     }
-    if incomplete {
+    let incomplete_tail_bytes = if incomplete {
+        file.metadata()?.len() - valid_bytes
+    } else {
+        0
+    };
+    if incomplete && !read_only {
         faults.hit("recovery_before_truncate")?;
         // Preserva o original para diagnóstico antes de descartar somente a cauda incompleta.
         let backup = config.directory.join(format!(
@@ -371,6 +456,14 @@ pub fn recover_with_faults(
     file.seek(SeekFrom::End(0))?;
     Ok(Recovered {
         store,
+        metadata: RecoveryMetadata {
+            layout: header.layout,
+            sequence,
+            format_version: header.format_version,
+            shard_usage,
+            valid_bytes,
+            incomplete_tail_bytes,
+        },
         writer: Writer {
             config,
             file,
@@ -386,6 +479,45 @@ pub fn recover_with_faults(
     })
 }
 
+fn batch_shard(mutations: &[Mutation], layout: DurableLayout) -> Result<usize, AofError> {
+    let mut selected = None;
+    for mutation in mutations {
+        let shard = layout.shard_for(mutation.key())?;
+        if selected.is_some_and(|previous| previous != shard) {
+            return Err(AofError::CrossShard);
+        }
+        selected = Some(shard);
+    }
+    Ok(selected.unwrap_or(0))
+}
+
+fn replay_routed(
+    store: &mut Store,
+    mutations: &[Mutation],
+    layout: DurableLayout,
+    total: usize,
+    usage: &mut [usize],
+) -> Result<(), AofError> {
+    let shard = batch_shard(mutations, layout)?;
+    let before = store.used_bytes();
+    store.replay(mutations)?;
+    let after = store.used_bytes();
+    if after >= before {
+        usage[shard] += after - before;
+    } else {
+        usage[shard] -= before - after;
+    }
+    let quota = layout.quota(total, shard)?;
+    if usage[shard] > quota {
+        return Err(AofError::ShardQuota {
+            shard,
+            used: usage[shard],
+            quota,
+        });
+    }
+    Ok(())
+}
+
 fn generation_path(directory: &Path, generation: u64) -> PathBuf {
     directory.join(format!("generation-{generation:020}.aof"))
 }
@@ -393,11 +525,11 @@ fn generation_path(directory: &Path, generation: u64) -> PathBuf {
 // Rust não expõe sync de diretório portátil no Windows. Preservamos gerações antigas;
 // garantia Windows cobre término do processo, sem prometer atomicidade contra queda de energia.
 #[cfg(unix)]
-fn sync_directory(directory: &Path) -> io::Result<()> {
+pub(super) fn sync_directory(directory: &Path) -> io::Result<()> {
     File::open(directory)?.sync_all()
 }
 #[cfg(not(unix))]
-fn sync_directory(_: &Path) -> io::Result<()> {
+pub(super) fn sync_directory(_: &Path) -> io::Result<()> {
     Ok(())
 }
 
@@ -456,6 +588,7 @@ impl Writer {
     }
 
     fn append(&mut self, batch: ResolvedBatch) -> Result<u64, AofError> {
+        batch_shard(&batch.mutations, self.config.layout)?;
         let sequence = self.sequence.checked_add(1).ok_or(AofError::Sequence)?;
         let encoded = format::encode(&Record::Batch { sequence, batch }, self.config.limits)?;
         self.faults.hit("before_append")?;
@@ -515,6 +648,7 @@ impl Writer {
         let faults = self.faults.clone();
         let sequence = self.sequence;
         let limits = self.config.limits;
+        let layout = self.config.layout;
         std::thread::spawn(move || {
             let result = (|| {
                 faults.hit("compact_before_snapshot")?;
@@ -523,7 +657,7 @@ impl Writer {
                     .write(true)
                     .create_new(true)
                     .open(&path)?;
-                format::write_header(&mut file, sequence)?;
+                format::write_header_with_layout(&mut file, sequence, layout)?;
                 let mut previous = None;
                 let mut entries = 0u64;
                 let mut digest = 0u32;

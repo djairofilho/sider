@@ -5,11 +5,14 @@ use std::io::{self, Read, Write};
 use bytes::Bytes;
 use thiserror::Error;
 
+use super::DurableLayout;
 use crate::storage::{Mutation, MutationOrigin, ResolvedBatch};
 
 pub const MAGIC: &[u8; 8] = b"SIDERAOF";
 pub const VERSION: u32 = 1;
 pub const HEADER_BYTES: usize = 24;
+pub const LAYOUT_VERSION: u32 = 2;
+pub const LAYOUT_HEADER_BYTES: usize = 32;
 pub const MAX_RECORD_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +41,14 @@ pub enum FormatError {
     Limit,
     #[error("registro AOF corrompido: {0}")]
     Corrupt(&'static str),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Header {
+    pub sequence: u64,
+    pub layout: DurableLayout,
+    pub format_version: u32,
+    pub bytes: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,23 +83,75 @@ pub fn write_header(mut output: impl Write, sequence: u64) -> Result<(), FormatE
 }
 
 pub fn read_header(mut input: impl Read) -> Result<u64, FormatError> {
-    let mut header = [0; HEADER_BYTES];
-    match input.read_exact(&mut header) {
+    Ok(read_header_with_layout(&mut input)?.sequence)
+}
+
+/// Novos arquivos registram a configuração; `write_header` conserva o encoder legado v1.
+pub fn write_header_with_layout(
+    mut output: impl Write,
+    sequence: u64,
+    layout: DurableLayout,
+) -> Result<(), FormatError> {
+    layout
+        .validate()
+        .map_err(|_| FormatError::Corrupt("configuração de shards"))?;
+    let mut header = Vec::with_capacity(LAYOUT_HEADER_BYTES);
+    header.extend_from_slice(MAGIC);
+    header.extend_from_slice(&LAYOUT_VERSION.to_le_bytes());
+    header.extend_from_slice(&sequence.to_le_bytes());
+    header.extend_from_slice(&layout.shard_count.to_le_bytes());
+    header.extend_from_slice(&layout.routing_version.to_le_bytes());
+    header.extend_from_slice(&checksum(&header).to_le_bytes());
+    output.write_all(&header)?;
+    Ok(())
+}
+
+pub fn read_header_with_layout(mut input: impl Read) -> Result<Header, FormatError> {
+    let mut prefix = [0; 12];
+    match input.read_exact(&mut prefix) {
         Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
             return Err(FormatError::Header);
         }
         result => result?,
     }
-    if &header[..8] != MAGIC
-        || checksum(&header[..20]) != u32::from_le_bytes(header[20..].try_into().unwrap())
+    if &prefix[..8] != MAGIC {
+        return Err(FormatError::Header);
+    }
+    let version = u32::from_le_bytes(prefix[8..12].try_into().unwrap());
+    let bytes = match version {
+        VERSION => HEADER_BYTES,
+        LAYOUT_VERSION => LAYOUT_HEADER_BYTES,
+        _ => return Err(FormatError::Version(version)),
+    };
+    let mut header = vec![0; bytes];
+    header[..12].copy_from_slice(&prefix);
+    match input.read_exact(&mut header[12..]) {
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
+            return Err(FormatError::Header);
+        }
+        result => result?,
+    }
+    if checksum(&header[..bytes - 4]) != u32::from_le_bytes(header[bytes - 4..].try_into().unwrap())
     {
         return Err(FormatError::Header);
     }
-    let version = u32::from_le_bytes(header[8..12].try_into().unwrap());
-    if version != VERSION {
-        return Err(FormatError::Version(version));
-    }
-    Ok(u64::from_le_bytes(header[12..20].try_into().unwrap()))
+    let layout = if version == VERSION {
+        DurableLayout::default()
+    } else {
+        DurableLayout {
+            shard_count: u32::from_le_bytes(header[20..24].try_into().unwrap()),
+            routing_version: u32::from_le_bytes(header[24..28].try_into().unwrap()),
+        }
+    };
+    layout
+        .validate()
+        .map_err(|_| FormatError::Corrupt("configuração de shards"))?;
+    Ok(Header {
+        sequence: u64::from_le_bytes(header[12..20].try_into().unwrap()),
+        layout,
+        format_version: version,
+        bytes,
+    })
 }
 
 fn mutation_size(mutation: &Mutation) -> Result<usize, FormatError> {
@@ -421,12 +484,12 @@ mod tests {
             assert!(read_header(&header[..length]).is_err());
         }
         assert_eq!(read_header(header.as_slice()).unwrap(), 7);
-        header[8..12].copy_from_slice(&2u32.to_le_bytes());
+        header[8..12].copy_from_slice(&99u32.to_le_bytes());
         let crc = checksum(&header[..20]);
         header[20..].copy_from_slice(&crc.to_le_bytes());
         assert!(matches!(
             read_header(header.as_slice()),
-            Err(FormatError::Version(2))
+            Err(FormatError::Version(99))
         ));
         let huge = [
             u32::MAX.to_le_bytes(),

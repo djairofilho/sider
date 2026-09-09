@@ -6,6 +6,7 @@ description = "In-memory database server with an incremental Redis-compatible co
 repository = "https://github.com/djairofilho/sider"
 license = "MIT"
 publish = false
+default-run = "sider"
 
 [dependencies]
 bytes = "1"

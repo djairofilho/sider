@@ -753,8 +753,12 @@ fn removed_snapshot_record_is_rejected_even_when_other_checksums_are_valid() {
     });
     let path = directory.0.join("generation-00000000000000000001.aof");
     let mut bytes = fs::read(&path).unwrap();
-    let record_size = u32::from_le_bytes(bytes[24..28].try_into().unwrap()) as usize + 12;
-    bytes.drain(24..24 + record_size);
+    let header_bytes = format::read_header_with_layout(bytes.as_slice())
+        .unwrap()
+        .bytes;
+    let record_size =
+        u32::from_le_bytes(bytes[header_bytes..header_bytes + 4].try_into().unwrap()) as usize + 12;
+    bytes.drain(header_bytes..header_bytes + record_size);
     fs::write(&path, &bytes).unwrap();
     assert!(
         persistence::recover(
@@ -954,9 +958,12 @@ fn migration_cases() -> u64 {
     drop(recovered);
     let path = directory.0.join("generation-00000000000000000001.aof");
     let mut unknown = fs::read(&path).unwrap();
+    let header_bytes = format::read_header_with_layout(unknown.as_slice())
+        .unwrap()
+        .bytes;
     unknown[8..12].copy_from_slice(&99u32.to_le_bytes());
-    let crc = format::checksum(&unknown[..20]);
-    unknown[20..24].copy_from_slice(&crc.to_le_bytes());
+    let crc = format::checksum(&unknown[..header_bytes - 4]);
+    unknown[header_bytes - 4..header_bytes].copy_from_slice(&crc.to_le_bytes());
     fs::write(&path, &unknown).unwrap();
     assert!(
         persistence::recover(
