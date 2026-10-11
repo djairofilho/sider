@@ -1,0 +1,10 @@
+[package]
+name = "sider-lua-pure-rust-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+omnilua = { version = "=0.7.1", default-features = false }
