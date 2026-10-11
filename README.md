@@ -216,6 +216,7 @@ with manual execution and evidence on the required platforms.
 | [docs/redis-benchmarks.md](docs/redis-benchmarks.md) | Comparative benchmark method and limits |
 | [docs/security-boundary.md](docs/security-boundary.md) | Network exposure and authentication contract |
 | [docs/agent-memory-v1.md](docs/agent-memory-v1.md) | Proposed AI memory contract and persistence reservations |
+| [examples/agent-memory/README.md](examples/agent-memory/README.md) | Deterministic external embedding fixture and memory lifecycle example |
 | [docs/lua-scripting.md](docs/lua-scripting.md) | Scripting contract and isolated containment spike |
 | [docs/cross-shard-transactions.md](docs/cross-shard-transactions.md) | Proposed mixed-owner transaction contract |
 | [docs/durable-format-registry.md](docs/durable-format-registry.md) | Proposed AOF, replication, and backup format composition |
