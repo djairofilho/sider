@@ -9,13 +9,15 @@ use std::time::Duration;
 use bytes::Bytes;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use sider::command::{Command, Reply};
 use sider::persistence::{self, AofConfig, DurableLayout, backup, composed_format, format};
 use sider::replication::{
     Cursor, composed,
     protocol::{self, ComposedHello, Hello, Message},
 };
-use sider::storage::{Clock, Mutation, StoreConfig};
+use sider::storage::{Clock, Mutation, Store, StoreConfig, SystemClock, worker};
 use tokio::io::{AsyncWriteExt, duplex};
+use tokio::sync::watch;
 
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 const CURSOR: Cursor = Cursor {
@@ -199,6 +201,207 @@ async fn schema3_export_verify_and_restore_use_header7_exactly() {
     );
     assert_eq!(recovered.metadata.sequence, CURSOR.sequence);
     assert_eq!(recovered.store.snapshot(), images());
+}
+
+#[tokio::test]
+async fn live_mixed_owner_exec_exports_one_durable_cut() {
+    let directory = Directory::new();
+    let mut config = AofConfig::new(directory.child("live-aof"));
+    config.layout = layout();
+    let store_config = StoreConfig::default();
+    let recovered =
+        persistence::recover_composed(config.clone(), store_config, Arc::new(SystemClock)).unwrap();
+    let (_empty, aof, writer) = recovered.start();
+    let (stop, shutdown) = watch::channel(false);
+    let stores = (0..layout().shard_count)
+        .map(|_| Store::with_config(store_config, Arc::new(SystemClock)).unwrap())
+        .collect();
+    let (database, owners) =
+        worker::channel_with_stores(8, Duration::from_secs(5), shutdown, stores).unwrap();
+    assert_ne!(
+        layout().shard_for(b"a").unwrap(),
+        layout().shard_for(b"b").unwrap()
+    );
+    let database = database.with_composed_aof(aof.clone()).unwrap();
+    let tasks: Vec<_> = owners
+        .into_iter()
+        .map(|owner| tokio::spawn(owner.with_aof(aof.clone(), 0).run()))
+        .collect();
+    assert_eq!(
+        database
+            .execute_batch(
+                vec![
+                    Command::Set {
+                        key: Bytes::from_static(b"a"),
+                        value: Bytes::from_static(b"first"),
+                    },
+                    Command::Set {
+                        key: Bytes::from_static(b"b"),
+                        value: Bytes::from_static(b"second"),
+                    },
+                ],
+                Vec::new(),
+            )
+            .await
+            .unwrap(),
+        Reply::Array(vec![Reply::Ok, Reply::Ok])
+    );
+    assert_eq!(aof.status().await.unwrap().0, 1);
+    let limits = backup::Limits::default();
+    let (mut invalid_producer, mut invalid_consumer) = duplex(128);
+    let unbound = database.clone().with_unpersisted_multi_owner();
+    let invalid_aof = aof.clone();
+    let rejected = tokio::spawn(async move {
+        composed::export_database(
+            &mut invalid_producer,
+            &unbound,
+            &invalid_aof,
+            hello(None, limits),
+            [9; 16],
+            protocol::Limits::default(),
+            Duration::from_secs(5),
+        )
+        .await
+    });
+    let rejected_archive = directory.child("unbound-archive");
+    assert!(
+        backup::export_composed_stream(
+            &mut invalid_consumer,
+            options(&rejected_archive, limits),
+            clock(),
+        )
+        .await
+        .is_err()
+    );
+    assert!(rejected.await.unwrap().is_err());
+    assert!(!rejected_archive.exists());
+    let (mut producer, mut consumer) = duplex(128);
+    let source_database = database.clone();
+    let source_aof = aof.clone();
+    let source = tokio::spawn(async move {
+        composed::export_database(
+            &mut producer,
+            &source_database,
+            &source_aof,
+            hello(None, limits),
+            [9; 16],
+            protocol::Limits::default(),
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+    });
+    let archive = directory.child("live-archive");
+    let manifest =
+        backup::export_composed_stream(&mut consumer, options(&archive, limits), clock())
+            .await
+            .unwrap();
+    source.await.unwrap();
+    assert_eq!(manifest.cursor.sequence, 1);
+    backup::verify_composed(&archive, layout(), limits, clock()).unwrap();
+    let restored = directory.child("live-restored");
+    backup::restore_composed(
+        backup::RestoreOptions {
+            source: archive,
+            destination: restored.clone(),
+            layout: layout(),
+            limits,
+        },
+        clock(),
+    )
+    .unwrap();
+    let mut restored_config = AofConfig::new(restored);
+    restored_config.layout = layout();
+    let restored =
+        persistence::recover_composed(restored_config, store_config, Arc::new(SystemClock))
+            .unwrap();
+    assert_eq!(restored.metadata.sequence, 1);
+    assert_eq!(
+        restored.store.snapshot(),
+        vec![
+            Mutation::Put {
+                key: Bytes::from_static(b"a"),
+                value: Bytes::from_static(b"first").into(),
+                expires_at_unix_ms: None,
+            },
+            Mutation::Put {
+                key: Bytes::from_static(b"b"),
+                value: Bytes::from_static(b"second").into(),
+                expires_at_unix_ms: None,
+            },
+        ]
+    );
+    drop(restored);
+    drop(database);
+    stop.send_replace(true);
+    for task in tasks {
+        task.await.unwrap();
+    }
+    drop(aof);
+    writer.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn composed_export_refuses_an_owner_without_the_shared_writer() {
+    let directory = Directory::new();
+    let mut config = AofConfig::new(directory.child("misbound-aof"));
+    config.layout = layout();
+    let recovered =
+        persistence::recover_composed(config, StoreConfig::default(), Arc::new(SystemClock))
+            .unwrap();
+    let (_empty, aof, writer) = recovered.start();
+    let (stop, shutdown) = watch::channel(false);
+    let stores = (0..layout().shard_count)
+        .map(|_| Store::with_config(StoreConfig::default(), Arc::new(SystemClock)).unwrap())
+        .collect();
+    let (database, owners) =
+        worker::channel_with_stores(8, Duration::from_secs(5), shutdown, stores).unwrap();
+    let database = database.with_composed_aof(aof.clone()).unwrap();
+    let tasks: Vec<_> = owners
+        .into_iter()
+        .enumerate()
+        .map(|(index, owner)| {
+            let owner = if index == 0 {
+                owner
+            } else {
+                owner.with_aof(aof.clone(), 0)
+            };
+            tokio::spawn(owner.run())
+        })
+        .collect();
+    let (mut producer, mut consumer) = duplex(128);
+    let source_aof = aof.clone();
+    let source = tokio::spawn(async move {
+        composed::export_database(
+            &mut producer,
+            &database,
+            &source_aof,
+            hello(None, backup::Limits::default()),
+            [9; 16],
+            protocol::Limits::default(),
+            Duration::from_secs(5),
+        )
+        .await
+    });
+    let archive = directory.child("misbound-archive");
+    assert!(
+        backup::export_composed_stream(
+            &mut consumer,
+            options(&archive, backup::Limits::default()),
+            clock(),
+        )
+        .await
+        .is_err()
+    );
+    assert!(source.await.unwrap().is_err());
+    assert!(!archive.exists());
+    assert_eq!(aof.status().await.unwrap().0, 0);
+    stop.send_replace(true);
+    for task in tasks {
+        task.await.unwrap();
+    }
+    drop(aof);
+    writer.await.unwrap().unwrap();
 }
 
 #[tokio::test]

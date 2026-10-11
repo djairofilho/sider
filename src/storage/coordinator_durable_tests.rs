@@ -63,7 +63,7 @@ async fn one_mixed_exec_appends_one_record_and_restarts_both_owners() {
         .collect();
     let (handle, owners) =
         worker::channel_with_stores(2, Duration::from_secs(5), shutdown, stores).unwrap();
-    let handle = handle.with_composed_aof(aof.clone());
+    let handle = handle.with_composed_aof(aof.clone()).unwrap();
     let tasks: Vec<_> = owners
         .into_iter()
         .map(|owner| tokio::spawn(owner.with_aof(aof.clone(), 0).run()))
@@ -182,7 +182,7 @@ async fn oversized_combined_record_rejects_all_owners_without_an_append() {
         .collect();
     let (handle, owners) =
         worker::channel_with_stores(2, Duration::from_secs(5), shutdown, stores).unwrap();
-    let handle = handle.with_composed_aof(aof.clone());
+    let handle = handle.with_composed_aof(aof.clone()).unwrap();
     let tasks: Vec<_> = owners
         .into_iter()
         .map(|owner| tokio::spawn(owner.with_aof(aof.clone(), 0).run()))
@@ -282,7 +282,7 @@ async fn uncertain_writer_result_closes_admission_and_restart_recovers_whole_bat
         .collect();
     let (handle, owners) =
         worker::channel_with_stores(2, Duration::from_secs(5), shutdown, stores).unwrap();
-    let handle = handle.with_composed_aof(aof.clone());
+    let handle = handle.with_composed_aof(aof.clone()).unwrap();
     let tasks: Vec<_> = owners
         .into_iter()
         .map(|owner| tokio::spawn(owner.with_aof(aof.clone(), 0).run()))
@@ -361,7 +361,7 @@ async fn lost_second_owner_after_durable_decision_requires_whole_batch_recovery(
     let stores = (0..2).map(|_| Store::new()).collect();
     let (handle, mut owners) =
         worker::channel_with_stores(2, Duration::from_secs(5), shutdown, stores).unwrap();
-    let handle = handle.with_composed_aof(aof.clone());
+    let handle = handle.with_composed_aof(aof.clone()).unwrap();
     let first = tokio::spawn(owners.remove(0).with_aof(aof.clone(), 0).run());
     let second_aof = aof.clone();
     let second = tokio::spawn(async move {

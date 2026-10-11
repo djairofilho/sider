@@ -7,8 +7,8 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 use super::Cursor;
 use super::protocol::{self, ComposedHello, Limits, Message, Reject};
-use crate::persistence::format;
-use crate::storage::Mutation;
+use crate::persistence::{AofHandle, format};
+use crate::storage::{Mutation, worker::DbHandle};
 
 /// A validated request bound to one source profile. Only negotiation can create it.
 pub struct ExportAdmission {
@@ -66,6 +66,41 @@ pub async fn negotiate_export(
         limits,
         deadline,
     }))
+}
+
+/// Negotiates a backup request, then captures a real mixed-owner database cut.
+/// The handle and all of its owner workers must share `aof`. This library entry
+/// point does not start a listener or enable the profile in the executable.
+pub async fn export_database(
+    stream: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    database: &DbHandle,
+    aof: &AofHandle,
+    profile: ComposedHello,
+    epoch: [u8; 16],
+    limits: Limits,
+    deadline: Duration,
+) -> Result<(), super::Error> {
+    if !aof.is_composed_legacy_mixed()
+        || profile.base.shard_count != aof.layout().shard_count
+        || profile.base.routing_version != aof.layout().routing_version
+        || epoch == [0; 16]
+    {
+        return Err(super::Error::Sequence);
+    }
+    let Some(admission) = negotiate_export(stream, profile.clone(), limits, deadline).await? else {
+        return Ok(());
+    };
+    let snapshot = database.composed_snapshot(aof).await?;
+    let cursor = Cursor {
+        epoch,
+        sequence: snapshot.sequence.ok_or(super::Error::Sequence)?,
+    };
+    let mut source = profile;
+    source.base.cursor = Some(cursor);
+    admission
+        .send_snapshot(stream, source, cursor, &snapshot.mutations)
+        .await?;
+    Ok(())
 }
 
 impl ExportAdmission {

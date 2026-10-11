@@ -262,12 +262,24 @@ impl DbHandle {
         self
     }
 
-    /// Internal record-1 mixed profile. The executable cannot select this path.
-    #[cfg(test)]
-    pub(crate) fn with_composed_aof(mut self, aof: crate::persistence::AofHandle) -> Self {
+    /// Selects the explicit record-1 mixed profile for a library handle.
+    /// Bind every owner worker to this same writer before running them.
+    /// The executable cannot select this profile yet.
+    pub fn with_composed_aof(
+        mut self,
+        aof: crate::persistence::AofHandle,
+    ) -> Result<Self, ConfigError> {
+        if !aof.is_composed_legacy_mixed()
+            || aof.layout().shard_count as usize != self.requests.len()
+            || self.replication.is_some()
+        {
+            return Err(ConfigError::InvalidServerLimits {
+                reason: "composed AOF requires a matching standalone mixed-owner handle",
+            });
+        }
         self.mixed_unpersisted = false;
         self.composed_aof = Some(aof);
-        self
+        Ok(self)
     }
 
     pub(crate) fn authorized_internal(

@@ -26,6 +26,42 @@ pub enum SnapshotError {
 }
 
 impl DbHandle {
+    /// Captures one mixed-owner source cut against this handle's bound writer.
+    pub async fn composed_snapshot(
+        &self,
+        aof: &AofHandle,
+    ) -> Result<Snapshot, crate::replication::Error> {
+        if !aof.is_composed_legacy_mixed()
+            || !self
+                .composed_aof
+                .as_ref()
+                .is_some_and(|bound| bound.same_writer(aof))
+        {
+            return Err(crate::replication::Error::Sequence);
+        }
+        for owner in &self.coordination {
+            let (reply, response) = oneshot::channel();
+            timeout(
+                self.request_timeout,
+                owner.send(super::coordinator::Control::Probe {
+                    mode: super::coordinator::Mode::Composed(aof.clone()),
+                    reply,
+                }),
+            )
+            .await
+            .map_err(|_| DbError::Timeout)?
+            .map_err(|_| DbError::Unavailable)?;
+            let supported = timeout(self.request_timeout, response)
+                .await
+                .map_err(|_| DbError::Timeout)?
+                .map_err(|_| DbError::Unavailable)?;
+            if !supported {
+                return Err(crate::replication::Error::Sequence);
+            }
+        }
+        Ok(self.snapshot(Some(aof)).await?)
+    }
+
     pub(super) async fn freeze(
         &self,
     ) -> Result<(OwnedRwLockWriteGuard<()>, Vec<Mutation>), DbError> {
