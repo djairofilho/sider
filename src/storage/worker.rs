@@ -955,6 +955,47 @@ impl Worker {
                 let _ = reply.send(result);
                 !fatal
             }
+            Control::ApplyMemory {
+                origin,
+                mutations,
+                sequence,
+                reply,
+                _security,
+            } => {
+                let result = async {
+                    let prepared = self.store.prepare_memory_replay(&mutations, origin)?;
+                    let aof = self
+                        .aof
+                        .as_ref()
+                        .ok_or(crate::replication::Error::Sequence)?
+                        .clone();
+                    let publication = self.admission.publication();
+                    if let Err(error) = aof
+                        .append_expected_memory(sequence, origin, mutations)
+                        .await
+                    {
+                        if matches!(
+                            error,
+                            crate::persistence::AofError::Sequence
+                                | crate::persistence::AofError::Format(
+                                    crate::persistence::format::FormatError::Limit
+                                )
+                        ) {
+                            publication.complete();
+                        }
+                        return Err(error.into());
+                    }
+                    self.apply_prepared(prepared);
+                    aof.flush().await?;
+                    publication.complete();
+                    Ok::<_, crate::replication::Error>(())
+                }
+                .await;
+                let fatal = matches!(&result, Err(crate::replication::Error::Persistence(error))
+                    if !matches!(error, crate::persistence::AofError::Sequence | crate::persistence::AofError::Format(crate::persistence::format::FormatError::Limit)));
+                let _ = reply.send(result);
+                !fatal
+            }
         }
     }
 

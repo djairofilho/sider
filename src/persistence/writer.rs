@@ -153,6 +153,12 @@ enum Request {
         Vec<memory_format::Mutation>,
         Response<u64>,
     ),
+    ReplicateMemory(
+        u64,
+        crate::storage::MutationOrigin,
+        Vec<memory_format::Mutation>,
+        Response<u64>,
+    ),
     Append(ResolvedBatch, Response<u64>),
     Replicate(u64, ResolvedBatch, Response<u64>),
     Flush(Response<u64>),
@@ -224,6 +230,23 @@ impl AofHandle {
         let (reply, response) = oneshot::channel();
         self.requests
             .send(Request::AppendMemory(origin, mutations, reply))
+            .await
+            .map_err(|_| AofError::Unavailable)?;
+        response.await.map_err(|_| AofError::Unavailable)?
+    }
+    /// Appends a record-2 replica batch at the exact upstream sequence.
+    pub async fn append_expected_memory(
+        &self,
+        sequence: u64,
+        origin: crate::storage::MutationOrigin,
+        mutations: Vec<memory_format::Mutation>,
+    ) -> Result<u64, AofError> {
+        if !self.memory_profile {
+            return Err(FormatError::Version(2).into());
+        }
+        let (reply, response) = oneshot::channel();
+        self.requests
+            .send(Request::ReplicateMemory(sequence, origin, mutations, reply))
             .await
             .map_err(|_| AofError::Unavailable)?;
         response.await.map_err(|_| AofError::Unavailable)?
@@ -856,6 +879,24 @@ impl Writer {
                         continue;
                     }
                     let result = self.append(batch);
+                    if result.is_err()
+                        && !matches!(result, Err(AofError::Format(FormatError::Limit)))
+                    {
+                        let _ = reply.send(result);
+                        return Err(AofError::Unavailable);
+                    }
+                    let _ = reply.send(result);
+                }
+                Ok(Some(Request::ReplicateMemory(sequence, origin, mutations, reply))) => {
+                    if self.sequence.checked_add(1) != Some(sequence)
+                        || !self
+                            .replication
+                            .is_some_and(|metadata| metadata.role == Role::Replica)
+                    {
+                        let _ = reply.send(Err(AofError::Sequence));
+                        continue;
+                    }
+                    let result = self.append_memory(origin, mutations);
                     if result.is_err()
                         && !matches!(result, Err(AofError::Format(FormatError::Limit)))
                     {

@@ -38,12 +38,42 @@ pub(super) enum Control {
         reply: oneshot::Sender<Result<(), Error>>,
         _security: Option<crate::security::InternalLease>,
     },
+    ApplyMemory {
+        origin: super::MutationOrigin,
+        mutations: Vec<memory_format::Mutation>,
+        sequence: u64,
+        reply: oneshot::Sender<Result<(), Error>>,
+        _security: Option<crate::security::InternalLease>,
+    },
 }
 
 pub struct Snapshot {
     pub cursor: Cursor,
     pub mutations: Vec<Mutation>,
     pub subscription: Option<Subscriber>,
+}
+
+enum ReplicaBatch {
+    Legacy(ResolvedBatch),
+    Memory {
+        origin: super::MutationOrigin,
+        mutations: Vec<memory_format::Mutation>,
+    },
+}
+
+fn replica_shard<'a>(
+    keys: impl Iterator<Item = &'a bytes::Bytes>,
+    layout: DurableLayout,
+) -> Result<usize, Error> {
+    let mut shard = None;
+    for key in keys {
+        let next = layout.shard_for(key)?;
+        if shard.is_some_and(|value| value != next) {
+            return Err(Error::Sequence);
+        }
+        shard = Some(next);
+    }
+    shard.ok_or(Error::Sequence)
 }
 
 impl DbHandle {
@@ -276,6 +306,41 @@ impl DbHandle {
         cursor: Cursor,
         batch: ResolvedBatch,
     ) -> Result<(), Error> {
+        if context.aof.is_memory_profile() {
+            return Err(Error::Sequence);
+        }
+        self.apply_replica_profile(context, generation, cursor, ReplicaBatch::Legacy(batch))
+            .await
+    }
+
+    /// Applies one guarded record-2 batch at the exact upstream cursor.
+    pub async fn apply_memory_replica(
+        &self,
+        context: Context,
+        generation: u64,
+        cursor: Cursor,
+        origin: super::MutationOrigin,
+        mutations: Vec<memory_format::Mutation>,
+    ) -> Result<(), Error> {
+        if !context.aof.is_memory_profile() {
+            return Err(Error::Sequence);
+        }
+        self.apply_replica_profile(
+            context,
+            generation,
+            cursor,
+            ReplicaBatch::Memory { origin, mutations },
+        )
+        .await
+    }
+
+    async fn apply_replica_profile(
+        &self,
+        context: Context,
+        generation: u64,
+        cursor: Cursor,
+        batch: ReplicaBatch,
+    ) -> Result<(), Error> {
         let database = self.clone();
         tokio::spawn(async move {
             let _guard = database.internal_barrier().await?;
@@ -293,15 +358,15 @@ impl DbHandle {
             {
                 return Err(Error::Sequence);
             }
-            let mut shard = None;
-            for mutation in &batch.mutations {
-                let next = context.layout.shard_for(mutation.key())?;
-                if shard.is_some_and(|value| value != next) {
-                    return Err(Error::Sequence);
+            let shard = match &batch {
+                ReplicaBatch::Legacy(batch) => {
+                    replica_shard(batch.mutations.iter().map(Mutation::key), context.layout)?
                 }
-                shard = Some(next);
-            }
-            let shard = shard.ok_or(Error::Sequence)?;
+                ReplicaBatch::Memory { mutations, .. } => replica_shard(
+                    mutations.iter().map(memory_format::Mutation::key),
+                    context.layout,
+                )?,
+            };
             let permit = if database.internal_lease.is_some() {
                 let permit = tokio::time::timeout(
                     database.request_timeout,
@@ -317,11 +382,20 @@ impl DbHandle {
             };
             let publication = database.admission.publication();
             let (reply, response) = oneshot::channel();
-            let message = Control::Apply {
-                batch,
-                sequence: cursor.sequence,
-                reply,
-                _security: database.internal_lease.clone(),
+            let message = match batch {
+                ReplicaBatch::Legacy(batch) => Control::Apply {
+                    batch,
+                    sequence: cursor.sequence,
+                    reply,
+                    _security: database.internal_lease.clone(),
+                },
+                ReplicaBatch::Memory { origin, mutations } => Control::ApplyMemory {
+                    origin,
+                    mutations,
+                    sequence: cursor.sequence,
+                    reply,
+                    _security: database.internal_lease.clone(),
+                },
             };
             if let Some(permit) = permit {
                 permit.send(message);
