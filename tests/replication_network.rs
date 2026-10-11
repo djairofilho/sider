@@ -18,10 +18,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use sider::persistence::format;
+use sider::persistence::{composed_format, format};
 use sider::replication::{
     Cursor,
-    protocol::{self, Hello, Limits, Message, Reject},
+    protocol::{self, ComposedHello, Hello, Limits, Message, Reject},
 };
 use sider::storage::{Mutation, MutationOrigin, ResolvedBatch};
 use tokio::net::{TcpListener, TcpStream};
@@ -861,6 +861,111 @@ fn hello(cursor: Option<Cursor>) -> Hello {
     }
 }
 
+fn composed_hello(cursor: Option<Cursor>) -> ComposedHello {
+    ComposedHello {
+        base: hello(cursor),
+        aof_header_version: composed_format::HEADER_VERSION,
+        required_capabilities: composed_format::MIXED_OWNER_BATCH,
+    }
+}
+
+async fn send_composed(socket: &mut TcpStream, message: Message) {
+    protocol::write_composed(socket, &message, Limits::default(), DEADLINE)
+        .await
+        .unwrap();
+}
+
+async fn read_composed(socket: &mut TcpStream) -> Message {
+    protocol::read_composed_authorized(socket, Limits::default(), DEADLINE, |_| true)
+        .await
+        .unwrap()
+        .1
+}
+
+async fn offer_composed(
+    listener: &TcpListener,
+    expected: Option<Cursor>,
+    head: Cursor,
+) -> TcpStream {
+    let (mut socket, _) = tokio::time::timeout(DEADLINE, listener.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    let Message::ComposedHello(peer) = read_composed(&mut socket).await else {
+        panic!("composed replica hello");
+    };
+    assert_eq!(peer, composed_hello(peer.base.cursor));
+    if let Some(expected) = expected {
+        assert_eq!(peer.base.cursor, Some(expected));
+    } else {
+        assert!(peer.base.cursor.is_some_and(|cursor| cursor.sequence == 0));
+    }
+    send_composed(
+        &mut socket,
+        Message::ComposedHello(composed_hello(Some(head))),
+    )
+    .await;
+    socket
+}
+
+fn composed_image(key: &'static [u8], value: &'static [u8]) -> Mutation {
+    Mutation::Put {
+        key: Bytes::from_static(key),
+        value: Bytes::from_static(value).into(),
+        expires_at_unix_ms: None,
+    }
+}
+
+fn composed_batch(left: &'static [u8], right: &'static [u8]) -> ResolvedBatch {
+    ResolvedBatch {
+        origin: MutationOrigin::Client,
+        mutations: vec![composed_image(b"a", left), composed_image(b"b", right)],
+    }
+}
+
+async fn full_composed(
+    socket: &mut TcpStream,
+    cursor: Cursor,
+    left: &'static [u8],
+    right: &'static [u8],
+    valid_digest: bool,
+) {
+    send_composed(socket, Message::FullStart { cursor, entries: 2 }).await;
+    let mut digest = 0;
+    for mutation in composed_batch(left, right).mutations {
+        let entry = Message::SnapshotEntry(mutation);
+        let frame = protocol::encode_composed(&entry, Limits::default()).unwrap();
+        digest = format::snapshot_digest(digest, &frame);
+        send_composed(socket, entry).await;
+    }
+    send_composed(
+        socket,
+        Message::FullEnd {
+            cursor,
+            entries: 2,
+            digest: if valid_digest { digest } else { digest ^ 1 },
+        },
+    )
+    .await;
+}
+
+fn assert_composed_pair(node: &Node, left: &[u8], right: &[u8]) {
+    for (key, value) in [(b"a".as_slice(), left), (b"b".as_slice(), right)] {
+        assert_eq!(
+            node.command(&[b"GET", key]),
+            Response::Bulk(Some(value.to_vec()))
+        );
+    }
+}
+
+async fn composed_connection_closes(socket: &mut TcpStream) {
+    assert!(
+        protocol::read_composed_authorized(socket, Limits::default(), DEADLINE, |_| true)
+            .await
+            .is_err()
+    );
+}
+
 async fn send(socket: &mut TcpStream, message: Message) {
     protocol::write(socket, &message, Limits::default(), DEADLINE)
         .await
@@ -1031,6 +1136,137 @@ async fn replication_process_rejects_bad_full_gaps_and_changed_duplicates_ack_su
         replica.command(&[b"GET", b"{s}:key"]),
         Response::Bulk(Some(b"persisted-before-ack".to_vec()))
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn composed_replica_refuses_partial_frames_bad_full_and_sequence_errors() {
+    let directory = Directory::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream = listener.local_addr().unwrap();
+    let path = directory.0.join("composed-replica-failures");
+    let mut replica = Node::start_composed(&path, Some(upstream)).await;
+    let base = Cursor {
+        epoch: [5; 16],
+        sequence: 10,
+    };
+    let mut socket = offer_composed(&listener, None, base).await;
+    full_composed(&mut socket, base, b"original-left", b"original-right", true).await;
+    assert_eq!(read_composed(&mut socket).await, Message::Ack(base));
+    assert_composed_pair(&replica, b"original-left", b"original-right");
+    drop(socket);
+
+    let invalid = Cursor {
+        epoch: [6; 16],
+        sequence: 40,
+    };
+    let mut socket = offer_composed(&listener, Some(base), invalid).await;
+    send_composed(
+        &mut socket,
+        Message::FullStart {
+            cursor: invalid,
+            entries: 2,
+        },
+    )
+    .await;
+    send_composed(
+        &mut socket,
+        Message::SnapshotEntry(composed_image(b"a", b"partial-left")),
+    )
+    .await;
+    drop(socket);
+    assert_eq!(composed_admin(&replica, "--status")["sequence"], 10);
+    assert_composed_pair(&replica, b"original-left", b"original-right");
+
+    let mut socket = offer_composed(&listener, Some(base), invalid).await;
+    full_composed(&mut socket, invalid, b"bad-left", b"bad-right", false).await;
+    composed_connection_closes(&mut socket).await;
+    assert_eq!(composed_admin(&replica, "--status")["sequence"], 10);
+    assert_composed_pair(&replica, b"original-left", b"original-right");
+
+    let next = Cursor {
+        sequence: 11,
+        ..base
+    };
+    let batch = composed_batch(b"persisted-left", b"persisted-right");
+    let mut socket = offer_composed(&listener, Some(base), base).await;
+    send_composed(&mut socket, Message::Continue(base)).await;
+    assert_eq!(read_composed(&mut socket).await, Message::Ack(base));
+    let frame = protocol::encode_composed(
+        &Message::Batch {
+            sequence: next.sequence,
+            batch: batch.clone(),
+        },
+        Limits::default(),
+    )
+    .unwrap();
+    tokio::io::AsyncWriteExt::write_all(&mut socket, &frame[..frame.len() / 2])
+        .await
+        .unwrap();
+    drop(socket);
+    assert_eq!(composed_admin(&replica, "--status")["sequence"], 10);
+    assert_composed_pair(&replica, b"original-left", b"original-right");
+
+    let mut socket = offer_composed(&listener, Some(base), base).await;
+    send_composed(&mut socket, Message::Continue(base)).await;
+    assert_eq!(read_composed(&mut socket).await, Message::Ack(base));
+    send_composed(
+        &mut socket,
+        Message::Batch {
+            sequence: 12,
+            batch: batch.clone(),
+        },
+    )
+    .await;
+    composed_connection_closes(&mut socket).await;
+    assert_eq!(composed_admin(&replica, "--status")["sequence"], 10);
+
+    let mut socket = offer_composed(&listener, Some(base), base).await;
+    send_composed(&mut socket, Message::Continue(base)).await;
+    assert_eq!(read_composed(&mut socket).await, Message::Ack(base));
+    send_composed(
+        &mut socket,
+        Message::Batch {
+            sequence: base.sequence,
+            batch: batch.clone(),
+        },
+    )
+    .await;
+    composed_connection_closes(&mut socket).await;
+    assert_composed_pair(&replica, b"original-left", b"original-right");
+
+    let mut socket = offer_composed(&listener, Some(base), base).await;
+    send_composed(&mut socket, Message::Continue(base)).await;
+    assert_eq!(read_composed(&mut socket).await, Message::Ack(base));
+    for _ in 0..2 {
+        send_composed(
+            &mut socket,
+            Message::Batch {
+                sequence: next.sequence,
+                batch: batch.clone(),
+            },
+        )
+        .await;
+        assert_eq!(read_composed(&mut socket).await, Message::Ack(next));
+    }
+    assert_composed_pair(&replica, b"persisted-left", b"persisted-right");
+    // ACK follows a flush. Terminate immediately and require both owners on restart.
+    replica.stop();
+    let replica = Node::start_composed(&path, Some(upstream)).await;
+    let mut socket = offer_composed(&listener, Some(next), next).await;
+    send_composed(&mut socket, Message::Continue(next)).await;
+    assert_eq!(read_composed(&mut socket).await, Message::Ack(next));
+    assert_composed_pair(&replica, b"persisted-left", b"persisted-right");
+    send_composed(
+        &mut socket,
+        Message::Batch {
+            sequence: next.sequence,
+            batch: composed_batch(b"forged-left", b"forged-right"),
+        },
+    )
+    .await;
+    composed_connection_closes(&mut socket).await;
+    assert_eq!(composed_admin(&replica, "--status")["sequence"], 11);
+    assert_composed_pair(&replica, b"persisted-left", b"persisted-right");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

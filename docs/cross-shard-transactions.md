@@ -24,7 +24,9 @@ one-frame journal publication, and library TCP follower path exist. A focused
 library test covers FULL, a mixed batch, disconnect, CONTINUE, and persisted
 replica cursor. A real process test now exercises mixed-owner EXEC through the
 transport-3 primary and follower, full sync, resumed follower, source restart,
-manual promotion, and recovery. Crash injection at each network/apply boundary
+manual promotion, and recovery. A controlled TCP source also tests truncated
+FULL and batch frames, a bad FULL digest, gaps, duplicates, and killing the
+follower immediately after ACK. Crash injection at each network/apply boundary
 and a release gate remain outstanding. The issue remains open.
 
 ## Contents
@@ -337,8 +339,10 @@ The staged implementation plan is:
 Issue #92 remains open until crash/network evidence satisfies all four acceptance
 criteria. Focused tests exercise coordinated mixed-owner RESP EXEC, actual
 writer/recovery, nine process-kill boundaries, a schema-3 backup path, and a
-loopback process follower with source restart. They do not cover every network
-commit boundary, power loss, protected transport, or a native release candidate.
+loopback process follower with source restart. The controlled TCP source proves
+that rejected transfers leave both old owners visible and that ACK survives an
+immediate process kill. Tests do not cover every network commit boundary, power
+loss, protected transport, or a native release candidate.
 
 ## Required deterministic tests
 
