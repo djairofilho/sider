@@ -1352,6 +1352,175 @@ async fn live_record2_server_exports_worker_snapshot_and_refuses_legacy_or_small
     .unwrap();
     assert_eq!(cli_image.store.snapshot_memory(), images);
     drop(cli_image);
+    {
+        use sider::replication::protocol::{self, Hello, Message};
+        let limits = protocol::Limits::default();
+        let peer = Hello {
+            sider_version: Bytes::from_static(env!("CARGO_PKG_VERSION").as_bytes()),
+            record_version: memory_format::RECORD_VERSION,
+            shard_count: 1,
+            routing_version: 1,
+            max_record_bytes: limits.record.max_record_bytes as u32,
+            max_mutations: limits.record.max_mutations as u32,
+            max_snapshot_bytes: backup::MAX_BACKUP_BYTES,
+            cursor: None,
+        };
+        let mut replica = tokio::net::TcpStream::connect(source).await.unwrap();
+        protocol::write_memory(
+            &mut replica,
+            &Message::Hello(peer.clone()),
+            limits,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        async fn read(socket: &mut tokio::net::TcpStream, limits: protocol::Limits) -> Message {
+            protocol::read_memory_authorized(socket, limits, Duration::from_secs(5), |_| true)
+                .await
+                .unwrap()
+                .1
+        }
+        let Message::Hello(source_hello) = read(&mut replica, limits).await else {
+            panic!("replica source hello");
+        };
+        let cursor = source_hello.cursor.unwrap();
+        assert_ne!(cursor.epoch, [0; 16]);
+        assert_eq!(cursor.sequence, 2);
+        assert_eq!(
+            read(&mut replica, limits).await,
+            Message::FullStart { cursor, entries: 1 }
+        );
+        assert!(matches!(
+            read(&mut replica, limits).await,
+            Message::MemorySnapshotEntry(_)
+        ));
+        assert!(matches!(
+            read(&mut replica, limits).await,
+            Message::FullEnd { cursor: end, entries: 1, .. } if end == cursor
+        ));
+        protocol::write_memory(
+            &mut replica,
+            &Message::Ack(cursor),
+            limits,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        tokio::task::spawn_blocking(move || {
+            let mut client = std::net::TcpStream::connect(client_addr).unwrap();
+            client
+                .write_all(&wire::request(&[
+                    b"MEM.DEL".to_vec(),
+                    b"c".to_vec(),
+                    b"\xff\0".to_vec(),
+                ]))
+                .unwrap();
+            assert_eq!(wire::read_response(&mut client).unwrap().bytes, b":1\r\n");
+        })
+        .await
+        .unwrap();
+        let next = loop {
+            match read(&mut replica, limits).await {
+                Message::Heartbeat(_) => {
+                    protocol::write_memory(
+                        &mut replica,
+                        &Message::Ack(cursor),
+                        limits,
+                        Duration::from_secs(5),
+                    )
+                    .await
+                    .unwrap();
+                }
+                Message::MemoryBatch { sequence, .. } => break sequence,
+                message => panic!("unexpected replica frame: {message:?}"),
+            }
+        };
+        assert_eq!(next, 3);
+        let next_cursor = sider::replication::Cursor {
+            sequence: next,
+            ..cursor
+        };
+        protocol::write_memory(
+            &mut replica,
+            &Message::Ack(next_cursor),
+            limits,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        drop(replica);
+        let mut resumed = tokio::net::TcpStream::connect(source).await.unwrap();
+        protocol::write_memory(
+            &mut resumed,
+            &Message::Hello(Hello {
+                cursor: Some(next_cursor),
+                ..peer.clone()
+            }),
+            limits,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        let mut stale = tokio::net::TcpStream::connect(source).await.unwrap();
+        protocol::write_memory(
+            &mut stale,
+            &Message::Hello(Hello {
+                cursor: Some(sider::replication::Cursor {
+                    epoch: [0x99; 16],
+                    sequence: 3,
+                }),
+                ..peer
+            }),
+            limits,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        let Message::Hello(stale_hello) = read(&mut stale, limits).await else {
+            panic!("stale replica source hello");
+        };
+        assert_eq!(stale_hello.cursor, Some(next_cursor));
+        assert_eq!(
+            read(&mut stale, limits).await,
+            Message::FullStart {
+                cursor: next_cursor,
+                entries: 1,
+            }
+        );
+        assert!(matches!(
+            read(&mut stale, limits).await,
+            Message::MemorySnapshotEntry(_)
+        ));
+        assert!(matches!(
+            read(&mut stale, limits).await,
+            Message::FullEnd { cursor, entries: 1, .. } if cursor == next_cursor
+        ));
+        protocol::write_memory(
+            &mut stale,
+            &Message::Ack(next_cursor),
+            limits,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            read(&mut resumed, limits).await,
+            Message::Hello(_)
+        ));
+        assert_eq!(
+            read(&mut resumed, limits).await,
+            Message::Continue(next_cursor)
+        );
+        protocol::write_memory(
+            &mut resumed,
+            &Message::Ack(next_cursor),
+            limits,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        drop(resumed);
+    }
     stop.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(5), server)
         .await

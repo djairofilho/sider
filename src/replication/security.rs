@@ -166,7 +166,7 @@ pub(super) async fn read_memory(
 ) -> Result<(bytes::Bytes, Message, Option<InternalLease>), Error> {
     Ok(
         protocol::read_memory_admitted(socket, limits, deadline, |kind| async move {
-            if kind != 10 {
+            if !matches!(kind, 1 | 10) {
                 return Err(protocol::Error::Invalid("permission denied"));
             }
             let Some(authority) = authority else {
@@ -178,6 +178,31 @@ pub(super) async fn read_memory(
                 .map_err(|_| protocol::Error::Invalid("permission denied"))
         })
         .await?,
+    )
+}
+
+pub(super) async fn read_memory_phase(
+    socket: &mut (impl AsyncRead + Unpin),
+    limits: protocol::Limits,
+    deadline: Duration,
+    phase: InternalPhase,
+    authority: Option<&Authority>,
+) -> Result<Message, Error> {
+    Ok(
+        protocol::read_memory_admitted(socket, limits, deadline, |kind| async move {
+            if !phase.permits(kind) {
+                return Err(protocol::Error::Invalid("permission denied"));
+            }
+            let Some(authority) = authority else {
+                return Ok(None);
+            };
+            authority
+                .admit(authority.request)
+                .await
+                .map_err(|_| protocol::Error::Invalid("permission denied"))
+        })
+        .await?
+        .1,
     )
 }
 
