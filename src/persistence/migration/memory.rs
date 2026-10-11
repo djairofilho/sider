@@ -1,4 +1,4 @@
-//! Explicit offline codec upgrade; the existing migrator and CLI remain legacy.
+//! Explicit offline codec upgrade used by record-2 CLI flags; default migration remains legacy.
 
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
