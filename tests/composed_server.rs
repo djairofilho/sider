@@ -13,6 +13,7 @@ use std::fs;
 use std::io::Write;
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -70,6 +71,107 @@ fn send(client: &mut TcpStream, args: &[&[u8]], expected: &[u8]) {
         .unwrap();
     let response = wire::read_response(client).unwrap();
     assert_eq!(response.bytes, expected, "command {args:?}");
+}
+
+#[test]
+fn composed_backup_cli_exports_verifies_restores_and_restarts() {
+    let directory = Directory::new();
+    let binary = PathBuf::from(env!("CARGO_BIN_EXE_sider"));
+    let backup_binary = PathBuf::from(env!("CARGO_BIN_EXE_sider-backup"));
+    let export_ready = directory.0.join("export-ready.json");
+    let configured = [
+        ("SIDER_AOF_DIR", directory.aof().into_os_string()),
+        ("SIDER_SHARDS", OsString::from("2")),
+        ("SIDER_AOF_COMPOSED", OsString::from("1")),
+        ("SIDER_COMPOSED_EXPORT_ADDR", OsString::from("127.0.0.1:0")),
+        (
+            "SIDER_COMPOSED_EXPORT_READY_FILE",
+            export_ready.clone().into_os_string(),
+        ),
+    ];
+    let server = sider_process::SiderProcess::try_start_configured(
+        &binary,
+        env!("CARGO_PKG_VERSION"),
+        &configured,
+    )
+    .unwrap();
+    let ready: serde_json::Value =
+        serde_json::from_slice(&fs::read(&export_ready).unwrap()).unwrap();
+    assert_eq!(ready["pid"], server.id());
+    let export_addr = SocketAddr::from((
+        [127, 0, 0, 1],
+        u16::try_from(ready["port"].as_u64().unwrap()).unwrap(),
+    ));
+    let mut first_client = client(server.address());
+    send(&mut first_client, &[b"MULTI"], b"+OK\r\n");
+    send(&mut first_client, &[b"SET", b"a", b"left"], b"+QUEUED\r\n");
+    send(&mut first_client, &[b"SET", b"b", b"right"], b"+QUEUED\r\n");
+    send(&mut first_client, &[b"EXEC"], b"*2\r\n+OK\r\n+OK\r\n");
+
+    let run = |args: Vec<OsString>| {
+        let mut command = Command::new(&backup_binary);
+        command
+            .env("SIDER_SECURITY_PROFILE", "legacy-loopback")
+            .env_remove("SIDER_SECURITY_DIR")
+            .args(args);
+        process::run(&mut command, Duration::from_secs(20)).unwrap()
+    };
+    let archive = directory.0.join("archive");
+    let exported = run(vec![
+        "export".into(),
+        "--profile".into(),
+        "composed".into(),
+        "--source".into(),
+        export_addr.to_string().into(),
+        "--destination".into(),
+        archive.clone().into_os_string(),
+        "--source-sha".into(),
+        "0123456789012345678901234567890123456789".into(),
+    ]);
+    assert!(
+        exported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    let manifest: serde_json::Value = serde_json::from_slice(&exported.stdout).unwrap();
+    assert_eq!(manifest["schema_version"], 3);
+    assert_eq!(manifest["required_capabilities"], 1);
+    let verification = vec![
+        "--source".into(),
+        archive.clone().into_os_string(),
+        "--shards".into(),
+        "2".into(),
+        "--routing".into(),
+        "1".into(),
+    ];
+    let mut verify = vec!["verify".into(), "--profile".into(), "composed".into()];
+    verify.extend(verification.clone());
+    assert!(run(verify).status.success());
+    let mut wrong_profile = vec!["verify".into()];
+    wrong_profile.extend(verification.clone());
+    assert!(!run(wrong_profile).status.success());
+    let restored = directory.0.join("restored");
+    let mut restore = vec!["restore".into(), "--profile".into(), "composed".into()];
+    restore.extend(verification);
+    restore.extend(["--destination".into(), restored.clone().into_os_string()]);
+    assert!(run(restore).status.success());
+    drop(first_client);
+    server.finish();
+    let restarted = sider_process::SiderProcess::try_start_configured(
+        &binary,
+        env!("CARGO_PKG_VERSION"),
+        &[
+            ("SIDER_AOF_DIR", restored.into_os_string()),
+            ("SIDER_SHARDS", "2".into()),
+            ("SIDER_AOF_COMPOSED", "1".into()),
+        ],
+    )
+    .unwrap();
+    let mut client = client(restarted.address());
+    send(&mut client, &[b"GET", b"a"], b"$4\r\nleft\r\n");
+    send(&mut client, &[b"GET", b"b"], b"$5\r\nright\r\n");
+    drop(client);
+    restarted.finish();
 }
 
 #[test]
