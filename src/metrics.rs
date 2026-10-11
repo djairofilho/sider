@@ -535,6 +535,12 @@ memory_max_lifecycle_scratch_bytes:16777216\r\n",
         .unwrap();
         writeln!(
             text,
+            "aof_composed_enabled:{}\r",
+            u8::from(config.composed_aof)
+        )
+        .unwrap();
+        writeln!(
+            text,
             "aof_queue_capacity_configured:{}\r\naof_max_mutations:{}\r",
             aof.queue_capacity, aof.limits.max_mutations
         )
