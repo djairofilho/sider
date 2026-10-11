@@ -45,9 +45,12 @@ supported inside `EXEC`; standalone multi-key commands still require one shard.
 
 `WATCH key [key ...]` observes keys until `EXEC`, `DISCARD`, `UNWATCH`, or the end
 of the connection. A write by the same connection also invalidates observation.
-One `WATCH` command still requires its keys to share a shard. In the composed
-profile, a watched key may be on a different shard from commands queued later;
-the coordinator checks its token before preparing any owner.
+By default, one `WATCH` command requires its keys to share a shard. In the
+composed profile, one call can observe keys on several owners. It excludes all
+mutations while collecting the observations, commits pending expirations as one
+AOF batch, and installs all tokens only after that decision is applied. Repeated
+WATCH calls accumulate tokens. The coordinator checks every token before
+preparing an EXEC owner.
 Writing the same value, creating and removing a key, or reaching its expiration
 deadline are conflicts. Removing an already absent key is not a conflict. `EXEC`
 with a conflict returns a null array (`*-1\r\n`) and neither writes nor applies the

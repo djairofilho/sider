@@ -10,6 +10,128 @@ use super::*;
 use crate::persistence::{self, AofConfig, FaultInjector, NoFaults};
 use crate::storage::{Store, StoreConfig, SystemClock, worker};
 
+#[tokio::test(start_paused = true)]
+async fn multi_owner_watch_persists_one_expiration_batch_before_tokens() {
+    use crate::command::{SetExpiry, SetOptions};
+    use std::sync::atomic::{AtomicI64, Ordering};
+
+    struct ShiftClock {
+        base: tokio::time::Instant,
+        shift_ms: AtomicI64,
+    }
+    impl Clock for ShiftClock {
+        fn now(&self) -> tokio::time::Instant {
+            self.base + Duration::from_millis(self.shift_ms.load(Ordering::SeqCst) as u64)
+        }
+        fn unix_millis(&self) -> i64 {
+            1_000 + self.shift_ms.load(Ordering::SeqCst)
+        }
+    }
+
+    let directory = std::env::temp_dir().join(format!(
+        "sider-mixed-watch-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    let mut config = AofConfig::new(directory.clone());
+    config.layout.shard_count = 2;
+    let clock = Arc::new(ShiftClock {
+        base: tokio::time::Instant::now(),
+        shift_ms: AtomicI64::new(0),
+    });
+    let quota = StoreConfig {
+        max_dataset_bytes: 4_096,
+    };
+    let recovered = persistence::recover_composed_legacy_mixed(
+        config.clone(),
+        quota,
+        clock.clone(),
+        Arc::new(NoFaults),
+    )
+    .unwrap();
+    let (_empty, aof, writer) = recovered.start();
+    let (stop, shutdown) = watch::channel(false);
+    let stores = (0..2)
+        .map(|_| {
+            Store::with_config(
+                StoreConfig {
+                    max_dataset_bytes: 2_048,
+                },
+                clock.clone(),
+            )
+            .unwrap()
+        })
+        .collect();
+    let (handle, owners) =
+        worker::channel_with_stores(2, Duration::from_secs(5), shutdown, stores).unwrap();
+    let handle = handle.with_composed_aof(aof.clone()).unwrap();
+    let tasks: Vec<_> = owners
+        .into_iter()
+        .map(|owner| tokio::spawn(owner.with_aof(aof.clone(), 0).run()))
+        .collect();
+    let expiring = |key| Command::SetWithOptions {
+        key: Bytes::from_static(key),
+        value: Bytes::from_static(b"value"),
+        options: SetOptions {
+            expiry: SetExpiry::After(Duration::from_millis(10)),
+            ..SetOptions::default()
+        },
+    };
+    assert_eq!(handle.execute(expiring(b"a")).await.unwrap(), Reply::Ok);
+    assert_eq!(handle.execute(expiring(b"b")).await.unwrap(), Reply::Ok);
+    assert_eq!(aof.status().await.unwrap().0, 2);
+
+    let exclusion = handle.barrier.clone().write_owned().await;
+    clock.shift_ms.store(20, Ordering::SeqCst);
+    let watcher = handle.clone();
+    let (entered, entering) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        entered.send(()).unwrap();
+        watcher
+            .watch(vec![Bytes::from_static(b"a"), Bytes::from_static(b"b")])
+            .await
+    });
+    entering.await.unwrap();
+    tokio::task::yield_now().await;
+    drop(exclusion);
+    let (reply, tokens) = task.await.unwrap().unwrap();
+    assert_eq!(reply, Reply::Ok);
+    assert_eq!(tokens.len(), 2);
+    assert!(tokens.iter().all(|token| !token.changed(clock.now())));
+    assert_eq!(aof.status().await.unwrap().0, 3);
+    assert_eq!(aof.diagnostics().records_written_total, 3);
+    drop(tokens);
+
+    drop(handle);
+    stop.send_replace(true);
+    for task in tasks {
+        task.await.unwrap();
+    }
+    drop(aof);
+    writer.await.unwrap().unwrap();
+    let restarted =
+        persistence::recover_composed_legacy_mixed(config, quota, clock, Arc::new(NoFaults))
+            .unwrap();
+    assert_eq!(restarted.metadata.sequence, 3);
+    assert!(restarted.store.is_empty());
+    drop(restarted);
+    let parent = std::env::temp_dir().canonicalize().unwrap();
+    let target = directory.canonicalize().unwrap();
+    assert_eq!(target.parent(), Some(parent.as_path()));
+    assert!(
+        target
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("sider-mixed-watch-")
+    );
+    std::fs::remove_dir_all(target).unwrap();
+}
+
 fn set(key: &'static [u8], value: &'static [u8]) -> Command {
     Command::Set {
         key: Bytes::from_static(key),
