@@ -333,9 +333,9 @@ async fn memory_aof_replica_install_publishes_complete_header5_generation() {
 }
 
 #[tokio::test]
-async fn memory_replica_install_persists_and_swaps_worker_image() {
+async fn memory_replica_install_and_guarded_delta_recover_exact_sequence() {
     use sider::replication::{Cursor, journal, state::Runtime};
-    use sider::storage::{memory::Edit, replication::Context};
+    use sider::storage::{MutationOrigin, memory::Edit, replication::Context};
 
     let directory = Directory::new();
     let config = directory.config();
@@ -378,10 +378,11 @@ async fn memory_replica_install_persists_and_swaps_worker_image() {
         epoch: [0x61; 16],
         sequence: 17,
     };
+    let generation = runtime.begin_session();
     database
         .install_memory_replica(
             context.clone(),
-            runtime.begin_session(),
+            generation,
             cursor,
             vec![persistence::memory_format::Mutation::Image {
                 key: Bytes::from_static(b"c"),
@@ -395,6 +396,74 @@ async fn memory_replica_install_persists_and_swaps_worker_image() {
     assert_eq!(image.sequence, Some(17));
     assert_eq!(runtime.status().applied, cursor);
     assert_eq!(image.mutations.len(), 1);
+    let mut changed = member();
+    changed.content = Bytes::from_static(b"updated\0\xff");
+    let next = Cursor {
+        sequence: 18,
+        ..cursor
+    };
+    let change = delta(vec![Edit::Upsert(changed.clone())], None);
+    assert!(
+        database
+            .apply_memory_replica(
+                context.clone(),
+                generation,
+                Cursor {
+                    sequence: 19,
+                    ..cursor
+                },
+                MutationOrigin::Client,
+                vec![change.clone()],
+            )
+            .await
+            .is_err()
+    );
+    let mut wrong = descriptor();
+    wrong.model = Bytes::from_static(b"other");
+    assert!(
+        database
+            .apply_memory_replica(
+                context.clone(),
+                generation,
+                next,
+                MutationOrigin::Client,
+                vec![persistence::memory_format::Mutation::Delta {
+                    key: Bytes::from_static(b"c"),
+                    descriptor: wrong,
+                    edits: vec![Edit::Upsert(changed)],
+                    key_deadline: None,
+                }],
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(aof.flush().await.unwrap(), 17);
+    database
+        .apply_memory_replica(
+            context.clone(),
+            generation,
+            next,
+            MutationOrigin::Client,
+            vec![change],
+        )
+        .await
+        .unwrap();
+    assert_eq!(runtime.status().applied, next);
+    let image = database.snapshot(Some(&aof)).await.unwrap();
+    assert_eq!(image.sequence, Some(18));
+    assert!(
+        database
+            .apply_memory_replica(
+                context.clone(),
+                generation,
+                next,
+                MutationOrigin::Client,
+                vec![delta(vec![Edit::Upsert(member())], None)],
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(aof.flush().await.unwrap(), 18);
     stop.send_replace(true);
     owner_task.await.unwrap();
     drop(database);
@@ -402,7 +471,7 @@ async fn memory_replica_install_persists_and_swaps_worker_image() {
     drop(aof);
     writer.await.unwrap().unwrap();
     let recovered = recover(&directory);
-    assert_eq!(recovered.metadata.sequence, 17);
+    assert_eq!(recovered.metadata.sequence, 18);
     assert_eq!(recovered.metadata.format_version, 5);
     assert_eq!(
         recovered.metadata.replication.unwrap().role,
