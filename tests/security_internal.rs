@@ -2314,7 +2314,7 @@ fn security_startup_executable_rejects_missing_material_before_recovery() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn security_posix_complete_file_generation_serves_client_and_internal_tls() {
+async fn security_posix_complete_file_generation_serves_tls_and_enforces_backup_role() {
     use sha2::Digest;
     use std::{fs, os::unix::fs::PermissionsExt};
 
@@ -2339,6 +2339,26 @@ async fn security_posix_complete_file_generation_serves_client_and_internal_tls(
             }
         }
     }
+    fn write_generation(directory: &std::path::Path, files: &[(&str, Vec<u8>)], number: u64) {
+        let mut digests = std::collections::BTreeMap::new();
+        for (name, bytes) in files {
+            let digest = sha2::Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            digests.insert(*name, digest);
+            let path = directory.join(name);
+            fs::write(&path, bytes).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let manifest = directory.join("security-manifest.json");
+        fs::write(
+            &manifest,
+            serde_json::to_vec(&json!({"version":1,"generation":number,"files":digests})).unwrap(),
+        )
+        .unwrap();
+        fs::set_permissions(manifest, fs::Permissions::from_mode(0o600)).unwrap();
+    }
 
     let home = fs::canonicalize(std::env::var_os("HOME").expect("service home")).unwrap();
     let security_directory = SecurityDirectory(
@@ -2347,7 +2367,7 @@ async fn security_posix_complete_file_generation_serves_client_and_internal_tls(
             std::process::id(),
             time::OffsetDateTime::now_utc().unix_timestamp_nanos()
         )),
-        home,
+        home.clone(),
     );
     fs::create_dir(security_directory.path()).unwrap();
     fs::set_permissions(security_directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
@@ -2358,7 +2378,7 @@ async fn security_posix_complete_file_generation_serves_client_and_internal_tls(
         time::OffsetDateTime::now_utc() + time::Duration::hours(1),
         None,
     );
-    let files = [
+    let mut files = [
         (
             "client-policy.json",
             br#"{"version":1,"users":[]}"#.to_vec(),
@@ -2367,31 +2387,14 @@ async fn security_posix_complete_file_generation_serves_client_and_internal_tls(
         ("client-key.pem", primary.1.as_bytes().to_vec()),
         (
             "internal-policy.json",
-            serde_json::to_vec(&runtime_policy(&["monitor"])).unwrap(),
+            serde_json::to_vec(&runtime_policy(&["monitor", "backup"])).unwrap(),
         ),
         ("internal-cert.pem", primary.0.as_bytes().to_vec()),
         ("internal-key.pem", primary.1.as_bytes().to_vec()),
         ("internal-ca.pem", certs.issuer.pem().into_bytes()),
         ("internal-crl.pem", crl.as_bytes().to_vec()),
     ];
-    let mut digests = std::collections::BTreeMap::new();
-    for (name, bytes) in &files {
-        let digest = sha2::Sha256::digest(bytes)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        digests.insert(*name, digest);
-        let path = security_directory.path().join(name);
-        fs::write(&path, bytes).unwrap();
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
-    }
-    let manifest = security_directory.path().join("security-manifest.json");
-    fs::write(
-        &manifest,
-        serde_json::to_vec(&json!({"version":1,"generation":1,"files":digests})).unwrap(),
-    )
-    .unwrap();
-    fs::set_permissions(&manifest, fs::Permissions::from_mode(0o600)).unwrap();
+    write_generation(security_directory.path(), &files, 1);
     let key = security_directory.path().join("internal-key.pem");
     fs::set_permissions(&key, fs::Permissions::from_mode(0o640)).unwrap();
     assert!(sider::security::Generation::server(security_directory.path(), true, false).is_err());
@@ -2464,6 +2467,84 @@ async fn security_posix_complete_file_generation_serves_client_and_internal_tls(
             .unwrap(),
         Message::Status { .. }
     ));
+
+    let tool_directory = SecurityDirectory(
+        home.join(format!(
+            "sider-complete-security-tool-{}-{}",
+            std::process::id(),
+            time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+        )),
+        home,
+    );
+    fs::create_dir(tool_directory.path()).unwrap();
+    fs::set_permissions(tool_directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    let tool_files = [
+        (
+            "internal-policy.json",
+            serde_json::to_vec(&json!({"version":1,"instance_id":"holder-b","principals":[],"upstream_principal":SERVER})).unwrap(),
+        ),
+        ("internal-cert.pem", remote.0.as_bytes().to_vec()),
+        ("internal-key.pem", remote.1.as_bytes().to_vec()),
+        ("internal-ca.pem", certs.issuer.pem().into_bytes()),
+        ("internal-crl.pem", crl.as_bytes().to_vec()),
+    ];
+    write_generation(tool_directory.path(), &tool_files, 1);
+    let tool_generation = sider::security::Generation::tool(tool_directory.path()).unwrap();
+    let tool_transport = tool_generation.internal.unwrap().transport;
+    let options = |source, destination| sider::persistence::backup::ExportOptions {
+        source,
+        destination,
+        source_sha: "a".repeat(40),
+        limits: sider::persistence::backup::Limits::default(),
+    };
+    let accepted = directory.0.join("backup-accepted");
+    sider::persistence::backup::export_secure(
+        options(internal_address, accepted.clone()),
+        Arc::new(sider::storage::SystemClock),
+        &tool_transport,
+    )
+    .await
+    .unwrap();
+    assert!(accepted.join("backup-manifest.json").exists());
+
+    drop(client);
+    drop(stream);
+    child.terminate(DEADLINE).unwrap();
+    fs::remove_file(config.ready_file.as_ref().unwrap()).unwrap();
+    fs::remove_file(
+        config
+            .replication
+            .as_ref()
+            .unwrap()
+            .ready_file
+            .as_ref()
+            .unwrap(),
+    )
+    .unwrap();
+    files[3].1 = serde_json::to_vec(&runtime_policy(&["monitor"])).unwrap();
+    write_generation(security_directory.path(), &files, 2);
+    let mut child = startup_process::OwnedChild::spawn(&mut command).unwrap();
+    let denied_source = startup_ready(
+        config
+            .replication
+            .as_ref()
+            .unwrap()
+            .ready_file
+            .as_deref()
+            .unwrap(),
+    )
+    .await;
+    let denied = directory.0.join("backup-denied");
+    assert!(
+        sider::persistence::backup::export_secure(
+            options(denied_source, denied.clone()),
+            Arc::new(sider::storage::SystemClock),
+            &tool_transport,
+        )
+        .await
+        .is_err()
+    );
+    assert!(!denied.exists());
     child.terminate(DEADLINE).unwrap();
 }
 
