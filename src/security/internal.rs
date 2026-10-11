@@ -90,6 +90,7 @@ pub struct InternalPeer {
     pub(crate) roles: Vec<Role>,
     pub(crate) own_pair: [u8; 32],
     pub(crate) validity: Validity,
+    pub(crate) runtime_closed: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 impl InternalPeer {
     /// Exact verified URI for authorization; callers must not log it.
@@ -98,6 +99,10 @@ impl InternalPeer {
     }
     pub fn current(&self) -> bool {
         self.validity.current()
+            && self
+                .runtime_closed
+                .as_ref()
+                .is_none_or(|closed| !closed.load(std::sync::atomic::Ordering::Acquire))
     }
 }
 

@@ -33,18 +33,40 @@ impl DbHandle {
             return Err(DbError::ShuttingDown);
         }
         self.admission.check()?;
+        self.check_internal_admission()?;
         // No worker waits for this lock. Already accepted normal requests hold read
         // guards and finish first; expiry merely attempts admission.
-        let guard = self.barrier.clone().write_owned().await;
+        let guard = self.internal_barrier().await?;
         self.admission.check()?;
+        self.check_internal_admission()?;
         if *self.shutdown.borrow() {
             return Err(DbError::ShuttingDown);
         }
         let mut responses = Vec::with_capacity(self.snapshots.len());
-        for sender in &self.snapshots {
-            let (reply, response) = oneshot::channel();
-            sender.send(reply).await.map_err(|_| DbError::Unavailable)?;
-            responses.push(response);
+        if self.internal_lease.is_some() {
+            let permits = timeout(self.request_timeout, async {
+                let mut permits = Vec::with_capacity(self.snapshots.len());
+                for sender in &self.snapshots {
+                    permits.push(sender.reserve().await.map_err(|_| DbError::Unavailable)?);
+                }
+                Ok::<_, DbError>(permits)
+            })
+            .await
+            .map_err(|_| DbError::Timeout)??;
+            self.check_internal_admission()?;
+            // Once the first capture is accepted, its owned caller retains the
+            // guard until all workers reply, including after network cancellation.
+            for permit in permits {
+                let (reply, response) = oneshot::channel();
+                permit.send(reply);
+                responses.push(response);
+            }
+        } else {
+            for sender in &self.snapshots {
+                let (reply, response) = oneshot::channel();
+                sender.send(reply).await.map_err(|_| DbError::Unavailable)?;
+                responses.push(response);
+            }
         }
         let mut mutations = Vec::new();
         for response in responses {

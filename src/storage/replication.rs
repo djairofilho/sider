@@ -30,11 +30,13 @@ pub(super) enum Control {
     Replace {
         store: Store,
         reply: oneshot::Sender<()>,
+        _security: Option<crate::security::InternalLease>,
     },
     Apply {
         batch: ResolvedBatch,
         sequence: u64,
         reply: oneshot::Sender<Result<(), Error>>,
+        _security: Option<crate::security::InternalLease>,
     },
 }
 
@@ -47,6 +49,21 @@ pub struct Snapshot {
 impl DbHandle {
     /// Captures and signs under the same barrier; serialization occurs outside it.
     pub async fn replication_snapshot(
+        &self,
+        context: &Context,
+        follow: bool,
+    ) -> Result<Snapshot, Error> {
+        if self.internal_lease.is_some() {
+            let database = self.clone();
+            let context = context.clone();
+            return tokio::spawn(async move {
+                database.replication_snapshot_inner(&context, follow).await
+            })
+            .await?;
+        }
+        self.replication_snapshot_inner(context, follow).await
+    }
+    async fn replication_snapshot_inner(
         &self,
         context: &Context,
         follow: bool,
@@ -84,8 +101,9 @@ impl DbHandle {
         runtime: &Runtime,
     ) -> Result<crate::replication::state::Status, Error> {
         self.admission.check()?;
-        let _guard = self.barrier.clone().write_owned().await;
+        let _guard = self.internal_barrier().await?;
         self.admission.check()?;
+        self.check_internal_admission()?;
         if *self.shutdown.borrow() {
             return Err(DbError::ShuttingDown.into());
         }
@@ -126,8 +144,9 @@ impl DbHandle {
                 stores[context.layout.shard_for(mutation.key())?]
                     .replay(std::slice::from_ref(mutation))?;
             }
-            let _guard = database.barrier.clone().write_owned().await;
+            let _guard = database.internal_barrier().await?;
             database.admission.check()?;
+            database.check_internal_admission()?;
             if *database.shutdown.borrow() {
                 return Err(DbError::ShuttingDown.into());
             }
@@ -137,6 +156,13 @@ impl DbHandle {
             if database.controls.len() != stores.len() {
                 return Err(Error::Sequence);
             }
+            let mut permits = if database.internal_lease.is_some() {
+                let permits = reserve_controls(&database).await?;
+                database.check_internal_admission()?;
+                Some(std::collections::VecDeque::from(permits))
+            } else {
+                None
+            };
             let publication = database.admission.publication();
             let decision = context
                 .aof
@@ -158,10 +184,22 @@ impl DbHandle {
             // After rename, any failure requires stopping: disk already selects the new snapshot.
             for (control, store) in database.controls.iter().zip(stores) {
                 let (reply, response) = oneshot::channel();
-                control
-                    .send(Control::Replace { store, reply })
-                    .await
-                    .map_err(|_| DbError::Unavailable)?;
+                let message = Control::Replace {
+                    store,
+                    reply,
+                    _security: database.internal_lease.clone(),
+                };
+                if let Some(permits) = &mut permits {
+                    permits
+                        .pop_front()
+                        .expect("one reservation per worker")
+                        .send(message);
+                } else {
+                    control
+                        .send(message)
+                        .await
+                        .map_err(|_| DbError::Unavailable)?;
+                }
                 response.await.map_err(|_| DbError::Unavailable)?;
             }
             context.runtime.applied(cursor);
@@ -180,8 +218,9 @@ impl DbHandle {
     ) -> Result<(), Error> {
         let database = self.clone();
         tokio::spawn(async move {
-            let _guard = database.barrier.clone().write_owned().await;
+            let _guard = database.internal_barrier().await?;
             database.admission.check()?;
+            database.check_internal_admission()?;
             if *database.shutdown.borrow() {
                 return Err(DbError::ShuttingDown.into());
             }
@@ -203,16 +242,35 @@ impl DbHandle {
                 shard = Some(next);
             }
             let shard = shard.ok_or(Error::Sequence)?;
+            let permit = if database.internal_lease.is_some() {
+                let permit = tokio::time::timeout(
+                    database.request_timeout,
+                    database.controls[shard].reserve(),
+                )
+                .await
+                .map_err(|_| DbError::Timeout)?
+                .map_err(|_| DbError::Unavailable)?;
+                database.check_internal_admission()?;
+                Some(permit)
+            } else {
+                None
+            };
             let publication = database.admission.publication();
             let (reply, response) = oneshot::channel();
-            database.controls[shard]
-                .send(Control::Apply {
-                    batch,
-                    sequence: cursor.sequence,
-                    reply,
-                })
-                .await
-                .map_err(|_| DbError::Unavailable)?;
+            let message = Control::Apply {
+                batch,
+                sequence: cursor.sequence,
+                reply,
+                _security: database.internal_lease.clone(),
+            };
+            if let Some(permit) = permit {
+                permit.send(message);
+            } else {
+                database.controls[shard]
+                    .send(message)
+                    .await
+                    .map_err(|_| DbError::Unavailable)?;
+            }
             if let Err(error) = response.await.map_err(|_| DbError::Unavailable)? {
                 if matches!(
                     &error,
@@ -273,5 +331,24 @@ impl DbHandle {
             Ok(cursor)
         })
         .await?
+    }
+}
+
+async fn reserve_controls(
+    database: &DbHandle,
+) -> Result<Vec<tokio::sync::mpsc::Permit<'_, Control>>, DbError> {
+    let reserve = async {
+        let mut permits = Vec::with_capacity(database.controls.len());
+        for control in &database.controls {
+            permits.push(control.reserve().await.map_err(|_| DbError::Unavailable)?);
+        }
+        Ok(permits)
+    };
+    if database.internal_lease.is_some() {
+        tokio::time::timeout(database.request_timeout, reserve)
+            .await
+            .map_err(|_| DbError::Timeout)?
+    } else {
+        reserve.await
     }
 }

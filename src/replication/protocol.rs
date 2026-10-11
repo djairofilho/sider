@@ -703,6 +703,22 @@ pub async fn read_authorized(
     read_authorized_profile(input, limits, deadline, authorize_kind, VERSION).await
 }
 
+/// Reads only the bounded header before asynchronous admission. One deadline
+/// covers header, lease acquisition, payload and decoding. The returned admission
+/// stays owned through payload allocation and can move to final operation admission.
+pub async fn read_admitted<A, F, Admission>(
+    input: &mut (impl AsyncRead + Unpin),
+    limits: Limits,
+    deadline: Duration,
+    admit: F,
+) -> Result<(Bytes, Message, A), Error>
+where
+    F: FnOnce(u8) -> Admission,
+    Admission: std::future::Future<Output = Result<A, Error>>,
+{
+    read_admitted_profile(input, limits, deadline, admit, VERSION).await
+}
+
 /// Transport 2 checks the version and phase before allocating a payload.
 pub async fn read_memory_in_phase(
     input: &mut (impl AsyncRead + Unpin),
@@ -727,6 +743,34 @@ async fn read_authorized_profile(
     authorize_kind: impl FnOnce(u8) -> bool,
     version: u16,
 ) -> Result<(Bytes, Message), Error> {
+    let (frame, message, ()) = read_admitted_profile(
+        input,
+        limits,
+        deadline,
+        |kind| {
+            std::future::ready(if authorize_kind(kind) {
+                Ok(())
+            } else {
+                Err(Error::Invalid("permission denied"))
+            })
+        },
+        version,
+    )
+    .await?;
+    Ok((frame, message))
+}
+
+async fn read_admitted_profile<A, F, Admission>(
+    input: &mut (impl AsyncRead + Unpin),
+    limits: Limits,
+    deadline: Duration,
+    admit: F,
+    version: u16,
+) -> Result<(Bytes, Message, A), Error>
+where
+    F: FnOnce(u8) -> Admission,
+    Admission: std::future::Future<Output = Result<A, Error>>,
+{
     if deadline.is_zero() || tokio::time::Instant::now().checked_add(deadline).is_none() {
         return Err(Error::Limit);
     }
@@ -735,15 +779,13 @@ async fn read_authorized_profile(
         let mut prefix = [0; HEADER_BYTES];
         input.read_exact(&mut prefix).await?;
         let (kind, size) = header(&prefix, limits, version)?;
-        if !authorize_kind(kind) {
-            return Err(Error::Invalid("permission denied"));
-        }
+        let admission = admit(kind).await?;
         let mut frame = vec![0; HEADER_BYTES + size];
         frame[..HEADER_BYTES].copy_from_slice(&prefix);
         input.read_exact(&mut frame[HEADER_BYTES..]).await?;
         let frame = Bytes::from(frame);
         let message = decode_profile(frame.clone(), limits, version)?;
-        Ok((frame, message))
+        Ok((frame, message, admission))
     })
     .await
     .map_err(|_| Error::Timeout)?
