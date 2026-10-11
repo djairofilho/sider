@@ -1,6 +1,7 @@
 //! Binary AOF with resolved batches and a single write owner.
 
 pub mod backup;
+pub mod composed_format;
 mod diagnostics;
 pub mod format;
 mod layout;
