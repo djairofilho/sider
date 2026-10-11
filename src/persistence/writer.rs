@@ -32,7 +32,7 @@ pub enum SyncPolicy {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AofConfig {
-    /// Explicit record-2 profile; server-side replica following remains gated.
+    /// Explicit record-2 profile for the server, backup, and replica paths.
     memory_profile: bool,
     pub directory: PathBuf,
     pub layout: DurableLayout,
@@ -57,8 +57,7 @@ impl AofConfig {
         }
     }
     /// Selects the record-2/header-4-or-5 profile explicitly.
-    /// Server-side replica following remains gated.
-    /// Explicit offline memory backup and migration APIs handle this profile.
+    /// Offline memory backup and migration APIs also handle this profile.
     pub fn with_memory_profile(mut self) -> Self {
         self.memory_profile = true;
         self

@@ -108,9 +108,10 @@ after durable publication. A memory source now persists a primary epoch at
 startup and publishes committed record-2 batches into its bounded journal.
 The database snapshot barrier captures a durable cursor and subscribes at that
 exact position. The memory source serves transport-2 `FULL` and `CONTINUE`
-sessions with cursor acknowledgements and bounded journal replay. The server
-still refuses replica following because follower startup, reconnect, and
-promotion controls are not integrated.
+sessions with cursor acknowledgements and bounded journal replay. The record-2
+follower starts read-only, installs durable snapshots, applies exact-sequence
+deltas, and reconnects after source or follower restarts. Memory promotion
+controls and Linux filesystem crash evidence are still pending.
 The internal replica path also validates guarded record-2 deltas and commits them
 at the exact upstream sequence before acknowledging worker application.
 
