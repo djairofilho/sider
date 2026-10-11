@@ -105,6 +105,7 @@ pub struct DbHandle {
     pub(crate) metrics: Metrics,
     requests: Vec<mpsc::Sender<Request>>,
     security_lease: Option<crate::security::ClientLease>,
+    pub(super) internal_lease: Option<crate::security::InternalLease>,
     router: ShardRouter,
     pub(super) request_timeout: Duration,
     pub(super) shutdown: watch::Receiver<bool>,
@@ -224,6 +225,7 @@ pub fn channel_with_stores(
             metrics,
             requests: senders,
             security_lease: None,
+            internal_lease: None,
             router,
             request_timeout,
             shutdown: shutdown.clone(),
@@ -238,6 +240,37 @@ pub fn channel_with_stores(
 }
 
 impl DbHandle {
+    pub(crate) fn authorized_internal(
+        &self,
+        lease: Option<crate::security::InternalLease>,
+    ) -> Self {
+        let mut handle = self.clone();
+        handle.internal_lease = lease;
+        handle
+    }
+    pub(super) async fn internal_barrier(
+        &self,
+    ) -> Result<tokio::sync::OwnedRwLockWriteGuard<()>, DbError> {
+        let wait = self.barrier.clone().write_owned();
+        if self.internal_lease.is_some() {
+            tokio::time::timeout(self.request_timeout, wait)
+                .await
+                .map_err(|_| DbError::Timeout)
+        } else {
+            Ok(wait.await)
+        }
+    }
+
+    pub(super) fn check_internal_admission(&self) -> Result<(), DbError> {
+        if self
+            .internal_lease
+            .as_ref()
+            .is_some_and(|lease| !lease.admitted_now())
+        {
+            return Err(DbError::SecurityExpired);
+        }
+        Ok(())
+    }
     pub(crate) fn authorized(&self, lease: Option<crate::security::ClientLease>) -> Self {
         let mut handle = self.clone();
         handle.security_lease = lease;
@@ -848,7 +881,11 @@ impl Worker {
     async fn replication_control(&mut self, control: super::replication::Control) -> bool {
         use super::replication::Control;
         match control {
-            Control::Replace { store, reply } => {
+            Control::Replace {
+                store,
+                reply,
+                _security,
+            } => {
                 self.store = store;
                 self.metrics.dataset(self.shard, self.store.dataset_stats());
                 let _ = reply.send(());
@@ -858,6 +895,7 @@ impl Worker {
                 batch,
                 sequence,
                 reply,
+                _security,
             } => {
                 let result = async {
                     let prepared = self.store.prepare_replay(&batch.mutations, batch.origin)?;

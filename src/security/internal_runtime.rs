@@ -22,10 +22,14 @@ use super::{
 #[derive(Clone)]
 pub struct InternalLease {
     generation: Arc<OwnedRwLockReadGuard<Generation>>,
+    proof: Option<(InternalPeer, Option<u8>)>,
 }
 impl InternalLease {
     pub(super) fn new(generation: Arc<OwnedRwLockReadGuard<Generation>>) -> Self {
-        Self { generation }
+        Self {
+            generation,
+            proof: None,
+        }
     }
     fn transport(&self) -> &InternalTransport {
         &self
@@ -55,6 +59,28 @@ impl InternalLease {
     /// Current trust, roles and expiry check for an already admitted frame direction.
     pub fn validate_peer(&self, peer: &InternalPeer) -> Result<(), Error> {
         self.transport().revalidate_peer(peer)
+    }
+    /// Binds final incoming operation admission to its initial request authority.
+    pub fn for_request(mut self, peer: &InternalPeer, kind: u8) -> Result<Self, Error> {
+        self.authorize_request(peer, kind)?;
+        self.proof = Some((peer.clone(), Some(kind)));
+        Ok(self)
+    }
+    /// Binds an outgoing replica operation to the exact verified upstream.
+    pub fn for_upstream(mut self, peer: &InternalPeer) -> Result<Self, Error> {
+        if peer.address.is_none() {
+            return Err(Error::Permission);
+        }
+        self.validate_peer(peer)?;
+        self.proof = Some((peer.clone(), None));
+        Ok(self)
+    }
+    pub(crate) fn admitted_now(&self) -> bool {
+        self.proof.as_ref().is_some_and(|(peer, kind)| {
+            self.validate_peer(peer).is_ok()
+                && kind
+                    .is_none_or(|kind| authorize_internal_request(self.policy(), peer.uri(), kind))
+        })
     }
 }
 
