@@ -67,27 +67,7 @@ impl Certificates {
         (cert.pem(), key.serialize_pem())
     }
     fn crl(&self, until: time::OffsetDateTime, revoked: Option<u64>) -> String {
-        let now = time::OffsetDateTime::now_utc();
-        rcgen::CertificateRevocationListParams {
-            this_update: now - time::Duration::hours(1),
-            next_update: until,
-            crl_number: 1_u64.into(),
-            issuing_distribution_point: None,
-            revoked_certs: revoked
-                .into_iter()
-                .map(|serial| rcgen::RevokedCertParams {
-                    serial_number: serial.into(),
-                    revocation_time: now - time::Duration::minutes(1),
-                    reason_code: Some(rcgen::RevocationReason::KeyCompromise),
-                    invalidity_date: None,
-                })
-                .collect(),
-            key_identifier_method: rcgen::KeyIdMethod::Sha256,
-        }
-        .signed_by(&self.issuer, &self.key)
-        .unwrap()
-        .pem()
-        .unwrap()
+        signed_crl(&self.issuer, &self.key, until, revoked)
     }
     fn transport(
         &self,
@@ -110,6 +90,34 @@ impl Certificates {
         )
         .unwrap()
     }
+}
+fn signed_crl(
+    issuer: &rcgen::Certificate,
+    key: &rcgen::KeyPair,
+    until: time::OffsetDateTime,
+    revoked: Option<u64>,
+) -> String {
+    let now = time::OffsetDateTime::now_utc();
+    rcgen::CertificateRevocationListParams {
+        this_update: now - time::Duration::hours(1),
+        next_update: until,
+        crl_number: 1_u64.into(),
+        issuing_distribution_point: None,
+        revoked_certs: revoked
+            .into_iter()
+            .map(|serial| rcgen::RevokedCertParams {
+                serial_number: serial.into(),
+                revocation_time: now - time::Duration::minutes(1),
+                reason_code: Some(rcgen::RevocationReason::KeyCompromise),
+                invalidity_date: None,
+            })
+            .collect(),
+        key_identifier_method: rcgen::KeyIdMethod::Sha256,
+    }
+    .signed_by(issuer, key)
+    .unwrap()
+    .pem()
+    .unwrap()
 }
 fn policy(roles: &[&str]) -> Arc<InternalPolicy> {
     let mut principal = json!({"uri_san":PEER,"roles":roles});
@@ -146,6 +154,139 @@ async fn pair(
     let outgoing = client.connect_with_peer(address).await.unwrap();
     let incoming = timeout(DEADLINE, task).await.unwrap().unwrap();
     (outgoing, incoming, address)
+}
+
+#[tokio::test]
+async fn security_internal_intermediate_chain_requires_each_issuer_crl() {
+    async fn admitted(
+        server_leaf: &(String, String),
+        client_leaf: &(String, String),
+        root: &str,
+        crls: &str,
+    ) -> bool {
+        let Ok(server) = InternalTransport::new(
+            server_leaf.0.as_bytes(),
+            server_leaf.1.as_bytes(),
+            root.as_bytes(),
+            crls.as_bytes(),
+            policy(&["monitor"]),
+        ) else {
+            return false;
+        };
+        let Ok(client) = InternalTransport::tool(
+            client_leaf.0.as_bytes(),
+            client_leaf.1.as_bytes(),
+            root.as_bytes(),
+            crls.as_bytes(),
+            tool_policy(SERVER),
+        ) else {
+            return false;
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let incoming = async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            server.accept_with_peer(socket).await
+        };
+        let (incoming, outgoing) = tokio::join!(
+            timeout(DEADLINE, incoming),
+            timeout(DEADLINE, client.connect_with_peer(address))
+        );
+        matches!(incoming, Ok(Ok(_))) && matches!(outgoing, Ok(Ok(_)))
+    }
+
+    let root_key = rcgen::KeyPair::generate().unwrap();
+    let mut root_params = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+    root_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    root_params.key_usages = vec![
+        rcgen::KeyUsagePurpose::KeyCertSign,
+        rcgen::KeyUsagePurpose::CrlSign,
+    ];
+    root_params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, "sider test root");
+    let root = root_params.self_signed(&root_key).unwrap();
+
+    let intermediate_key = rcgen::KeyPair::generate().unwrap();
+    let mut intermediate_params = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+    intermediate_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Constrained(0));
+    intermediate_params.key_usages = vec![
+        rcgen::KeyUsagePurpose::KeyCertSign,
+        rcgen::KeyUsagePurpose::CrlSign,
+    ];
+    intermediate_params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, "sider test intermediate");
+    intermediate_params.serial_number = Some(3_u64.into());
+    let intermediate = intermediate_params
+        .signed_by(&intermediate_key, &root, &root_key)
+        .unwrap();
+
+    let leaf = |uri: &str, serial: u64| {
+        let key = rcgen::KeyPair::generate().unwrap();
+        let mut params = rcgen::CertificateParams::new(vec!["127.0.0.1".into()]).unwrap();
+        params.serial_number = Some(serial.into());
+        params
+            .subject_alt_names
+            .push(rcgen::SanType::URI(uri.try_into().unwrap()));
+        params.key_usages = vec![rcgen::KeyUsagePurpose::DigitalSignature];
+        params.extended_key_usages = vec![
+            rcgen::ExtendedKeyUsagePurpose::ClientAuth,
+            rcgen::ExtendedKeyUsagePurpose::ServerAuth,
+        ];
+        let certificate = params
+            .signed_by(&key, &intermediate, &intermediate_key)
+            .unwrap();
+        (
+            format!("{}{}", certificate.pem(), intermediate.pem()),
+            key.serialize_pem(),
+        )
+    };
+    let server_leaf = leaf(SERVER, 1);
+    let client_leaf = leaf(PEER, 2);
+    let until = time::OffsetDateTime::now_utc() + time::Duration::hours(1);
+    let root_crl = signed_crl(&root, &root_key, until, None);
+    let intermediate_crl = signed_crl(&intermediate, &intermediate_key, until, None);
+    let full = format!("{root_crl}{intermediate_crl}");
+    assert!(admitted(&server_leaf, &client_leaf, &root.pem(), &full).await);
+    assert!(!admitted(&server_leaf, &client_leaf, &root.pem(), &root_crl).await);
+    assert!(!admitted(&server_leaf, &client_leaf, &root.pem(), &intermediate_crl).await);
+
+    let revoked_leaf = signed_crl(&intermediate, &intermediate_key, until, Some(2));
+    assert!(
+        !admitted(
+            &server_leaf,
+            &client_leaf,
+            &root.pem(),
+            &format!("{root_crl}{revoked_leaf}")
+        )
+        .await
+    );
+    let revoked_intermediate = signed_crl(&root, &root_key, until, Some(3));
+    assert!(
+        !admitted(
+            &server_leaf,
+            &client_leaf,
+            &root.pem(),
+            &format!("{revoked_intermediate}{intermediate_crl}")
+        )
+        .await
+    );
+    let expired_intermediate = signed_crl(
+        &intermediate,
+        &intermediate_key,
+        time::OffsetDateTime::now_utc() - time::Duration::minutes(1),
+        None,
+    );
+    assert!(
+        !admitted(
+            &server_leaf,
+            &client_leaf,
+            &root.pem(),
+            &format!("{root_crl}{expired_intermediate}")
+        )
+        .await
+    );
 }
 
 fn runtime_generation(
