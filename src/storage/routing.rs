@@ -3,6 +3,10 @@
 use crate::ConfigError;
 use crate::command::{Command, ExecutionError};
 
+#[path = "routing_transaction.rs"]
+mod transaction;
+pub use transaction::{CommandPlan, Fragment, PlanError, ReplyPlan};
+
 /// Bounds workers, queues, and coordination metadata created at initialization.
 pub const MAX_SHARDS: usize = 256;
 
