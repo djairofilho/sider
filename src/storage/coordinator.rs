@@ -3,7 +3,7 @@
 //! The explicit local composed AOF profile uses this owner-control protocol for
 //! mixed-owner EXEC. Default EXEC remains single-owner; replica roles refuse it.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bytes::Bytes;
 use tokio::sync::{OwnedRwLockWriteGuard, mpsc, oneshot};
@@ -33,6 +33,17 @@ pub(super) enum Control {
     Probe {
         mode: Mode,
         reply: oneshot::Sender<bool>,
+    },
+    PrepareWatch {
+        mode: Mode,
+        keys: Vec<Bytes>,
+        reply: oneshot::Sender<Result<Prepared, DbError>>,
+    },
+    ApplyWatch {
+        mode: Mode,
+        prepared: Prepared,
+        keys: Vec<Bytes>,
+        reply: oneshot::Sender<Result<Vec<WatchToken>, DbError>>,
     },
     Clock(oneshot::Sender<TransactionTime>),
     CheckWatches {
@@ -79,6 +90,32 @@ impl Worker {
             Control::Probe { mode, reply } => {
                 let _ =
                     reply.send(self.supports_coordinated_mode(&mode) && self.coordinated.is_none());
+            }
+            Control::PrepareWatch { mode, keys, reply } => {
+                let result = if self.supports_coordinated_mode(&mode) && self.coordinated.is_none()
+                {
+                    Ok(self.store.prepare(Command::Exists { keys }))
+                } else {
+                    Err(DbError::Unavailable)
+                };
+                let _ = reply.send(result);
+            }
+            Control::ApplyWatch {
+                mode,
+                prepared,
+                keys,
+                reply,
+            } => {
+                let result = if self.supports_coordinated_mode(&mode)
+                    && self.coordinated.is_none()
+                    && !matches!(&prepared.reply, Reply::Error(_))
+                {
+                    self.apply_prepared(prepared);
+                    Ok(self.store.watch(keys))
+                } else {
+                    Err(DbError::Unavailable)
+                };
+                let _ = reply.send(result);
             }
             Control::Clock(reply) => {
                 let _ = reply.send(self.store.transaction_time());
@@ -168,9 +205,51 @@ async fn control<T>(
 }
 
 impl DbHandle {
+    /// Registers keys from several owners at one excluded durable cut.
+    pub(super) async fn watch_coordinated(
+        &self,
+        keys: Vec<Bytes>,
+    ) -> Result<(Reply, Vec<WatchToken>), DbError> {
+        if self.replication.is_some() || self.composed_aof.is_none() {
+            return Err(DbError::Unavailable);
+        }
+        let deadline = Instant::now()
+            .checked_add(self.request_timeout)
+            .ok_or(DbError::Timeout)?;
+        self.admission.check()?;
+        let mut shutdown = self.shutdown.clone();
+        let exclusive = tokio::select! {
+            biased;
+            () = sleep_until(deadline) => return Err(DbError::Timeout),
+            () = super::worker::stopping(&mut shutdown) => return Err(DbError::ShuttingDown),
+            guard = self.barrier.clone().write_owned() => guard,
+        };
+        self.admission.check()?;
+        if *shutdown.borrow() {
+            return Err(DbError::ShuttingDown);
+        }
+        if self
+            .security_lease
+            .as_ref()
+            .is_some_and(|lease| !lease.admitted_now())
+        {
+            return Err(DbError::SecurityExpired);
+        }
+        let handle = self.clone();
+        let (reply, response) = oneshot::channel();
+        tokio::spawn(async move {
+            let result = run_watch(handle, keys, deadline, exclusive).await;
+            let _ = reply.send(result);
+        });
+        tokio::select! {
+            () = sleep_until(deadline) => Err(DbError::Timeout),
+            result = response => result.map_err(|_| DbError::Unavailable)?,
+        }
+    }
+
     /// Executes a dataset-only queue across owners under exclusive admission.
     /// The explicit local composed profile appends one record before application;
-    /// the RESP EXEC and replica paths remain gated.
+    /// RESP EXEC can select it locally, while network replica sessions remain gated.
     /// After acceptance, caller cancellation does not stop owner application.
     pub(crate) async fn execute_coordinated(
         &self,
@@ -244,6 +323,98 @@ impl DbHandle {
             result = response => result.map_err(|_| DbError::Unavailable)?,
         }
     }
+}
+
+async fn run_watch(
+    handle: DbHandle,
+    keys: Vec<Bytes>,
+    deadline: Instant,
+    _exclusive: OwnedRwLockWriteGuard<()>,
+) -> Result<(Reply, Vec<WatchToken>), DbError> {
+    let aof = handle.composed_aof.as_ref().ok_or(DbError::Unavailable)?;
+    let mode = Mode::Composed(aof.clone());
+    let mut by_owner = BTreeMap::<usize, Vec<Bytes>>::new();
+    for key in keys {
+        by_owner
+            .entry(handle.router.shard_for(&key))
+            .or_default()
+            .push(key);
+    }
+    let mut prepared = Vec::with_capacity(by_owner.len());
+    for (owner, keys) in by_owner {
+        let candidate = control(&handle.coordination[owner], deadline, |reply| {
+            Control::PrepareWatch {
+                mode: mode.clone(),
+                keys: keys.clone(),
+                reply,
+            }
+        })
+        .await??;
+        if matches!(&candidate.reply, Reply::Error(_)) {
+            return Ok((candidate.reply, Vec::new()));
+        }
+        prepared.push((owner, keys, candidate));
+    }
+    let mut batch = ResolvedBatch {
+        origin: MutationOrigin::Expiration,
+        mutations: prepared
+            .iter()
+            .flat_map(|(_, _, candidate)| candidate.batch.mutations.iter().cloned())
+            .collect(),
+    };
+    batch
+        .mutations
+        .sort_unstable_by(|left, right| left.key().cmp(right.key()));
+    if batch
+        .mutations
+        .windows(2)
+        .any(|pair| pair[0].key() == pair[1].key())
+    {
+        return Err(DbError::Unavailable);
+    }
+    let mut publication = if batch.mutations.is_empty() {
+        None
+    } else {
+        Some(handle.admission.publication())
+    };
+    if publication.is_some() {
+        match aof.append(batch).await {
+            Ok(_) => {}
+            Err(crate::persistence::AofError::Format(
+                crate::persistence::format::FormatError::Limit,
+            )) => {
+                publication
+                    .take()
+                    .expect("decision guard created")
+                    .complete();
+                return Ok((Reply::Error(ExecutionError::AofRecordLimit), Vec::new()));
+            }
+            Err(error) => {
+                tracing::error!(%error, "multi-owner WATCH expiration decision failed");
+                return Err(DbError::Unavailable);
+            }
+        }
+    }
+    let apply_deadline = Instant::now()
+        .checked_add(handle.request_timeout)
+        .ok_or(DbError::Timeout)?;
+    let mut tokens = Vec::new();
+    for (owner, keys, candidate) in prepared {
+        let mut acquired = control(&handle.coordination[owner], apply_deadline, |reply| {
+            Control::ApplyWatch {
+                mode: mode.clone(),
+                prepared: candidate,
+                keys,
+                reply,
+            }
+        })
+        .await??;
+        tokens.append(&mut acquired);
+    }
+    if let Some(publication) = publication {
+        publication.complete();
+    }
+    Ok((Reply::Ok, tokens))
 }
 
 async fn run(

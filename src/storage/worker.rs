@@ -498,10 +498,13 @@ impl DbHandle {
         &self,
         keys: Vec<bytes::Bytes>,
     ) -> Result<(Reply, Vec<WatchToken>), DbError> {
-        let shard = self
+        let participants = self
             .router
-            .route(&Command::Watch { keys: keys.clone() })
-            .map_err(|_| DbError::Unavailable)?;
+            .transaction_participants(&[], keys.iter().map(bytes::Bytes::as_ref));
+        let [shard] = participants.as_slice() else {
+            return self.watch_coordinated(keys).await;
+        };
+        let shard = *shard;
         self.request(shard, |reply, _admission| Request::Watch {
             keys,
             reply,
