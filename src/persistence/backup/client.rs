@@ -272,7 +272,7 @@ async fn receive(
         .write(true)
         .create_new(true)
         .open(&path)?;
-    let codec = crate::persistence::profile::Profile(profile == super::Profile::Memory);
+    let codec = crate::persistence::profile::Profile::selected(profile == super::Profile::Memory);
     codec.write_header(&mut file, cursor.sequence, layout, None)?;
     let mut previous = None;
     let mut digest = 0;

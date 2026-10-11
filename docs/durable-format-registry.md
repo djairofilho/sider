@@ -207,8 +207,12 @@ by this proposal. The isolated `persistence::composed_format` module encodes and
 validates the header-7 grammar against the literal fixtures, all truncated headers,
 and invalid fields with recomputed checksums. It does not select a supported
 profile or open, scan, repair, append, back up, replicate, or migrate a directory.
-The default reader still rejects version 7 before inspecting records, including
-every torn first-record prefix, and preserves the file bytes.
+An internal, unselectable writer profile now exercises record-1 mixed batches
+through append, whole-record replay, compaction, restart, and torn-tail repair.
+It refuses record 2, the missing mixed bit, and replica roles before record scan.
+No public AOF configuration selects that profile; default recovery still rejects
+version 7 before inspecting records, including every torn first-record prefix,
+and preserves the file bytes. Backup and transport 3 are still unavailable.
 Coordinate acceptance of allocations 7, transport 3 and backup schema 3 with
 the memory contract owner before enabling any of them in production.
 

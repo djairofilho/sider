@@ -1,12 +1,21 @@
 //! Explicit development profile selection; never inferred from current values.
-use super::{DurableLayout, ReplicationMetadata, format, memory_format};
+use super::{DurableLayout, ReplicationMetadata, composed_format, format, memory_format};
 use crate::storage::{Mutation, ResolvedBatch, Value};
 use std::io::{Read, Write};
 
-#[derive(Clone, Copy)]
-pub(super) struct Profile(pub bool);
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Profile {
+    Legacy,
+    Memory,
+    /// Internal recovery proof only; public configuration never selects this profile.
+    ComposedLegacyMixed,
+}
 
 impl Profile {
+    pub fn selected(memory: bool) -> Self {
+        if memory { Self::Memory } else { Self::Legacy }
+    }
+
     pub fn write_header(
         self,
         mut output: impl Write,
@@ -14,7 +23,19 @@ impl Profile {
         layout: DurableLayout,
         replication: Option<ReplicationMetadata>,
     ) -> Result<(), format::FormatError> {
-        if self.0 {
+        if self == Self::ComposedLegacyMixed {
+            if replication.is_some() {
+                return Err(format::FormatError::Corrupt("unsupported composed role"));
+            }
+            output.write_all(&composed_format::encode_header(composed_format::Header {
+                sequence,
+                layout,
+                record_version: composed_format::RecordVersion::Legacy,
+                mixed_owner_batch: true,
+                replication: None,
+            })?)?;
+            Ok(())
+        } else if self == Self::Memory {
             output.write_all(&memory_format::encode_header(memory_format::Header {
                 sequence,
                 layout,
@@ -27,7 +48,23 @@ impl Profile {
     }
 
     pub fn read_header(self, input: impl Read) -> Result<format::Header, format::FormatError> {
-        if !self.0 {
+        if self == Self::ComposedLegacyMixed {
+            let header = composed_format::read_header(input)?;
+            if header.record_version != composed_format::RecordVersion::Legacy
+                || !header.mixed_owner_batch
+                || header.replication.is_some()
+            {
+                return Err(format::FormatError::Corrupt("unsupported composed profile"));
+            }
+            return Ok(format::Header {
+                sequence: header.sequence,
+                layout: header.layout,
+                replication: None,
+                format_version: composed_format::HEADER_VERSION,
+                bytes: composed_format::HEADER_BYTES,
+            });
+        }
+        if self != Self::Memory {
             return format::read_header_with_layout(input);
         }
         let header = memory_format::read_header(input)?;
@@ -45,7 +82,7 @@ impl Profile {
         input: impl Read,
         limits: format::Limits,
     ) -> Result<memory_format::Next, format::FormatError> {
-        if self.0 {
+        if self == Self::Memory {
             return memory_format::read_record(input, limits);
         }
         Ok(match format::read_record(input, limits)? {
@@ -68,7 +105,7 @@ impl Profile {
         record: &memory_format::Record,
         limits: format::Limits,
     ) -> Result<Vec<u8>, format::FormatError> {
-        if self.0 {
+        if self == Self::Memory {
             return memory_format::encode(record, limits);
         }
         let legacy = match record {

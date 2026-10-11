@@ -183,6 +183,7 @@ enum Request {
 #[derive(Clone)]
 pub struct AofHandle {
     memory_profile: bool,
+    composed_profile: bool,
     limits: Limits,
     faults: Arc<dyn FaultInjector>,
     requests: mpsc::Sender<Request>,
@@ -257,9 +258,9 @@ impl AofHandle {
         sequence: u64,
         batch: ResolvedBatch,
     ) -> Result<u64, AofError> {
-        if self.memory_profile {
+        if self.memory_profile || self.composed_profile {
             return Err(AofError::Migration(
-                "record-2 replication transport is not activated",
+                "selected replication transport is not activated",
             ));
         }
         let (reply, response) = oneshot::channel();
@@ -276,9 +277,9 @@ impl AofHandle {
         sequence: u64,
         metadata: ReplicationMetadata,
     ) -> Result<(), AofError> {
-        if self.memory_profile {
+        if self.memory_profile || self.composed_profile {
             return Err(AofError::Migration(
-                "record-2 replication installation is not activated",
+                "selected replication installation is not activated",
             ));
         }
         let (reply, response) = oneshot::channel();
@@ -322,6 +323,11 @@ impl AofHandle {
         &self,
         journal: crate::replication::journal::Journal,
     ) -> Result<(), AofError> {
+        if self.composed_profile {
+            return Err(AofError::Migration(
+                "composed replication transport is not activated",
+            ));
+        }
         let (reply, response) = oneshot::channel();
         self.requests
             .send(Request::Journal(journal, reply))
@@ -433,6 +439,7 @@ impl Recovered {
         });
         let completed = diagnostics.clone();
         let memory_profile = self.writer.config.memory_profile;
+        let composed_profile = self.writer.profile == Profile::ComposedLegacyMixed;
         let limits = self.writer.config.limits;
         let faults = self.writer.faults.clone();
         let runtime = tokio::runtime::Handle::current();
@@ -449,6 +456,7 @@ impl Recovered {
             self.store,
             AofHandle {
                 memory_profile,
+                composed_profile,
                 limits,
                 faults,
                 requests,
@@ -472,6 +480,7 @@ struct Compaction {
 
 struct Writer {
     config: AofConfig,
+    profile: Profile,
     file: File,
     _lock: DirectoryLock,
     generation: u64,
@@ -547,6 +556,21 @@ fn load(
     faults: Arc<dyn FaultInjector>,
     read_only: bool,
 ) -> Result<Recovered, AofError> {
+    let profile = Profile::selected(config.memory_profile);
+    load_profile(config, store_config, clock, faults, read_only, profile)
+}
+
+fn load_profile(
+    config: AofConfig,
+    store_config: StoreConfig,
+    clock: Arc<dyn Clock>,
+    faults: Arc<dyn FaultInjector>,
+    read_only: bool,
+    profile: Profile,
+) -> Result<Recovered, AofError> {
+    if (profile == Profile::Memory) != config.memory_profile {
+        return Err(AofError::Migration("incompatible development AOF profile"));
+    }
     config.validate()?;
     store_config.validate()?;
     config.layout.quota(store_config.max_dataset_bytes, 0)?;
@@ -554,7 +578,6 @@ fn load(
         fs::create_dir_all(&config.directory)?;
     }
     let lock = DirectoryLock::acquire(&config.directory, !read_only)?;
-    let profile = Profile(config.memory_profile);
     let mut generations = Vec::new();
     let mut residues = Vec::new();
     for entry in fs::read_dir(&config.directory)? {
@@ -669,7 +692,7 @@ fn load(
                     config.layout,
                     store_config.max_dataset_bytes,
                     &mut shard_usage,
-                    false,
+                    profile == Profile::ComposedLegacyMixed,
                 )?;
             }
             memory_format::Record::Seal {
@@ -694,7 +717,7 @@ fn load(
                     config.layout,
                     store_config.max_dataset_bytes,
                     &mut shard_usage,
-                    false,
+                    profile == Profile::ComposedLegacyMixed,
                 )?;
                 sequence = next;
             }
@@ -748,6 +771,7 @@ fn load(
         },
         writer: Writer {
             config,
+            profile,
             file,
             _lock: lock,
             generation,
@@ -1016,7 +1040,13 @@ impl Writer {
     }
 
     fn append(&mut self, batch: ResolvedBatch) -> Result<u64, AofError> {
-        batch_shard(&batch.mutations, self.config.layout)?;
+        if self.profile == Profile::ComposedLegacyMixed {
+            for mutation in &batch.mutations {
+                self.config.layout.shard_for(mutation.key())?;
+            }
+        } else {
+            batch_shard(&batch.mutations, self.config.layout)?;
+        }
         let sequence = self.sequence.checked_add(1).ok_or(AofError::Sequence)?;
         let replication_frame = if self.journal.is_some() {
             Some(
@@ -1035,7 +1065,8 @@ impl Writer {
         } else {
             None
         };
-        let encoded = Profile(self.config.memory_profile)
+        let encoded = self
+            .profile
             .encode_legacy(Record::Batch { sequence, batch }, self.config.limits)?;
         self.append_encoded(sequence, encoded, replication_frame)
     }
@@ -1157,7 +1188,7 @@ impl Writer {
         sequence: u64,
         metadata: ReplicationMetadata,
     ) -> Result<(), AofError> {
-        if self.config.memory_profile {
+        if self.config.memory_profile || self.profile == Profile::ComposedLegacyMixed {
             return Err(FormatError::Version(2).into());
         }
         self.install_profile_snapshot(
@@ -1218,7 +1249,7 @@ impl Writer {
         drop(checked);
         let temporary = temporary_path(&self.config.directory, "replication-install");
         let destination = generation_path(&self.config.directory, generation);
-        let profile = Profile(self.config.memory_profile);
+        let profile = self.profile;
         let result = (|| {
             self.faults.hit("replication_before_install")?;
             let mut file = OpenOptions::new()
@@ -1304,7 +1335,7 @@ impl Writer {
         let limits = self.config.limits;
         let layout = self.config.layout;
         let replication = self.replication;
-        let profile = Profile(self.config.memory_profile);
+        let profile = self.profile;
         std::thread::spawn(move || {
             let result = (|| {
                 faults.hit("compact_before_snapshot")?;
@@ -1554,5 +1585,288 @@ mod routed_replay_tests {
         ));
         assert!(store.is_empty());
         assert_eq!(usage, [0, 0]);
+    }
+}
+
+#[cfg(test)]
+mod composed_local_tests {
+    use super::*;
+    use crate::storage::{MutationOrigin, SystemClock, Value};
+    use bytes::Bytes;
+
+    struct Directory(PathBuf);
+    impl Directory {
+        fn new() -> Self {
+            let path = temporary_path(&std::env::temp_dir(), "sider-composed-aof");
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for Directory {
+        fn drop(&mut self) {
+            let resolved = fs::canonicalize(&self.0).ok();
+            let root = fs::canonicalize(std::env::temp_dir()).ok();
+            if root.is_some()
+                && resolved.as_ref().and_then(|path| path.parent()) == root.as_deref()
+                && self
+                    .0
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("sider-composed-aof-"))
+            {
+                fs::remove_dir_all(&self.0).unwrap();
+            }
+        }
+    }
+
+    fn config(directory: &Directory) -> (AofConfig, StoreConfig) {
+        let mut aof = AofConfig::new(directory.0.clone());
+        aof.layout = DurableLayout {
+            shard_count: 2,
+            ..DurableLayout::default()
+        };
+        (
+            aof,
+            StoreConfig {
+                max_dataset_bytes: 600,
+            },
+        )
+    }
+
+    fn mixed_batch(right_size: usize) -> ResolvedBatch {
+        ResolvedBatch {
+            origin: MutationOrigin::Client,
+            mutations: [(b"a".as_slice(), 10), (b"b".as_slice(), right_size)]
+                .into_iter()
+                .map(|(key, size)| Mutation::Put {
+                    key: Bytes::copy_from_slice(key),
+                    value: Value::String(Bytes::from(vec![b'x'; size])),
+                    expires_at_unix_ms: None,
+                })
+                .collect(),
+        }
+    }
+
+    fn recover_composed(
+        config: AofConfig,
+        store: StoreConfig,
+        read_only: bool,
+    ) -> Result<Recovered, AofError> {
+        load_profile(
+            config,
+            store,
+            Arc::new(SystemClock),
+            Arc::new(NoFaults),
+            read_only,
+            Profile::ComposedLegacyMixed,
+        )
+    }
+
+    #[tokio::test]
+    async fn composed_local_append_compaction_and_restart_keep_one_mixed_decision() {
+        let directory = Directory::new();
+        let (config, store_config) = config(&directory);
+        let recovered = recover_composed(config.clone(), store_config, false).unwrap();
+        assert_eq!(recovered.metadata.format_version, 7);
+        let (mut store, handle, task) = recovered.start();
+        let batch = mixed_batch(10);
+        assert_eq!(handle.append(batch.clone()).await.unwrap(), 1);
+        store.replay(&batch.mutations).unwrap();
+        assert_eq!(handle.flush().await.unwrap(), 1);
+        assert!(matches!(
+            handle.append_expected(2, batch.clone()).await,
+            Err(AofError::Migration(_))
+        ));
+        assert!(matches!(
+            handle
+                .install_snapshot(
+                    store.snapshot(),
+                    1,
+                    ReplicationMetadata {
+                        role: Role::Replica,
+                        epoch: [1; 16]
+                    },
+                )
+                .await,
+            Err(AofError::Migration(_))
+        ));
+        drop(handle);
+        task.await.unwrap().unwrap();
+
+        let replayed = recover_composed(config.clone(), store_config, false).unwrap();
+        assert_eq!(replayed.metadata.sequence, 1);
+        assert_eq!(replayed.store.snapshot(), store.snapshot());
+        let (replayed_store, handle, task) = replayed.start();
+        handle.compact(replayed_store.snapshot()).await.unwrap();
+        let (sequence, _, _) = handle.status().await.unwrap();
+        assert_eq!(sequence, 1);
+        drop(handle);
+        task.await.unwrap().unwrap();
+
+        let current = generation_path(&config.directory, 1);
+        let bytes = fs::read(&current).unwrap();
+        let header = super::super::composed_format::read_header(bytes.as_slice()).unwrap();
+        assert_eq!(
+            header.record_version,
+            super::super::composed_format::RecordVersion::Legacy
+        );
+        assert!(header.mixed_owner_batch);
+        assert!(header.replication.is_none());
+        assert!(matches!(
+            format::read_header_with_layout(bytes.as_slice()),
+            Err(FormatError::Version(7))
+        ));
+        assert!(matches!(
+            recover(config.clone(), store_config, Arc::new(SystemClock)),
+            Err(AofError::Format(FormatError::Version(7)))
+        ));
+        assert_eq!(fs::read(&current).unwrap(), bytes);
+
+        let recovered = recover_composed(config, store_config, false).unwrap();
+        assert_eq!(recovered.metadata.sequence, 1);
+        assert_eq!(recovered.metadata.format_version, 7);
+        assert_eq!(recovered.store.snapshot(), store.snapshot());
+    }
+
+    #[test]
+    fn composed_local_recovery_rejects_hot_owner_without_repair() {
+        let directory = Directory::new();
+        let (config, store_config) = config(&directory);
+        let recovered = recover_composed(config.clone(), store_config, false).unwrap();
+        drop(recovered);
+        let path = generation_path(&config.directory, 0);
+        let mut bytes = fs::read(&path).unwrap();
+        bytes.extend_from_slice(
+            &format::encode(
+                &Record::Batch {
+                    sequence: 1,
+                    batch: mixed_batch(200),
+                },
+                config.limits,
+            )
+            .unwrap(),
+        );
+        fs::write(&path, &bytes).unwrap();
+        assert!(matches!(
+            recover_composed(config, store_config, false),
+            Err(AofError::ShardQuota { .. })
+        ));
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        assert!(!fs::read_dir(&directory.0).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("tail-")
+        }));
+    }
+
+    #[test]
+    fn composed_local_torn_mixed_record_never_replays_a_participant_prefix() {
+        let directory = Directory::new();
+        let (config, store_config) = config(&directory);
+        drop(recover_composed(config.clone(), store_config, false).unwrap());
+        let path = generation_path(&config.directory, 0);
+        let sealed = fs::read(&path).unwrap();
+        let batch = format::encode(
+            &Record::Batch {
+                sequence: 1,
+                batch: mixed_batch(10),
+            },
+            config.limits,
+        )
+        .unwrap();
+        for prefix in 1..batch.len() {
+            let bytes = [sealed.as_slice(), &batch[..prefix]].concat();
+            fs::write(&path, &bytes).unwrap();
+            let recovered = recover_composed(config.clone(), store_config, true).unwrap();
+            assert!(recovered.store.is_empty(), "prefix {prefix}");
+            assert_eq!(recovered.metadata.sequence, 0, "prefix {prefix}");
+            assert_eq!(recovered.metadata.incomplete_tail_bytes, prefix as u64);
+            drop(recovered);
+            assert_eq!(fs::read(&path).unwrap(), bytes, "prefix {prefix}");
+        }
+        let complete = [sealed.as_slice(), batch.as_slice()].concat();
+        fs::write(&path, &complete).unwrap();
+        let recovered = recover_composed(config.clone(), store_config, true).unwrap();
+        assert_eq!(recovered.metadata.sequence, 1);
+        assert_eq!(recovered.store.len(), 2);
+        drop(recovered);
+
+        let torn = [sealed.as_slice(), &batch[..3]].concat();
+        fs::write(&path, &torn).unwrap();
+        assert!(matches!(
+            recover(config.clone(), store_config, Arc::new(SystemClock)),
+            Err(AofError::Format(FormatError::Version(7)))
+        ));
+        assert_eq!(fs::read(&path).unwrap(), torn);
+        let repaired = recover_composed(config, store_config, false).unwrap();
+        assert!(repaired.store.is_empty());
+        assert_eq!(repaired.metadata.incomplete_tail_bytes, 3);
+        drop(repaired);
+        assert_eq!(fs::read(&path).unwrap(), sealed);
+        let saved: Vec<_> = fs::read_dir(&directory.0)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("tail-"))
+            })
+            .collect();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(fs::read(&saved[0]).unwrap(), torn);
+    }
+
+    #[test]
+    fn composed_local_reader_refuses_other_profiles_before_tail_repair() {
+        use super::super::composed_format::{self, Header, RecordVersion};
+
+        let directory = Directory::new();
+        let (config, store_config) = config(&directory);
+        drop(recover_composed(config.clone(), store_config, false).unwrap());
+        let path = generation_path(&config.directory, 0);
+        let header = Header {
+            sequence: 0,
+            layout: config.layout,
+            record_version: RecordVersion::Legacy,
+            mixed_owner_batch: true,
+            replication: None,
+        };
+        for unsupported in [
+            Header {
+                record_version: RecordVersion::Memory,
+                ..header
+            },
+            Header {
+                mixed_owner_batch: false,
+                ..header
+            },
+            Header {
+                replication: Some(ReplicationMetadata {
+                    role: Role::Replica,
+                    epoch: [1; 16],
+                }),
+                ..header
+            },
+        ] {
+            let mut bytes = composed_format::encode_header(unsupported)
+                .unwrap()
+                .to_vec();
+            bytes.extend_from_slice(b"torn-first-record");
+            fs::write(&path, &bytes).unwrap();
+            assert!(matches!(
+                recover_composed(config.clone(), store_config, false),
+                Err(AofError::Format(FormatError::Corrupt(
+                    "unsupported composed profile"
+                )))
+            ));
+            assert_eq!(fs::read(&path).unwrap(), bytes);
+            assert!(!fs::read_dir(&directory.0).unwrap().any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("tail-")
+            }));
+        }
     }
 }

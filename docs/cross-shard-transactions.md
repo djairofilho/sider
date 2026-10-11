@@ -15,7 +15,12 @@ The recovery helper now stages postimages and validates each touched shard's
 projected quota before applying a record. An internal test exercises a mixed-owner
 record and a quota failure on its last owner; all production recovery calls still
 pass the single-owner gate and reject such records before preparation. This proves
-the helper's local all-or-none application only, not durable mixed-owner replay.
+the helper's local all-or-none application, without enabling a durable profile.
+An internal, unselectable header-7/record-1 profile now exercises one mixed batch
+through an actual AOF append, restart, replay, compaction, and every torn-record
+prefix. It rejects an over-quota owner and unsupported profiles without repair.
+The public server and tools still cannot select header 7; transport 3, backup 3,
+replica application, and coordinated EXEC remain unimplemented.
 
 ## Contents
 
