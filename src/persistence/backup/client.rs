@@ -18,6 +18,7 @@ use super::{CHECKSUMS, Error, Limits, MANIFEST, Manifest, SNAPSHOT};
 use crate::persistence::DurableLayout;
 use crate::persistence::format::{self, Record};
 use crate::replication::protocol::{self, Message};
+use crate::security::{InternalPeer, InternalPhase};
 use crate::storage::{Clock, Mutation};
 
 #[derive(Clone, Debug)]
@@ -53,7 +54,22 @@ pub async fn export(options: ExportOptions, clock: Arc<dyn Clock>) -> Result<Man
     let mut stream = timeout(remaining(deadline)?, TcpStream::connect(options.source))
         .await
         .map_err(|_| Error::Timeout)??;
-    receive(&mut stream, options, clock, deadline).await
+    receive(&mut stream, options, clock, deadline, None).await
+}
+
+/// Exports through authenticated mutual TLS, checking both IP SAN and expected URI.
+pub async fn export_secure(
+    options: ExportOptions,
+    clock: Arc<dyn Clock>,
+    transport: &crate::security::InternalTransport,
+) -> Result<Manifest, Error> {
+    options.validate()?;
+    let deadline = Instant::now() + options.limits.timeout;
+    let (mut stream, peer) = transport
+        .connect_with_peer(options.source)
+        .await
+        .map_err(|_| Error::Invalid("internal TLS authentication failed"))?;
+    receive(&mut stream, options, clock, deadline, Some(&peer)).await
 }
 
 /// Injectable transport for tests; applies the same limits and contract as the TCP client.
@@ -64,7 +80,7 @@ pub async fn export_stream(
 ) -> Result<Manifest, Error> {
     options.validate()?;
     let deadline = Instant::now() + options.limits.timeout;
-    receive(stream, options, clock, deadline).await
+    receive(stream, options, clock, deadline, None).await
 }
 
 async fn receive(
@@ -72,6 +88,7 @@ async fn receive(
     options: ExportOptions,
     clock: Arc<dyn Clock>,
     deadline: Instant,
+    peer: Option<&InternalPeer>,
 ) -> Result<Manifest, Error> {
     let limits = options.limits;
     let transport = limits.transport();
@@ -86,7 +103,14 @@ async fn receive(
         remaining(deadline)?,
     )
     .await?;
-    let Message::Hello(hello) = protocol::read(stream, transport, remaining(deadline)?).await?
+    let Message::Hello(hello) = protocol::read_in_phase(
+        stream,
+        transport,
+        remaining(deadline)?,
+        InternalPhase::Hello,
+    )
+    .await?
+    .1
     else {
         return Err(Error::Invalid(
             "source rejected export or did not send Hello",
@@ -107,8 +131,14 @@ async fn receive(
         routing_version: hello.routing_version,
     };
     layout.validate()?;
-    let Message::FullStart { cursor, entries } =
-        protocol::read(stream, transport, remaining(deadline)?).await?
+    let Message::FullStart { cursor, entries } = protocol::read_in_phase(
+        stream,
+        transport,
+        remaining(deadline)?,
+        InternalPhase::BackupStart,
+    )
+    .await?
+    .1
     else {
         return Err(Error::Invalid("missing FullStart"));
     };
@@ -131,8 +161,13 @@ async fn receive(
     let mut transport_bytes = 0u64;
     let mut quotas = Quotas::new(layout, limits.max_dataset_bytes, freeze(clock.clone()))?;
     for _ in 0..entries {
-        let (raw, message) =
-            protocol::read_with_frame(stream, transport, remaining(deadline)?).await?;
+        let (raw, message) = protocol::read_in_phase(
+            stream,
+            transport,
+            remaining(deadline)?,
+            InternalPhase::SnapshotEntry,
+        )
+        .await?;
         let Message::SnapshotEntry(mutation @ Mutation::Put { .. }) = message else {
             return Err(Error::Invalid("incomplete snapshot or unexpected message"));
         };
@@ -153,13 +188,18 @@ async fn receive(
         aof_digest = format::snapshot_digest(aof_digest, record);
         file.write_all(record)?;
     }
-    if protocol::read(stream, transport, remaining(deadline)?).await?
-        != (Message::FullEnd {
-            cursor,
-            entries,
-            digest,
-        })
-    {
+    if protocol::read_in_phase(
+        stream,
+        transport,
+        remaining(deadline)?,
+        InternalPhase::SnapshotEnd,
+    )
+    .await?
+    .1 != (Message::FullEnd {
+        cursor,
+        entries,
+        digest,
+    }) {
         return Err(Error::Invalid("divergent cursor, count, or final digest"));
     }
     let mut extra = [0u8; 1];
@@ -205,6 +245,9 @@ async fn receive(
         &directory.path.join(CHECKSUMS),
         checksums(&encoded, &manifest.snapshot_sha256).as_bytes(),
     )?;
+    if peer.is_some_and(|peer| !peer.current()) {
+        return Err(Error::Invalid("internal security expired"));
+    }
     directory.finish()?;
     Ok(manifest)
 }

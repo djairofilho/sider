@@ -22,6 +22,14 @@ pub struct ReadyFile {
 impl ReadyFile {
     /// Creates the file after bind, with the address actually assigned.
     pub fn create(path: &Path, address: SocketAddr) -> io::Result<Self> {
+        Self::create_with_security(path, address, false)
+    }
+    /// Publishes aggregate transport state without paths, principals, or credentials.
+    pub fn create_with_security(
+        path: &Path,
+        address: SocketAddr,
+        protected: bool,
+    ) -> io::Result<Self> {
         let parent = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -32,10 +40,12 @@ impl ReadyFile {
             NEXT_FILE.fetch_add(1, Ordering::Relaxed)
         ));
         let contents = format!(
-            "{{\"pid\":{},\"host\":\"{}\",\"port\":{}}}\n",
+            "{{\"pid\":{},\"host\":\"{}\",\"port\":{},\"transport_mode\":\"{}\",\"authentication_required\":{}}}\n",
             std::process::id(),
             address.ip(),
-            address.port()
+            address.port(),
+            if protected { "tls" } else { "plaintext" },
+            protected
         )
         .into_bytes();
         let mut file = OpenOptions::new()

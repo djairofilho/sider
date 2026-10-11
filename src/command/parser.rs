@@ -12,6 +12,12 @@ pub enum RequestError {
     /// Only non-empty arrays of non-null bulk strings are executable.
     #[error("invalid request format")]
     InvalidFormat,
+    #[error("unsupported HELLO options")]
+    UnsupportedHelloOptions,
+    #[error("unsupported protocol version")]
+    UnsupportedProtocolVersion,
+    #[error("invalid protocol version")]
+    InvalidProtocolVersion,
     /// Simplified message, without reproducing client-supplied data.
     #[error("unknown command")]
     UnknownCommand,
@@ -28,6 +34,8 @@ pub enum RequestError {
     InvalidSetExpiry,
     #[error("invalid expiry")]
     InvalidExpiry(&'static str),
+    #[error("{0}")]
+    Memory(&'static str),
 }
 
 impl RequestError {
@@ -39,7 +47,15 @@ impl RequestError {
     /// Converts the error into a controlled reply without revealing client arguments.
     pub fn into_frame(self) -> Frame {
         let message = match self {
+            Self::Memory(message) => Bytes::from_static(message.as_bytes()),
             Self::InvalidFormat => Bytes::from_static(b"ERR invalid request format"),
+            Self::UnsupportedHelloOptions => Bytes::from_static(b"ERR unsupported HELLO options"),
+            Self::UnsupportedProtocolVersion => {
+                Bytes::from_static(b"NOPROTO unsupported protocol version")
+            }
+            Self::InvalidProtocolVersion => {
+                Bytes::from_static(b"ERR Protocol version is not an integer or out of range")
+            }
             Self::UnknownCommand => Bytes::from_static(b"ERR unknown command"),
             Self::WrongArity(name) => Bytes::from(format!(
                 "ERR wrong number of arguments for '{name}' command"
@@ -78,7 +94,9 @@ pub fn parse(frame: Frame) -> Result<Command, RequestError> {
     let mut arguments = arguments.ok_or(RequestError::InvalidFormat)?.into_iter();
     let name = arguments.next().ok_or(RequestError::InvalidFormat)?;
     let count = arguments.len();
-    if name.eq_ignore_ascii_case(b"INFO") {
+    if super::memory::name(&name).is_some() {
+        super::memory::parse(&name, arguments.collect())
+    } else if name.eq_ignore_ascii_case(b"INFO") {
         Ok(Command::Info(super::InfoSections::from_names(
             arguments.as_slice().iter().map(|value| value.as_ref()),
         )))

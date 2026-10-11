@@ -32,9 +32,14 @@ impl DbHandle {
         if *self.shutdown.borrow() {
             return Err(DbError::ShuttingDown);
         }
+        self.admission.check()?;
         // No worker waits for this lock. Already accepted normal requests hold read
         // guards and finish first; expiry merely attempts admission.
         let guard = self.barrier.clone().write_owned().await;
+        self.admission.check()?;
+        if *self.shutdown.borrow() {
+            return Err(DbError::ShuttingDown);
+        }
         let mut responses = Vec::with_capacity(self.snapshots.len());
         for sender in &self.snapshots {
             let (reply, response) = oneshot::channel();
@@ -145,6 +150,54 @@ mod tests {
             key: Bytes::from_static(key),
             value: Bytes::from_static(b"accepted"),
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn info_admission_wait_has_a_total_deadline() {
+        let (_stop, shutdown) = watch::channel(false);
+        let (database, _owner) = worker::channel(1, Duration::from_secs(5), shutdown).unwrap();
+        let exclusive = database.barrier.clone().write_owned().await;
+        let mut info = pin!(database.info(crate::command::InfoSections::ALL));
+        poll_fn(|cx| {
+            assert!(info.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        advance(Duration::from_secs(5)).await;
+        assert_eq!(info.await, Err(DbError::Timeout));
+        drop(exclusive);
+        assert!(
+            database
+                .info(crate::command::InfoSections::ALL)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_publication_rechecks_waiting_reads_info_and_snapshots_after_exclusion() {
+        let (_stop, shutdown) = watch::channel(false);
+        let (database, _owner) = worker::channel(1, Duration::from_secs(5), shutdown).unwrap();
+        let exclusive = database.barrier.clone().write_owned().await;
+        let publication = database.admission.publication();
+        let mut command = pin!(database.execute(set(b"key")));
+        let mut info = pin!(database.info(crate::command::InfoSections::ALL));
+        let mut snapshot = pin!(database.snapshot(None));
+        poll_fn(|cx| {
+            assert!(command.as_mut().poll(cx).is_pending());
+            assert!(info.as_mut().poll(cx).is_pending());
+            assert!(snapshot.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        drop(publication);
+        drop(exclusive);
+        assert_eq!(command.await, Err(DbError::Unavailable));
+        assert_eq!(info.await, Err(DbError::Unavailable));
+        assert!(matches!(
+            snapshot.await,
+            Err(SnapshotError::Database(DbError::Unavailable))
+        ));
     }
 
     #[tokio::test(start_paused = true)]

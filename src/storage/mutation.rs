@@ -176,6 +176,8 @@ pub struct Prepared {
 
 #[derive(Debug, Error)]
 pub enum ReplayError {
+    #[error("invalid memory replay state: {0}")]
+    Memory(#[from] super::memory::MemoryError),
     #[error("batch contains duplicate keys")]
     DuplicateKey,
     #[error("recovered dataset exceeds configured quota")]
@@ -201,6 +203,16 @@ impl Store {
     /// Resolves conditions, integers, TTL, and quota without copying or changing the dataset.
     /// The temporary copy contains only command-key metadata; Bytes is shared.
     pub fn prepare(&self, command: Command) -> Prepared {
+        // Generic Prepared carries legacy mutations; memory needs its guarded delta.
+        if matches!(command, Command::Memory { .. }) {
+            return self.prepared(
+                Reply::Error(ExecutionError::Memory(
+                    "ERR memory commands require native preparation",
+                )),
+                Vec::new(),
+                MutationOrigin::Client,
+            );
+        }
         let origin = if matches!(
             &command,
             Command::Get { .. }
@@ -274,8 +286,9 @@ impl Store {
 
     /// Prepares bounded tombstones without removing a key before append.
     pub fn prepare_expiration(&self, budget: usize) -> Prepared {
+        let budget = budget.min(super::memory::MAX_EDITS);
         let now = self.clock.now();
-        let entries = self
+        let mut entries = self
             .expirations
             .iter()
             .take(budget)
@@ -287,8 +300,53 @@ impl Store {
             })
             .map(|(_, _, key)| (key.clone(), None))
             .collect::<Vec<_>>();
+        let mut events = entries.len();
+        let mut removals: std::collections::BTreeMap<Bytes, Vec<super::memory::Edit>> =
+            std::collections::BTreeMap::new();
+        for (deadline, key, id) in self
+            .member_expirations
+            .iter()
+            .take_while(|(deadline, _, _)| *deadline <= now)
+        {
+            if events >= budget {
+                break;
+            }
+            if entries.iter().any(|(expired_key, _)| expired_key == key) {
+                continue;
+            }
+            if self
+                .values
+                .get(key)
+                .is_some_and(|entry| entry.member_deadlines.get(id) == Some(deadline))
+            {
+                removals
+                    .entry(key.clone())
+                    .or_default()
+                    .push(super::memory::Edit::Remove(id.clone()));
+                events += 1;
+            }
+        }
+        for (key, mut edits) in removals {
+            edits.sort_unstable_by(|left, right| left.id().cmp(right.id()));
+            let old = self
+                .values
+                .get(&key)
+                .expect("retained member expiration target");
+            let Value::Memory(collection) = &old.value else {
+                unreachable!("memory deadline index");
+            };
+            let candidate = collection
+                .apply_edits(collection.descriptor(), &edits, &key)
+                .expect("validated expiration edits");
+            let mut entry = old.clone();
+            entry.value = Value::Memory(Arc::new(candidate));
+            for edit in edits {
+                entry.member_deadlines.remove(edit.id());
+            }
+            entries.push((key, Some(entry)));
+        }
         self.prepared(
-            Reply::Integer(entries.len() as i64),
+            Reply::Integer(events as i64),
             entries,
             MutationOrigin::Expiration,
         )
@@ -328,7 +386,7 @@ impl Store {
         }
         for (key, entry) in prepared.entries {
             if let Some(entry) = entry {
-                self.insert(key, entry.value.clone(), Self::entry_expiry(&entry));
+                self.install_entry(key, entry);
             }
         }
         prepared.reply
@@ -383,15 +441,22 @@ impl Store {
                 Mutation::Delete { .. } => None,
                 Mutation::Put {
                     expires_at_unix_ms: Some(deadline),
+                    value,
                     ..
-                } if *deadline <= unix_ms => None,
+                } if *deadline <= unix_ms && !matches!(value, Value::Memory(_)) => None,
                 Mutation::Put {
                     value,
                     expires_at_unix_ms,
                     ..
                 } => {
+                    if let Value::Memory(collection) = value {
+                        collection.validate_key(&key)?;
+                    }
                     let expires_at = expires_at_unix_ms
                         .map(|deadline| {
+                            if deadline <= unix_ms {
+                                return Ok(now);
+                            }
                             let remaining = i128::from(deadline) - i128::from(unix_ms);
                             let millis =
                                 u64::try_from(remaining).map_err(|_| ReplayError::Deadline)?;
@@ -407,6 +472,9 @@ impl Store {
                         expires_at,
                         expires_at_unix_ms: *expires_at_unix_ms,
                         generation: 0,
+                        member_deadlines: self
+                            .resolve_member_deadlines_at(&key, value, now, unix_ms)
+                            .map_err(|_| ReplayError::Deadline)?,
                     })
                 }
             };

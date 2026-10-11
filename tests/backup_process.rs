@@ -91,6 +91,9 @@ fn replication_address(path: &Path, pid: u32) -> SocketAddr {
 }
 fn cli(binary: &Path, args: &[&std::ffi::OsStr]) -> std::process::Output {
     let mut command = Command::new(binary);
+    command
+        .env("SIDER_SECURITY_PROFILE", "legacy-loopback")
+        .env_remove("SIDER_SECURITY_DIR");
     command.args(args);
     let result = process::run(&mut command, TIMEOUT).unwrap();
     assert!(

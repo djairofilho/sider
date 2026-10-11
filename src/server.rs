@@ -124,6 +124,73 @@ pub async fn serve_prepared(
     shutdown: impl Future<Output = ()> + Send,
     prepared: PreparedServer,
 ) -> Result<(), ServerError> {
+    serve_prepared_inner(listener, config, shutdown, prepared, None, None).await
+}
+
+/// Serves RESP with TLS, named authentication, and default-deny authorization.
+///
+/// Internal networking requires its separate mutual TLS integration; this entry
+/// point rejects a configured plaintext internal listener before preparing state.
+pub async fn serve_secure(
+    listener: TcpListener,
+    config: ServerConfig,
+    shutdown: impl Future<Output = ()> + Send,
+    security: crate::security::ClientSecurity,
+) -> Result<(), ServerError> {
+    if config.replication.is_some() {
+        return Err(ConfigError::InvalidServerLimits {
+            reason: "secure client listener requires secure internal transport integration",
+        }
+        .into());
+    }
+    let prepared = prepare(&config).await?;
+    serve_prepared_inner(listener, config, shutdown, prepared, Some(security), None).await
+}
+
+/// Serves both listeners and outgoing replica sessions using separately validated identities.
+pub async fn serve_secure_full(
+    listener: TcpListener,
+    config: ServerConfig,
+    shutdown: impl Future<Output = ()> + Send,
+    client: crate::security::ClientSecurity,
+    internal: Option<crate::security::InternalSecurity>,
+) -> Result<(), ServerError> {
+    if config.replication.is_some() != internal.is_some() {
+        return Err(ConfigError::InvalidServerLimits {
+            reason: "internal networking requires validated mutual TLS identity and roles",
+        }
+        .into());
+    }
+    let prepared = prepare(&config).await?;
+    serve_secure_prepared(listener, config, shutdown, prepared, client, internal).await
+}
+
+/// Starts protected networking after validated generation loading and recovery.
+pub async fn serve_secure_prepared(
+    listener: TcpListener,
+    config: ServerConfig,
+    shutdown: impl Future<Output = ()> + Send,
+    prepared: PreparedServer,
+    client: crate::security::ClientSecurity,
+    internal: Option<crate::security::InternalSecurity>,
+) -> Result<(), ServerError> {
+    if config.replication.is_some() != internal.is_some() {
+        return Err(ConfigError::InvalidServerLimits {
+            reason: "internal networking requires validated mutual TLS identity and roles",
+        }
+        .into());
+    }
+    serve_prepared_inner(listener, config, shutdown, prepared, Some(client), internal).await
+}
+
+async fn serve_prepared_inner(
+    listener: TcpListener,
+    config: ServerConfig,
+    shutdown: impl Future<Output = ()> + Send,
+    prepared: PreparedServer,
+    security: Option<crate::security::ClientSecurity>,
+    internal_security: Option<crate::security::InternalSecurity>,
+) -> Result<(), ServerError> {
     config.validate()?;
     if prepared.config != config {
         return Err(ConfigError::InvalidServerLimits {
@@ -236,16 +303,29 @@ pub async fn serve_prepared(
         let source_context = context.clone();
         let source_config = replication.clone();
         let source_shutdown = receiver.clone();
+        let source_internal = internal_security.clone();
         workers.spawn(async move {
-            if let Err(error) = crate::replication::session::serve(
-                listener,
-                source_db,
-                source_context,
-                source_config,
-                source_shutdown,
-            )
-            .await
-            {
+            let result = if let Some(security) = source_internal {
+                crate::replication::session::serve_secure(
+                    listener,
+                    source_db,
+                    source_context,
+                    source_config,
+                    source_shutdown,
+                    security,
+                )
+                .await
+            } else {
+                crate::replication::session::serve(
+                    listener,
+                    source_db,
+                    source_context,
+                    source_config,
+                    source_shutdown,
+                )
+                .await
+            };
+            if let Err(error) = result {
                 tracing::error!(%error, "internal listener terminated with failure");
             }
         });
@@ -253,15 +333,27 @@ pub async fn serve_prepared(
             let replica_db = database.clone();
             let replica_config = replication.clone();
             let replica_shutdown = receiver.clone();
+            let replica_internal = internal_security.clone();
             workers.spawn(async move {
-                if let Err(error) = crate::replication::session::follow(
-                    replica_db,
-                    context,
-                    replica_config,
-                    replica_shutdown,
-                )
-                .await
-                {
+                let result = if let Some(security) = replica_internal {
+                    crate::replication::session::follow_secure(
+                        replica_db,
+                        context,
+                        replica_config,
+                        replica_shutdown,
+                        security,
+                    )
+                    .await
+                } else {
+                    crate::replication::session::follow(
+                        replica_db,
+                        context,
+                        replica_config,
+                        replica_shutdown,
+                    )
+                    .await
+                };
+                if let Err(error) = result {
                     tracing::error!(%error, "replica terminated with failure");
                 }
             });
@@ -279,12 +371,24 @@ pub async fn serve_prepared(
         .as_ref()
         .and_then(|replication| replication.ready_file.as_ref())
         .zip(replication_addr)
-        .map(|(path, address)| crate::readiness::ReadyFile::create(path, address))
+        .map(|(path, address)| {
+            crate::readiness::ReadyFile::create_with_security(
+                path,
+                address,
+                internal_security.is_some(),
+            )
+        })
         .transpose()?;
     let _ready = config
         .ready_file
         .as_ref()
-        .map(|path| crate::readiness::ReadyFile::create(path, listener.local_addr()?))
+        .map(|path| {
+            crate::readiness::ReadyFile::create_with_security(
+                path,
+                listener.local_addr()?,
+                security.is_some(),
+            )
+        })
         .transpose()?;
     let mut shutdown_deadline = None;
     let result = supervise_workers(
@@ -295,6 +399,7 @@ pub async fn serve_prepared(
         workers,
         stop,
         &mut shutdown_deadline,
+        security,
     )
     .await;
     if let Some((handle, writer)) = persistence {
@@ -320,11 +425,12 @@ async fn supervise(
     let mut workers = JoinSet::new();
     workers.spawn(worker);
     supervise_workers(
-        listener, config, shutdown, database, workers, stop, &mut None,
+        listener, config, shutdown, database, workers, stop, &mut None, None,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)] // Explicit ownership of workers, shutdown, and optional TLS admission.
 async fn supervise_workers(
     listener: TcpListener,
     config: ServerConfig,
@@ -333,11 +439,13 @@ async fn supervise_workers(
     mut workers: JoinSet<()>,
     stop: watch::Sender<bool>,
     shutdown_deadline: &mut Option<Instant>,
+    security: Option<crate::security::ClientSecurity>,
 ) -> Result<(), ServerError> {
     let mut connections = JoinSet::new();
     let slots = Arc::new(Semaphore::new(config.max_connections));
     let metrics = database.metrics.clone();
     metrics.configure(&config, listener.local_addr()?.port());
+    metrics.configure_security(security.is_some());
     let pubsub = crate::pubsub::Hub::with_metrics(metrics.clone());
     tokio::pin!(shutdown);
     tracing::info!(address = %listener.local_addr()?, "TCP server started");
@@ -354,7 +462,7 @@ async fn supervise_workers(
             }
             result = connections.join_next(), if !connections.is_empty() => log_connection(result),
             accepted = listener.accept() => {
-                let (stream, _) = match accepted {
+                let (stream, peer) = match accepted {
                     Ok(accepted) => accepted,
                     Err(error) => break Some(error.into()),
                 };
@@ -372,9 +480,18 @@ async fn supervise_workers(
                 let database = database.clone();
                 let shutdown = stop.subscribe();
                 let pubsub = pubsub.clone();
+                let security = security.clone();
                 connections.spawn(async move {
                     let _slot = slot;
-                    connection::run_with_pubsub(stream, config, database, shutdown, pubsub).await
+                    if let Some(security) = security {
+                        let (stream, security, registered) = match security.accept(stream).await {
+                            Ok(stream) => stream,
+                            Err(_) => { tracing::warn!("client TLS authentication failed"); return Ok(()); }
+                        };
+                        connection::run_with_registered_security(stream, config, database, shutdown, pubsub, Some((security, peer.ip())), registered).await
+                    } else {
+                        connection::run_with_pubsub(stream, config, database, shutdown, pubsub).await
+                    }
                 });
             }
         }

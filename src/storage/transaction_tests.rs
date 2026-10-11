@@ -92,6 +92,35 @@ async fn transactions_cross_shard_batch_is_rejected_without_enqueuing_any_part()
 }
 
 #[tokio::test]
+async fn transactions_watch_only_participant_rejects_before_owner_controls_or_expiry() {
+    let (_stop, shutdown) = watch::channel(false);
+    let mut watched_store = Store::new();
+    watched_store.execute(set(b"b", b"observed"));
+    let tokens = watched_store.watch(vec![Bytes::from_static(b"b")]);
+    let (db, owners) = channel_with_stores(
+        1,
+        Duration::from_secs(5),
+        shutdown,
+        vec![Store::new(), watched_store],
+    )
+    .unwrap();
+    assert_ne!(db.router().shard_for(b"a"), db.router().shard_for(b"b"));
+    assert_eq!(
+        db.execute_batch(vec![set(b"a", b"candidate")], tokens)
+            .await
+            .unwrap(),
+        Reply::Error(ExecutionError::CrossShard)
+    );
+    for owner in &owners {
+        assert!(owner.requests.is_empty());
+        assert!(owner.controls.is_empty());
+        assert!(owner.snapshots.is_empty());
+    }
+    assert_eq!(owners[db.router().shard_for(b"b")].store.len(), 1);
+    assert_eq!(owners[db.router().shard_for(b"a")].store.len(), 0);
+}
+
+#[tokio::test]
 async fn transactions_pubsub_limits_are_individual_and_slow_subscriber_does_not_block_batch() {
     let (stop, shutdown) = watch::channel(false);
     let (db, owner) = channel(2, Duration::from_secs(5), shutdown).unwrap();
@@ -255,6 +284,7 @@ async fn transactions_aof_failures_and_record_limit_have_no_data_or_pubsub_effec
                 limits: RespLimits::default(),
                 reply,
                 _admission: _db.barrier.clone().read_owned().await,
+                _security: None,
             })
             .await;
         assert!(owner.store.is_empty(), "{point}");
@@ -276,7 +306,8 @@ async fn transactions_aof_failures_and_record_limit_have_no_data_or_pubsub_effec
                 result.output.unwrap(),
                 encode_reply(
                     Reply::Error(ExecutionError::AofRecordLimit),
-                    RespLimits::default()
+                    RespLimits::default(),
+                    false,
                 )
                 .unwrap()
             );

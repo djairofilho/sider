@@ -790,6 +790,7 @@ fn binary_refuses_corrupt_aof_before_bind_and_readiness() {
     let mut command = Command::new(env!("CARGO_BIN_EXE_sider"));
     command
         .env_clear()
+        .env("SIDER_SECURITY_PROFILE", "legacy-loopback")
         .env("SIDER_AOF_DIR", &directory.0)
         .env("SIDER_READY_FILE", &ready)
         .env("SIDER_ADDR", held.local_addr().unwrap().to_string());

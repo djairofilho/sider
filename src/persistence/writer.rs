@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, watch};
 
-use super::format::{self, FormatError, Limits, Next, Record};
-use super::{DurableLayout, ReplicationMetadata, Role};
+use super::format::{self, FormatError, Limits, Record};
+use super::{DurableLayout, ReplicationMetadata, Role, memory_format, profile::Profile};
 use crate::ConfigError;
 use crate::storage::{Clock, Mutation, ReplayError, ResolvedBatch, Store, StoreConfig};
 
@@ -32,6 +32,8 @@ pub enum SyncPolicy {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AofConfig {
+    /// Isolated development profile; no environment or server CLI enables it.
+    memory_profile: bool,
     pub directory: PathBuf,
     pub layout: DurableLayout,
     pub sync: SyncPolicy,
@@ -44,6 +46,7 @@ pub struct AofConfig {
 impl AofConfig {
     pub fn new(directory: PathBuf) -> Self {
         Self {
+            memory_profile: false,
             directory,
             layout: DurableLayout::default(),
             sync: SyncPolicy::Always,
@@ -52,6 +55,15 @@ impl AofConfig {
             compact_after_bytes: 64 * 1024 * 1024,
             max_delta_bytes: 16 * 1024 * 1024,
         }
+    }
+    /// Selects the record-2/header-4-or-5 development profile explicitly.
+    /// Backup, replication transport, and offline migration remain gated.
+    pub fn with_memory_profile(mut self) -> Self {
+        self.memory_profile = true;
+        self
+    }
+    pub fn is_memory_profile(&self) -> bool {
+        self.memory_profile
     }
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.layout.validate()?;
@@ -135,6 +147,11 @@ impl FaultInjector for NoFaults {
 
 type Response<T> = oneshot::Sender<Result<T, AofError>>;
 enum Request {
+    AppendMemory(
+        crate::storage::MutationOrigin,
+        Vec<memory_format::Mutation>,
+        Response<u64>,
+    ),
     Append(ResolvedBatch, Response<u64>),
     Replicate(u64, ResolvedBatch, Response<u64>),
     Flush(Response<u64>),
@@ -152,6 +169,9 @@ enum Request {
 /// Bounded channel for a global writer; clones can be shared among workers.
 #[derive(Clone)]
 pub struct AofHandle {
+    memory_profile: bool,
+    limits: Limits,
+    faults: Arc<dyn FaultInjector>,
     requests: mpsc::Sender<Request>,
     failed: watch::Receiver<bool>,
     diagnostics: super::diagnostics::Shared,
@@ -176,12 +196,42 @@ impl AofDiagnosticsHandle {
 }
 
 impl AofHandle {
+    pub fn is_memory_profile(&self) -> bool {
+        self.memory_profile
+    }
+    pub fn record_limits(&self) -> Limits {
+        self.limits
+    }
+    pub(crate) fn lifecycle_fault(&self, point: &'static str) -> Result<(), AofError> {
+        self.faults.hit(point).map_err(Into::into)
+    }
+
+    pub async fn append_memory(
+        &self,
+        origin: crate::storage::MutationOrigin,
+        mutations: Vec<memory_format::Mutation>,
+    ) -> Result<u64, AofError> {
+        if !self.memory_profile {
+            return Err(FormatError::Version(2).into());
+        }
+        let (reply, response) = oneshot::channel();
+        self.requests
+            .send(Request::AppendMemory(origin, mutations, reply))
+            .await
+            .map_err(|_| AofError::Unavailable)?;
+        response.await.map_err(|_| AofError::Unavailable)?
+    }
     /// The sequence comes from upstream and must exactly follow the local AOF.
     pub async fn append_expected(
         &self,
         sequence: u64,
         batch: ResolvedBatch,
     ) -> Result<u64, AofError> {
+        if self.memory_profile {
+            return Err(AofError::Migration(
+                "record-2 replication transport is not activated",
+            ));
+        }
         let (reply, response) = oneshot::channel();
         self.requests
             .send(Request::Replicate(sequence, batch, reply))
@@ -196,6 +246,11 @@ impl AofHandle {
         sequence: u64,
         metadata: ReplicationMetadata,
     ) -> Result<(), AofError> {
+        if self.memory_profile {
+            return Err(AofError::Migration(
+                "record-2 replication installation is not activated",
+            ));
+        }
         let (reply, response) = oneshot::channel();
         self.requests
             .send(Request::Install {
@@ -214,6 +269,11 @@ impl AofHandle {
         &self,
         journal: crate::replication::journal::Journal,
     ) -> Result<(), AofError> {
+        if self.memory_profile {
+            return Err(AofError::Migration(
+                "record-2 replication journal is not activated",
+            ));
+        }
         let (reply, response) = oneshot::channel();
         self.requests
             .send(Request::Journal(journal, reply))
@@ -319,6 +379,9 @@ impl Recovered {
             state.queue_capacity = requests.max_capacity();
         });
         let completed = diagnostics.clone();
+        let memory_profile = self.writer.config.memory_profile;
+        let limits = self.writer.config.limits;
+        let faults = self.writer.faults.clone();
         let runtime = tokio::runtime::Handle::current();
         let task = tokio::task::spawn_blocking(move || {
             let result = self.writer.run(receiver, runtime);
@@ -332,6 +395,9 @@ impl Recovered {
         (
             self.store,
             AofHandle {
+                memory_profile,
+                limits,
+                faults,
                 requests,
                 failed,
                 diagnostics,
@@ -435,7 +501,9 @@ fn load(
         fs::create_dir_all(&config.directory)?;
     }
     let lock = DirectoryLock::acquire(&config.directory, !read_only)?;
+    let profile = Profile(config.memory_profile);
     let mut generations = Vec::new();
+    let mut residues = Vec::new();
     for entry in fs::read_dir(&config.directory)? {
         let entry = entry?;
         if !read_only
@@ -444,7 +512,7 @@ fn load(
                 name.starts_with("replication-install-") && name.ends_with(".tmp")
             })
         {
-            fs::remove_file(entry.path())?;
+            residues.push(entry.path());
             continue;
         }
         if let Some(name) = entry.file_name().to_str()
@@ -471,9 +539,9 @@ fn load(
             .write(true)
             .create_new(true)
             .open(&temporary)?;
-        format::write_header_with_layout(&mut initial, 0, config.layout)?;
-        initial.write_all(&format::encode(
-            &Record::Seal {
+        profile.write_header(&mut initial, 0, config.layout, None)?;
+        initial.write_all(&profile.encode_legacy(
+            Record::Seal {
                 sequence: 0,
                 entries: 0,
                 digest: 0,
@@ -490,7 +558,14 @@ fn load(
         .write(!read_only)
         .open(&path)?;
     let mut store = Store::with_config(store_config, clock.clone())?;
-    let header = format::read_header_with_layout(&mut file)?;
+    let header = match profile.read_header(&mut file) {
+        Err(FormatError::Version(1..=3)) if config.memory_profile => {
+            return Err(AofError::Migration(
+                "record-2 profile requires explicit offline migration from legacy AOF",
+            ));
+        }
+        result => result?,
+    };
     if header.layout != config.layout {
         return Err(AofError::LayoutMismatch {
             expected: config.layout,
@@ -506,10 +581,20 @@ fn load(
     let mut snapshot_digest = 0u32;
     let mut valid_bytes = header.bytes as u64;
     let incomplete = loop {
-        match format::read_record(&mut file, config.limits)? {
-            Next::End => break false,
-            Next::IncompleteTail => break true,
-            Next::Record(Record::Snapshot(mutation @ Mutation::Put { .. })) if !sealed => {
+        let record = match profile.read_record(&mut file, config.limits)? {
+            memory_format::Next::End => break false,
+            memory_format::Next::IncompleteTail => break true,
+            memory_format::Next::Record(record) => *record,
+        };
+        match record {
+            memory_format::Record::Snapshot(mutation)
+                if !sealed
+                    && matches!(
+                        mutation,
+                        memory_format::Mutation::Image { .. }
+                            | memory_format::Mutation::Legacy(Mutation::Put { .. })
+                    ) =>
+            {
                 if previous_key
                     .as_ref()
                     .is_some_and(|key| key >= mutation.key())
@@ -520,9 +605,12 @@ fn load(
                 snapshot_entries += 1;
                 snapshot_digest = format::snapshot_digest(
                     snapshot_digest,
-                    &format::encode(&Record::Snapshot(mutation.clone()), config.limits)?,
+                    &profile.encode(
+                        &memory_format::Record::Snapshot(mutation.clone()),
+                        config.limits,
+                    )?,
                 );
-                replay_routed(
+                replay_routed_memory(
                     &mut store,
                     &[mutation],
                     config.layout,
@@ -530,24 +618,25 @@ fn load(
                     &mut shard_usage,
                 )?;
             }
-            Next::Record(Record::Seal {
+            memory_format::Record::Seal {
                 sequence: seal,
                 entries,
                 digest,
-            }) if !sealed
+            } if !sealed
                 && seal == base
                 && entries == snapshot_entries
                 && digest == snapshot_digest =>
             {
                 sealed = true
             }
-            Next::Record(Record::Batch {
+            memory_format::Record::Batch {
                 sequence: next,
-                batch,
-            }) if sealed && sequence.checked_add(1) == Some(next) => {
-                replay_routed(
+                mutations,
+                ..
+            } if sealed && sequence.checked_add(1) == Some(next) => {
+                replay_routed_memory(
                     &mut store,
-                    &batch.mutations,
+                    &mutations,
                     config.layout,
                     store_config.max_dataset_bytes,
                     &mut shard_usage,
@@ -560,6 +649,11 @@ fn load(
     };
     if !sealed {
         return Err(AofError::Sequence);
+    }
+    // Validate the selected header and complete history before deleting residues.
+    // Incompatible profiles and corrupt histories never enter cleanup or repair.
+    for residue in residues {
+        fs::remove_file(residue)?;
     }
     let incomplete_tail_bytes = if incomplete {
         file.metadata()?.len() - valid_bytes
@@ -664,6 +758,41 @@ fn replay_routed(
     Ok(())
 }
 
+fn replay_routed_memory(
+    store: &mut Store,
+    mutations: &[memory_format::Mutation],
+    layout: DurableLayout,
+    total: usize,
+    usage: &mut [usize],
+) -> Result<(), AofError> {
+    let mut selected = None;
+    for mutation in mutations {
+        let shard = layout.shard_for(mutation.key())?;
+        if selected.is_some_and(|previous| previous != shard) {
+            return Err(AofError::CrossShard);
+        }
+        selected = Some(shard);
+    }
+    let shard = selected.unwrap_or(0);
+    let before = store.used_bytes();
+    store.replay_memory(mutations)?;
+    let after = store.used_bytes();
+    usage[shard] = if after >= before {
+        usage[shard] + after - before
+    } else {
+        usage[shard] - (before - after)
+    };
+    let quota = layout.quota(total, shard)?;
+    if usage[shard] > quota {
+        return Err(AofError::ShardQuota {
+            shard,
+            used: usage[shard],
+            quota,
+        });
+    }
+    Ok(())
+}
+
 fn generation_path(directory: &Path, generation: u64) -> PathBuf {
     directory.join(format!("generation-{generation:020}.aof"))
 }
@@ -690,6 +819,25 @@ impl Writer {
                 tokio::time::timeout(Duration::from_millis(10), requests.recv()).await
             });
             match request {
+                Ok(Some(Request::AppendMemory(origin, mutations, reply))) => {
+                    let result = self.append_memory(origin, mutations);
+                    self.refresh_diagnostics();
+                    if let Err(error) = &result {
+                        self.diagnostics.error(error);
+                        if matches!(error, AofError::Format(FormatError::Limit)) {
+                            self.diagnostics.update(|state| {
+                                state.record_rejections_total =
+                                    state.record_rejections_total.saturating_add(1);
+                            });
+                        }
+                    }
+                    let fatal = result.is_err()
+                        && !matches!(result, Err(AofError::Format(FormatError::Limit)));
+                    let _ = reply.send(result);
+                    if fatal {
+                        return Err(AofError::Unavailable);
+                    }
+                }
                 Ok(Some(Request::Replicate(sequence, batch, reply))) => {
                     if self.sequence.checked_add(1) != Some(sequence)
                         || !self
@@ -820,7 +968,45 @@ impl Writer {
         } else {
             None
         };
-        let encoded = format::encode(&Record::Batch { sequence, batch }, self.config.limits)?;
+        let encoded = Profile(self.config.memory_profile)
+            .encode_legacy(Record::Batch { sequence, batch }, self.config.limits)?;
+        self.append_encoded(sequence, encoded, replication_frame)
+    }
+
+    fn append_memory(
+        &mut self,
+        origin: crate::storage::MutationOrigin,
+        mutations: Vec<memory_format::Mutation>,
+    ) -> Result<u64, AofError> {
+        if !self.config.memory_profile || self.journal.is_some() {
+            return Err(FormatError::Version(2).into());
+        }
+        let mut selected = None;
+        for mutation in &mutations {
+            let shard = self.config.layout.shard_for(mutation.key())?;
+            if selected.is_some_and(|previous| previous != shard) {
+                return Err(AofError::CrossShard);
+            }
+            selected = Some(shard);
+        }
+        let sequence = self.sequence.checked_add(1).ok_or(AofError::Sequence)?;
+        let encoded = memory_format::encode(
+            &memory_format::Record::Batch {
+                sequence,
+                origin,
+                mutations,
+            },
+            self.config.limits,
+        )?;
+        self.append_encoded(sequence, encoded, None)
+    }
+
+    fn append_encoded(
+        &mut self,
+        sequence: u64,
+        encoded: Vec<u8>,
+        replication_frame: Option<bytes::Bytes>,
+    ) -> Result<u64, AofError> {
         self.faults.hit("before_append")?;
         self.faults.write_append(&mut self.file, &encoded)?;
         self.faults.hit("after_append")?;
@@ -994,6 +1180,7 @@ impl Writer {
         let limits = self.config.limits;
         let layout = self.config.layout;
         let replication = self.replication;
+        let profile = Profile(self.config.memory_profile);
         std::thread::spawn(move || {
             let result = (|| {
                 faults.hit("compact_before_snapshot")?;
@@ -1002,7 +1189,7 @@ impl Writer {
                     .write(true)
                     .create_new(true)
                     .open(&path)?;
-                format::write_header_with_replication(&mut file, sequence, layout, replication)?;
+                profile.write_header(&mut file, sequence, layout, replication)?;
                 let mut previous = None;
                 let mut entries = 0u64;
                 let mut digest = 0u32;
@@ -1013,13 +1200,13 @@ impl Writer {
                         return Err(AofError::Sequence);
                     }
                     previous = Some(mutation.key().clone());
-                    let encoded = format::encode(&Record::Snapshot(mutation), limits)?;
+                    let encoded = profile.encode_legacy(Record::Snapshot(mutation), limits)?;
                     entries += 1;
                     digest = format::snapshot_digest(digest, &encoded);
                     file.write_all(&encoded)?;
                 }
-                file.write_all(&format::encode(
-                    &Record::Seal {
+                file.write_all(&profile.encode_legacy(
+                    Record::Seal {
                         sequence,
                         entries,
                         digest,

@@ -228,8 +228,6 @@ fn malformed_wire_is_terminal_in_whole_and_fragmented_input() {
     let cases: &[&[u8]] = &[
         b"?\r\n",
         b"PING\r\n",
-        b"_\r\n",
-        b"#t\r\n",
         b"+a\nb\r\n",
         b"-a\rb\r\n",
         b"+a\rx",

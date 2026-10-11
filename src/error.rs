@@ -22,7 +22,7 @@ pub enum ConfigError {
     },
 
     /// A limit or timeout is not a representable decimal integer.
-    #[error("{name} is invalid: {value:?}; use only decimal digits, without a sign or spaces")]
+    #[error("{name} is invalid; use only decimal digits, without a sign or spaces")]
     InvalidInteger {
         /// Configuration variable name.
         name: &'static str,
@@ -42,7 +42,7 @@ pub enum ConfigError {
     NonUnicodeAddress,
 
     /// The address does not contain a literal IP address and valid port.
-    #[error("SIDER_ADDR is invalid: {value:?}; use an IP address and port, such as 127.0.0.1:6379")]
+    #[error("SIDER_ADDR is invalid; use a literal IP address and port")]
     InvalidAddress {
         /// Received value, preserved for diagnostics.
         value: String,

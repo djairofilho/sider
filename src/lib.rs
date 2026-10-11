@@ -12,6 +12,7 @@ mod pubsub;
 pub mod readiness;
 pub mod replication;
 pub mod resp;
+pub mod security;
 pub mod server;
 pub mod storage;
 

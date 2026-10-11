@@ -3,6 +3,7 @@
 use bytes::Bytes;
 use thiserror::Error;
 
+use super::Command;
 use crate::resp::Frame;
 
 /// Recoverable execution errors that do not close the connection or worker.
@@ -26,6 +27,9 @@ pub enum ExecutionError {
     OutOfMemory,
     #[error("ERR AOF record limit exceeded")]
     AofRecordLimit,
+    /// Native staged memory lifecycle diagnostics; errors never contain user data.
+    #[error("{0}")]
+    Memory(&'static str),
     /// Pub/Sub depends on connection context and does not execute in the map.
     #[error("ERR command requires connection context")]
     ConnectionOnly,
@@ -61,5 +65,76 @@ impl From<Reply> for Frame {
             Reply::NullArray => Self::Array(None),
             Reply::Error(error) => Self::Error(Bytes::from(error.to_string())),
         }
+    }
+}
+
+pub(crate) fn resp3(frame: Frame) -> Frame {
+    match frame {
+        Frame::Bulk(None) | Frame::Array(None) => Frame::Null,
+        Frame::Array(Some(values)) => Frame::Array(Some(values.into_iter().map(resp3).collect())),
+        frame => frame,
+    }
+}
+
+fn typed_resp3(frame: Frame, name: &[u8]) -> Frame {
+    match (name, frame) {
+        (b"hgetall", Frame::Array(Some(values))) => {
+            Frame::Map(values.into_iter().map(resp3).collect())
+        }
+        (b"smembers", Frame::Array(Some(values))) => {
+            Frame::Set(values.into_iter().map(resp3).collect())
+        }
+        (b"zscore", Frame::Bulk(Some(value))) => Frame::Double(value),
+        (_, frame) => resp3(frame),
+    }
+}
+
+pub(crate) fn push(frame: Frame, protocol: u8) -> Frame {
+    match frame {
+        Frame::Array(Some(values)) if protocol == 3 => {
+            Frame::Push(values.into_iter().map(resp3).collect())
+        }
+        frame => frame,
+    }
+}
+
+pub(crate) fn command_resp3(frame: Frame, command: &Command) -> Frame {
+    use crate::command::{HashCommand, SetCommand, SortedSetCommand};
+    match command {
+        Command::Hash {
+            operation: HashCommand::GetAll,
+            ..
+        } => typed_resp3(frame, b"hgetall"),
+        Command::SetCollection {
+            operation: SetCommand::Members,
+            ..
+        } => typed_resp3(frame, b"smembers"),
+        Command::SortedSet {
+            operation: SortedSetCommand::Score { .. },
+            ..
+        } => typed_resp3(frame, b"zscore"),
+        Command::SortedSet {
+            operation: SortedSetCommand::Range {
+                with_scores: true, ..
+            },
+            ..
+        } => match frame {
+            Frame::Array(Some(values)) => Frame::Array(Some(
+                values
+                    .chunks_exact(2)
+                    .map(|pair| {
+                        Frame::Array(Some(vec![
+                            pair[0].clone(),
+                            match &pair[1] {
+                                Frame::Bulk(Some(score)) => Frame::Double(score.clone()),
+                                other => other.clone(),
+                            },
+                        ]))
+                    })
+                    .collect(),
+            )),
+            frame => resp3(frame),
+        },
+        _ => resp3(frame),
     }
 }

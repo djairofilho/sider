@@ -1,4 +1,4 @@
-//! Incremental RESP2 codec without network, command, or storage dependencies.
+//! Incremental RESP2/RESP3 codec without network, command, or storage dependencies.
 //!
 //! Incomplete frames retain the buffer. After a protocol error, discard the
 //! decoder and close the connection: no resynchronization is attempted.
@@ -33,3 +33,6 @@ pub use encoder::encode;
 pub use error::{EncodeError, ProtocolError};
 pub use frame::Frame;
 pub use limits::RespLimits;
+
+#[cfg(test)]
+mod resp3_tests;

@@ -35,6 +35,7 @@ struct Harness {
     clock: Arc<ManualClock>,
     stop: watch::Sender<bool>,
     workers: tokio::task::JoinSet<()>,
+    owner_abort: Vec<tokio::task::AbortHandle>,
     writer: tokio::task::JoinHandle<Result<(), persistence::AofError>>,
     directory: PathBuf,
 }
@@ -96,12 +97,15 @@ impl Harness {
             worker::channel_with_stores(8, Duration::from_secs(5), shutdown, stores).unwrap();
         let database = database.with_replication(runtime.clone());
         let mut workers = tokio::task::JoinSet::new();
+        let mut owner_abort = Vec::new();
         for worker in owners {
-            workers.spawn(
-                worker
-                    .with_aof(aof.clone(), 0)
-                    .with_replication(runtime.clone())
-                    .run(),
+            owner_abort.push(
+                workers.spawn(
+                    worker
+                        .with_aof(aof.clone(), 0)
+                        .with_replication(runtime.clone())
+                        .run(),
+                ),
             );
         }
         let context = Context {
@@ -129,6 +133,7 @@ impl Harness {
             clock,
             stop,
             workers,
+            owner_abort,
             writer,
             directory,
         }
@@ -147,6 +152,7 @@ impl Harness {
 }
 
 struct InstallGate {
+    point: &'static str,
     armed: std::sync::atomic::AtomicBool,
     entered: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     released: std::sync::Mutex<bool>,
@@ -160,7 +166,7 @@ impl InstallGate {
 }
 impl persistence::FaultInjector for InstallGate {
     fn hit(&self, point: &'static str) -> std::io::Result<()> {
-        if point == "replication_before_publish" && self.armed.swap(false, Ordering::SeqCst) {
+        if point == self.point && self.armed.swap(false, Ordering::SeqCst) {
             if let Some(entered) = self.entered.lock().unwrap().take() {
                 let _ = entered.send(());
             }
@@ -185,6 +191,7 @@ async fn cancelled_snapshot_caller_does_not_release_barrier_before_all_stores_ar
     use std::task::Poll;
     let (entered, entering) = tokio::sync::oneshot::channel();
     let gate = Arc::new(InstallGate {
+        point: "replication_before_publish",
         armed: std::sync::atomic::AtomicBool::new(false),
         entered: std::sync::Mutex::new(Some(entered)),
         released: std::sync::Mutex::new(false),
@@ -241,6 +248,118 @@ fn put(key: &'static [u8], value: &'static [u8]) -> Mutation {
         key: Bytes::from_static(key),
         value: Bytes::from_static(value).into(),
         expires_at_unix_ms: None,
+    }
+}
+
+#[tokio::test]
+async fn published_replica_install_owner_failure_closes_all_database_admission() {
+    for failed_owner in [1, 0, 2, 3] {
+        let (entered, entering) = tokio::sync::oneshot::channel();
+        let gate = Arc::new(InstallGate {
+            point: "replication_after_publish",
+            armed: std::sync::atomic::AtomicBool::new(false),
+            entered: std::sync::Mutex::new(Some(entered)),
+            released: std::sync::Mutex::new(false),
+            wake: std::sync::Condvar::new(),
+        });
+        let _release_on_failure = ReleaseGate(gate.clone());
+        let mut replica = Harness::with_faults(Role::Replica, gate.clone()).await;
+        let generation = replica.context.runtime.begin_session();
+        let database = replica.database.clone();
+        let context = replica.context.clone();
+        let cursor = Cursor {
+            epoch: [5; 16],
+            sequence: 40,
+        };
+        gate.armed.store(true, Ordering::SeqCst);
+        let installing = tokio::spawn(async move {
+            let image = (0..4)
+                .map(|shard| Mutation::Put {
+                    key: Bytes::from(format!("{{{shard}}}:key")),
+                    value: Bytes::from_static(b"complete").into(),
+                    expires_at_unix_ms: None,
+                })
+                .collect();
+            database
+                .install_replica(context, generation, cursor, image)
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), entering)
+            .await
+            .unwrap()
+            .unwrap();
+        replica.owner_abort[failed_owner].abort();
+        assert!(
+            replica
+                .workers
+                .join_next()
+                .await
+                .unwrap()
+                .unwrap_err()
+                .is_cancelled()
+        );
+        gate.release();
+        assert!(matches!(
+            installing.await.unwrap(),
+            Err(Error::Database(worker::DbError::Unavailable))
+        ));
+        let observed_owner = if failed_owner == 0 { 1 } else { 0 };
+        let key = (0..4)
+            .map(|index| Bytes::from(format!("{{{index}}}:key")))
+            .find(|key| replica.database.router().shard_for(key) == observed_owner)
+            .unwrap();
+        assert_eq!(
+            replica.database.execute(Command::Get { key }).await,
+            Err(worker::DbError::Unavailable),
+            "failed owner {failed_owner}"
+        );
+        assert!(matches!(
+            replica.database.snapshot(None).await,
+            Err(sider::storage::snapshot::SnapshotError::Database(
+                worker::DbError::Unavailable
+            ))
+        ));
+        assert!(matches!(
+            replica
+                .database
+                .replication_position(&replica.context.runtime)
+                .await,
+            Err(Error::Database(worker::DbError::Unavailable))
+        ));
+        assert_eq!(replica.context.runtime.status().applied.sequence, 0);
+        assert_eq!(replica.context.aof.flush().await.unwrap(), 40);
+        // Restart must recover the complete published generation, although live
+        // maps may have stopped after any owner prefix and no applied ACK exists.
+        let Harness {
+            database,
+            context,
+            clock,
+            stop,
+            mut workers,
+            writer,
+            directory,
+            ..
+        } = replica;
+        stop.send_replace(true);
+        while let Some(result) = workers.join_next().await {
+            result.unwrap();
+        }
+        drop((database, context));
+        writer.await.unwrap().unwrap();
+        let mut config = AofConfig::new(directory.clone());
+        config.layout.shard_count = 4;
+        let recovered = persistence::recover(
+            config,
+            StoreConfig {
+                max_dataset_bytes: 16384,
+            },
+            clock,
+        )
+        .unwrap();
+        assert_eq!(recovered.metadata.sequence, 40);
+        assert_eq!(recovered.store.len(), 4);
+        drop(recovered);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }
 

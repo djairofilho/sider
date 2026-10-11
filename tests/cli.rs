@@ -13,6 +13,82 @@ const IO_DEADLINE: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
+#[test]
+fn security_cli_default_requires_protected_material_and_redacts_environment_values() {
+    let mut command = sider();
+    command
+        .env_remove("SIDER_SECURITY_PROFILE")
+        .arg("--diagnose");
+    let mut process = ChildProcess::start(&mut command, TestDirectory::new());
+    let result = process.wait();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("security configuration unavailable"));
+
+    let mut command = sider();
+    command
+        .env("SIDER_SECURITY_PROFILE", "security-profile-canary")
+        .arg("--diagnose");
+    let mut process = ChildProcess::start(&mut command, TestDirectory::new());
+    let result = process.wait();
+    assert!(!result.status.success());
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("security-profile-canary"));
+    assert!(!String::from_utf8_lossy(&result.stdout).contains("security-profile-canary"));
+}
+
+#[cfg(windows)]
+#[test]
+fn security_cli_windows_protected_profile_is_unavailable_before_listener_start() {
+    let directory = TestDirectory::new();
+    let occupied = TcpListener::bind("127.0.0.1:0").unwrap();
+    let missing_aof = directory.file("must-not-create-aof");
+    let mut command = sider();
+    command
+        .env("SIDER_SECURITY_PROFILE", "protected")
+        .env("SIDER_SECURITY_DIR", std::env::current_dir().unwrap())
+        .env("SIDER_ADDR", occupied.local_addr().unwrap().to_string())
+        .env("SIDER_READY_FILE", directory.file("ready.json"))
+        .env("SIDER_AOF_DIR", &missing_aof);
+    let mut process = ChildProcess::start(&mut command, directory);
+    let result = process.wait();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains(
+        "protected Windows profile unavailable pending filesystem permission validation"
+    ));
+    assert!(!process.directory.file("ready.json").exists());
+    assert!(!missing_aof.exists());
+}
+
+#[test]
+fn security_cli_protected_internal_requires_revocation_before_recovery_or_bind() {
+    let directory = TestDirectory::new();
+    let occupied = TcpListener::bind("127.0.0.1:0").unwrap();
+    let missing_aof = directory.file("must-not-create-aof");
+    let missing_security = directory.file("must-not-read-security-canary");
+    let mut command = sider();
+    command
+        .env("SIDER_SECURITY_PROFILE", "protected")
+        .env("SIDER_SECURITY_DIR", &missing_security)
+        .env("SIDER_ADDR", occupied.local_addr().unwrap().to_string())
+        .env(
+            "SIDER_REPLICATION_ADDR",
+            occupied.local_addr().unwrap().to_string(),
+        )
+        .env("SIDER_READY_FILE", directory.file("ready.json"))
+        .env("SIDER_AOF_DIR", &missing_aof);
+    let mut process = ChildProcess::start(&mut command, directory);
+    let result = process.wait();
+    assert!(!result.status.success());
+    let stderr = String::from_utf8(result.stderr).unwrap();
+    assert!(
+        stderr.contains(
+            "protected internal profile unavailable pending generation revocation support"
+        )
+    );
+    assert!(!stderr.contains("must-not-read-security-canary"));
+    assert!(!process.directory.file("ready.json").exists());
+    assert!(!missing_aof.exists());
+}
+
 fn sider() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_sider"));
     // Changes only the child environment, never the global test environment.
@@ -25,6 +101,7 @@ fn sider() -> Command {
             command.env_remove(name);
         }
     }
+    command.env("SIDER_SECURITY_PROFILE", "legacy-loopback");
     command.stdin(Stdio::null());
     command
 }
@@ -111,7 +188,9 @@ impl ChildProcess {
                     let ready: serde_json::Value =
                         serde_json::from_slice(&bytes).expect("complete readiness JSON");
                     let object = ready.as_object().expect("readiness object");
-                    assert_eq!(object.len(), 3, "pid, host and port only");
+                    assert_eq!(object.len(), 5, "fixed readiness fields only");
+                    assert_eq!(ready["transport_mode"], "plaintext");
+                    assert_eq!(ready["authentication_required"], false);
                     assert_eq!(ready["pid"].as_u64(), Some(u64::from(self.child.id())));
                     let host: IpAddr = ready["host"]
                         .as_str()

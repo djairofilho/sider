@@ -85,9 +85,22 @@ impl Registry {
 impl super::Store {
     /// The worker resolves key expiries before obtaining these observations.
     pub fn watch(&self, keys: Vec<Bytes>) -> Vec<WatchToken> {
+        let now = self.clock.now();
         keys.into_iter()
             .map(|key| {
-                let deadline = self.values.get(&key).and_then(|entry| entry.expires_at);
+                let deadline = self.values.get(&key).and_then(|entry| {
+                    entry
+                        .expires_at
+                        .into_iter()
+                        .chain(
+                            entry
+                                .member_deadlines
+                                .values()
+                                .copied()
+                                .filter(|deadline| *deadline > now),
+                        )
+                        .min()
+                });
                 self.watches.token(key, deadline)
             })
             .collect()
@@ -95,7 +108,10 @@ impl super::Store {
 
     /// Checked by the same owner that will prepare and apply the batch.
     pub fn watches_valid(&self, tokens: &[WatchToken]) -> bool {
-        let now = self.clock.now();
+        self.watches_valid_at(tokens, self.clock.now())
+    }
+
+    pub(super) fn watches_valid_at(&self, tokens: &[WatchToken], now: Instant) -> bool {
         tokens
             .iter()
             .all(|token| Arc::ptr_eq(&self.watches.0, &token.registry.0) && !token.changed(now))

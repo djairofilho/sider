@@ -2,7 +2,9 @@
 
 mod collections;
 mod fpconv;
+mod hello;
 mod info;
+pub mod memory;
 mod parser;
 mod reply;
 mod score;
@@ -15,8 +17,10 @@ pub use sorted_set::SortedSetCommand;
 use bytes::Bytes;
 use std::time::Duration;
 
+pub(crate) use hello::{parse_auth, parse_hello, parse_hello_auth};
 pub use parser::{RequestError, parse};
 pub use reply::{ExecutionError, Reply};
+pub(crate) use reply::{command_resp3, push, resp3};
 
 /// Existence condition checked by the worker before replacing the value.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -66,6 +70,11 @@ pub(crate) fn parse_decimal(value: &[u8]) -> Option<i64> {
 /// Validated command, without channels or transport-protocol knowledge.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    /// One binary collection key and its validated native memory lifecycle operation.
+    Memory {
+        key: Bytes,
+        operation: Box<crate::storage::memory::Operation>,
+    },
     /// Sider operational diagnostics, with a limited section selection.
     Info(InfoSections),
     SortedSet {
@@ -175,6 +184,7 @@ impl Command {
     /// Classification without consulting the dataset; conditions that would fail remain writes.
     pub fn writes_dataset(&self) -> bool {
         match self {
+            Self::Memory { operation, .. } => operation.writes_dataset(),
             Self::Set { .. }
             | Self::SetWithOptions { .. }
             | Self::Del { .. }
@@ -229,6 +239,7 @@ impl Command {
             Self::Multi | Self::Exec | Self::Discard | Self::Unwatch => {}
             Self::Watch { keys } => keys.iter().for_each(visit),
             Self::Get { key }
+            | Self::Memory { key, .. }
             | Self::Hash { key, .. }
             | Self::List { key, .. }
             | Self::SetCollection { key, .. }

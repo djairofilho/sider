@@ -301,7 +301,7 @@ async fn metrics_info_remains_available_with_a_saturated_worker_and_records_time
     );
     assert_eq!(metric(&database.metrics, "worker_failures_total"), 1);
     assert_eq!(
-        fields(&database.info(InfoSections::ALL))["worker_queue_used"],
+        fields(&database.info(InfoSections::ALL).await.unwrap())["worker_queue_used"],
         "0"
     );
 }
@@ -333,7 +333,7 @@ async fn metrics_dataset_tracks_committed_quota_and_expiration() {
             .unwrap(),
         Reply::Ok
     );
-    let committed = fields(&database.info(InfoSections::ALL));
+    let committed = fields(&database.info(InfoSections::ALL).await.unwrap());
     assert_eq!(committed["dataset_keys"], "1");
     assert_eq!(committed["dataset_expiring_keys"], "1");
     assert_eq!(committed["dataset_quota_bytes"], "300");
@@ -348,12 +348,12 @@ async fn metrics_dataset_tracks_committed_quota_and_expiration() {
         Reply::Error(command::ExecutionError::OutOfMemory)
     );
     assert_eq!(
-        fields(&database.info(InfoSections::ALL))["dataset_logical_bytes"],
+        fields(&database.info(InfoSections::ALL).await.unwrap())["dataset_logical_bytes"],
         committed["dataset_logical_bytes"]
     );
     tokio::time::advance(Duration::from_millis(100)).await;
     database.execute(Command::Ping(None)).await.unwrap();
-    let expired = fields(&database.info(InfoSections::ALL));
+    let expired = fields(&database.info(InfoSections::ALL).await.unwrap());
     assert_eq!(expired["dataset_keys"], "0");
     assert_eq!(expired["dataset_expiring_keys"], "0");
     assert_eq!(expired["dataset_logical_bytes"], "0");
@@ -364,7 +364,7 @@ async fn metrics_dataset_tracks_committed_quota_and_expiration() {
 }
 
 #[tokio::test]
-async fn metrics_four_shards_remain_observable_during_snapshot_waiting_for_apply() {
+async fn metrics_info_waits_for_snapshot_admission_and_complete_dataset_state() {
     let (stop, shutdown) = watch::channel(false);
     let stores = (0..4)
         .map(|_| {
@@ -431,20 +431,23 @@ async fn metrics_four_shards_remain_observable_during_snapshot_waiting_for_apply
         .write_all(&request(&[b"INFO", b"stats", b"memory"]))
         .await
         .unwrap();
-    let Frame::Bulk(Some(info)) = read_frame(&mut client).await else {
-        panic!()
-    };
-    let observed = fields(&info);
-    assert_eq!(observed["worker_queue_used"], "1");
-    assert_eq!(observed["worker_queue_capacity"], "4");
-    assert_eq!(
-        observed["dataset_keys"], "1",
-        "acceptance does not publish state before apply"
-    );
-    assert_eq!(observed["dataset_quota_bytes"], "1200");
+    let mut info_reply = Box::pin(read_frame(&mut client));
+    poll_fn(|cx| {
+        assert!(info_reply.as_mut().poll(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
     running.spawn(slow.run());
     let captured = snapshot.await.unwrap();
     assert_eq!(accepted.await.unwrap(), Reply::Ok);
+    let Frame::Bulk(Some(info)) = info_reply.await else {
+        panic!()
+    };
+    let observed = fields(&info);
+    assert_eq!(observed["worker_queue_used"], "0");
+    assert_eq!(observed["worker_queue_capacity"], "4");
+    assert_eq!(observed["dataset_keys"], "2");
+    assert_eq!(observed["dataset_quota_bytes"], "1200");
     assert_eq!(captured.mutations.len(), 2);
     assert!(
         captured
@@ -460,7 +463,7 @@ async fn metrics_four_shards_remain_observable_during_snapshot_waiting_for_apply
     );
     let mut restored = Store::new();
     restored.replay(&captured.mutations).unwrap();
-    let observed = fields(&database.info(InfoSections::ALL));
+    let observed = fields(&database.info(InfoSections::ALL).await.unwrap());
     assert_eq!(observed["dataset_keys"], "2");
     assert_eq!(
         observed["dataset_logical_bytes"],
