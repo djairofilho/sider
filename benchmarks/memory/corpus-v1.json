@@ -1,0 +1,26 @@
+{
+  "version": "sider-memory-corpus/1",
+  "seed": 1142026,
+  "collection": "memory:{corpus}:quality",
+  "identity": ["fixture", "two-axis-corpus", "1", "f32le-v1"],
+  "records": [
+    {"name": "policy-a", "id_hex": "7031", "namespace": "team-a", "vector": [0.0, 0.0], "metadata": {"category": ["BYTES", "policy"], "tier": ["I64", "1"]}},
+    {"name": "policy-b", "id_hex": "7032", "namespace": "team-a", "vector": [0.2, 0.0], "metadata": {"category": ["BYTES", "policy"], "tier": ["I64", "1"]}},
+    {"name": "policy-c", "id_hex": "7033", "namespace": "team-a", "vector": [0.4, 0.0], "metadata": {"category": ["BYTES", "policy"], "tier": ["I64", "2"]}},
+    {"name": "note-a", "id_hex": "6e31", "namespace": "team-a", "vector": [0.1, 0.0], "metadata": {"category": ["BYTES", "note"], "tier": ["I64", "1"]}},
+    {"name": "note-b", "id_hex": "6e32", "namespace": "team-a", "vector": [0.8, 0.0], "metadata": {"category": ["BYTES", "note"], "tier": ["I64", "2"]}},
+    {"name": "other-policy", "id_hex": "7034", "namespace": "team-b", "vector": [0.05, 0.0], "metadata": {"category": ["BYTES", "policy"], "tier": ["I64", "1"]}},
+    {"name": "other-note", "id_hex": "6e33", "namespace": "team-b", "vector": [0.3, 0.0], "metadata": {"category": ["BYTES", "note"], "tier": ["I64", "1"]}},
+    {"name": "far-policy", "id_hex": "7035", "namespace": "team-a", "vector": [1.0, 1.0], "metadata": {"category": ["BYTES", "policy"], "tier": ["I64", "1"]}},
+    {"name": "binary-id", "id_hex": "00ff", "namespace": "team-a", "vector": [0.0, 0.0], "metadata": {"category": ["BYTES", "policy"], "tier": ["I64", "1"]}},
+    {"name": "negative-policy", "id_hex": "7036", "namespace": "team-a", "vector": [-0.2, 0.0], "metadata": {"category": ["BYTES", "policy"], "tier": ["I64", "1"]}},
+    {"name": "expiring-policy", "id_hex": "6578", "namespace": "team-a", "vector": [0.0, 0.02], "metadata": {"category": ["BYTES", "policy"], "tier": ["I64", "1"]}, "ttl_ms": 150}
+  ],
+  "queries": [
+    {"name": "broad", "namespace": "team-a", "vector": [0.0, 0.0], "k": 5, "filters": {}, "eligible_hex_after_expiry": ["7031", "7032", "7033", "6e31", "6e32", "7035", "00ff", "7036"], "relevant_hex": ["7031", "7032", "00ff"]},
+    {"name": "category", "namespace": "team-a", "vector": [0.0, 0.0], "k": 5, "filters": {"category": ["BYTES", "policy"]}, "eligible_hex_after_expiry": ["7031", "7032", "7033", "7035", "00ff", "7036"], "relevant_hex": ["7031", "7032", "00ff"]},
+    {"name": "selective", "namespace": "team-a", "vector": [0.0, 0.0], "k": 5, "filters": {"category": ["BYTES", "policy"], "tier": ["I64", "1"]}, "eligible_hex_after_expiry": ["7031", "7032", "7035", "00ff", "7036"], "relevant_hex": ["7031", "7032", "00ff"]},
+    {"name": "other-namespace", "namespace": "team-b", "vector": [0.0, 0.0], "k": 5, "filters": {"category": ["BYTES", "policy"]}, "eligible_hex_after_expiry": ["7034"], "relevant_hex": ["7034"]},
+    {"name": "empty", "namespace": "team-a", "vector": [0.0, 0.0], "k": 5, "filters": {"category": ["BYTES", "absent"]}, "eligible_hex_after_expiry": [], "relevant_hex": []}
+  ]
+}
