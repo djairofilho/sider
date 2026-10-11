@@ -139,6 +139,12 @@ needs explicit semantics and evaluation across selective filters. See
 and [Redis vector search concepts](https://redis.io/docs/latest/develop/ai/search-and-query/vectors/)
 for comparison; neither is a Sider compatibility promise.
 
+The versioned corpus led to a
+[decision to defer an approximate index](evidence/issue-114-index-0d88504/README.md):
+the fastest offline candidates missed the predeclared recall threshold for
+supported 256-member collections. No approximate index is part of the current
+memory implementation.
+
 ## Promotion into the release manifest
 
 The operational-base epic and the AI-memory epic will have **separate publishable
