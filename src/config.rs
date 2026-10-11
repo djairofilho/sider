@@ -217,9 +217,9 @@ impl ServerConfig {
             let aof = self.aof.as_ref().ok_or(ConfigError::InvalidServerLimits {
                 reason: "replication requires SIDER_AOF_DIR",
             })?;
-            if aof.is_memory_profile() {
+            if aof.is_memory_profile() && replication.upstream.is_some() {
                 return Err(ConfigError::InvalidServerLimits {
-                    reason: "record-2 replication requires the memory transport integration",
+                    reason: "record-2 replica following requires the memory transport integration",
                 });
             }
             replication.validate(aof)?;
@@ -440,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn record_two_requires_explicit_aof_and_refuses_unimplemented_replication() {
+    fn record_two_requires_explicit_aof_and_refuses_unimplemented_following() {
         let configured = config_with(&[
             ("SIDER_AOF_DIR", "memory-aof"),
             ("SIDER_AOF_RECORD_VERSION", "2"),
@@ -464,16 +464,17 @@ mod tests {
             );
         }
         assert!(config_with(&[("SIDER_AOF_RECORD_VERSION", "2")]).is_err());
-        assert!(
-            config_with(&[
-                ("SIDER_AOF_DIR", "aof"),
-                ("SIDER_AOF_RECORD_VERSION", "2"),
-                ("SIDER_REPLICATION_ADDR", "127.0.0.1:0"),
-            ])
-            .is_err()
-        );
+        let source = config_with(&[
+            ("SIDER_AOF_DIR", "aof"),
+            ("SIDER_AOF_RECORD_VERSION", "2"),
+            ("SIDER_REPLICATION_ADDR", "127.0.0.1:0"),
+        ])
+        .unwrap();
+        assert!(source.replication.is_some());
         let mut direct = configured;
         direct.replication = Some(crate::replication::config::Config::default());
+        assert!(direct.validate().is_ok());
+        direct.replication.as_mut().unwrap().upstream = Some("127.0.0.1:6380".parse().unwrap());
         assert!(direct.validate().is_err());
     }
 

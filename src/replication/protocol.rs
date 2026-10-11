@@ -719,6 +719,20 @@ where
     read_admitted_profile(input, limits, deadline, admit, VERSION).await
 }
 
+/// Transport 2 admits the initial frame kind before allocating its payload.
+pub async fn read_memory_admitted<A, F, Admission>(
+    input: &mut (impl AsyncRead + Unpin),
+    limits: Limits,
+    deadline: Duration,
+    admit: F,
+) -> Result<(Bytes, Message, A), Error>
+where
+    F: FnOnce(u8) -> Admission,
+    Admission: std::future::Future<Output = Result<A, Error>>,
+{
+    read_admitted_profile(input, limits, deadline, admit, MEMORY_VERSION).await
+}
+
 /// Transport 2 checks the version and phase before allocating a payload.
 pub async fn read_memory_in_phase(
     input: &mut (impl AsyncRead + Unpin),

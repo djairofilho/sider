@@ -265,23 +265,31 @@ async fn serve_prepared_inner(
         .recovered
         .as_ref()
         .map_or(0, |recovered| recovered.metadata.sequence);
-    let runtime = config.replication.as_ref().map(|replication| {
-        let role = if metadata
-            .is_some_and(|metadata| metadata.role == crate::persistence::Role::Primary)
-            || replication.upstream.is_none()
-        {
-            crate::persistence::Role::Primary
-        } else {
-            crate::persistence::Role::Replica
-        };
-        crate::replication::state::Runtime::new(
-            role,
-            crate::replication::Cursor {
-                epoch: metadata.map_or([0; 16], |metadata| metadata.epoch),
-                sequence: recovered_sequence,
-            },
-        )
-    });
+    let memory_profile = config
+        .aof
+        .as_ref()
+        .is_some_and(|aof| aof.is_memory_profile());
+    let runtime = config
+        .replication
+        .as_ref()
+        .filter(|_| !memory_profile)
+        .map(|replication| {
+            let role = if metadata
+                .is_some_and(|metadata| metadata.role == crate::persistence::Role::Primary)
+                || replication.upstream.is_none()
+            {
+                crate::persistence::Role::Primary
+            } else {
+                crate::persistence::Role::Replica
+            };
+            crate::replication::state::Runtime::new(
+                role,
+                crate::replication::Cursor {
+                    epoch: metadata.map_or([0; 16], |metadata| metadata.epoch),
+                    sequence: recovered_sequence,
+                },
+            )
+        });
     let persistence = match prepared.recovered {
         Some(recovered) => {
             let (_, handle, task) = recovered.start();
@@ -315,8 +323,61 @@ async fn serve_prepared_inner(
         .as_ref()
         .map(TcpListener::local_addr)
         .transpose()?;
-    if let (Some(listener), Some(replication), Some(runtime), Some((aof, _))) = (
-        prepared.replication_listener,
+    let replication_listener = prepared.replication_listener;
+    if memory_profile {
+        if let (Some(listener), Some(replication), Some((aof, _)), Some(aof_config)) = (
+            replication_listener,
+            config.replication.as_ref(),
+            persistence.as_ref(),
+            config.aof.as_ref(),
+        ) {
+            let source = crate::replication::memory_source::Source {
+                database: database.clone(),
+                aof: aof.clone(),
+                aof_config: aof_config.clone(),
+                store_config: StoreConfig {
+                    max_dataset_bytes: config.max_dataset_bytes,
+                },
+                config: replication.clone(),
+            };
+            let source_shutdown = receiver.clone();
+            let source_internal = internal_security.clone();
+            workers.spawn(async move {
+                let result = match source_internal {
+                    Some(InternalAdmission::Live(security)) => {
+                        crate::replication::memory_source::serve_live(
+                            listener,
+                            source,
+                            source_shutdown,
+                            security,
+                        )
+                        .await
+                    }
+                    Some(InternalAdmission::Static(security)) => {
+                        crate::replication::memory_source::serve_secure(
+                            listener,
+                            source,
+                            source_shutdown,
+                            security,
+                        )
+                        .await
+                    }
+                    None => {
+                        crate::replication::memory_source::serve_plain(
+                            listener,
+                            source,
+                            source_shutdown,
+                        )
+                        .await
+                    }
+                };
+                if let Err(error) = result {
+                    tracing::error!(%error, "memory export listener terminated with failure");
+                }
+            });
+        }
+    } else if let (Some(listener), Some(replication), Some(runtime), Some((aof, _))) = (
+        replication_listener,
         config.replication.as_ref(),
         runtime.as_ref(),
         persistence.as_ref(),

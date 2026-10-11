@@ -1,6 +1,9 @@
 //! Explicit record-2 offline export, archive verification and atomic restoration.
 #![forbid(unsafe_code)]
 
+#[path = "common/wire.rs"]
+mod wire;
+
 use bytes::Bytes;
 use sha2::{Digest, Sha256};
 use sider::command::{Command, Reply, SetCondition};
@@ -1064,6 +1067,185 @@ async fn live_memory_export_rejects_capacity_before_snapshot_or_destination() {
     );
     task.await.unwrap();
     assert!(!destination.exists());
+}
+
+#[tokio::test]
+async fn live_record2_server_exports_worker_snapshot_and_refuses_legacy_or_small_receiver() {
+    use std::net::SocketAddr;
+    use std::time::Duration;
+
+    use sider::ServerConfig;
+    use sider::replication::config::Config as ReplicationConfig;
+
+    let directory = Directory::new();
+    let internal_ready = directory.child("internal.json");
+    let aof_config = AofConfig::new(directory.child("aof")).with_memory_profile();
+    let config = ServerConfig {
+        bind_addr: "127.0.0.1:0".parse().unwrap(),
+        aof: Some(aof_config),
+        replication: Some(ReplicationConfig {
+            listen: "127.0.0.1:0".parse().unwrap(),
+            ready_file: Some(internal_ready.clone()),
+            ..ReplicationConfig::default()
+        }),
+        ..ServerConfig::default()
+    };
+    config.validate().unwrap();
+    let listener = tokio::net::TcpListener::bind(config.bind_addr)
+        .await
+        .unwrap();
+    let client_addr = listener.local_addr().unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(sider::server::serve(listener, config, async {
+        let _ = stopped.await;
+    }));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !internal_ready.exists() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "internal listener readiness"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let ready: serde_json::Value =
+        serde_json::from_slice(&fs::read(&internal_ready).unwrap()).unwrap();
+    let source: SocketAddr = format!(
+        "{}:{}",
+        ready["host"].as_str().unwrap(),
+        ready["port"].as_u64().unwrap()
+    )
+    .parse()
+    .unwrap();
+    tokio::task::spawn_blocking(move || {
+        let mut client = std::net::TcpStream::connect(client_addr).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let send = |client: &mut std::net::TcpStream, args: Vec<Vec<u8>>| {
+            client.write_all(&wire::request(&args)).unwrap();
+            wire::read_response(client).unwrap().bytes
+        };
+        assert_eq!(
+            send(
+                &mut client,
+                [
+                    b"MEM.CREATE".as_slice(),
+                    b"c",
+                    b"1",
+                    b"2",
+                    b"L2SQ",
+                    b"p",
+                    b"m",
+                    b"r",
+                    b"t",
+                ]
+                .into_iter()
+                .map(<[u8]>::to_vec)
+                .collect()
+            ),
+            b"+OK\r\n"
+        );
+        let vector = [1.0f32.to_le_bytes(), 0.0f32.to_le_bytes()].concat();
+        assert_eq!(
+            send(
+                &mut client,
+                vec![
+                    b"MEM.PUT".to_vec(),
+                    b"c".to_vec(),
+                    b"\xff\0".to_vec(),
+                    b"n".to_vec(),
+                    b"content\0\xff".to_vec(),
+                    b"p".to_vec(),
+                    b"m".to_vec(),
+                    b"r".to_vec(),
+                    b"t".to_vec(),
+                    vector,
+                    b"-1".to_vec(),
+                    b"UPSERT".to_vec(),
+                    b"0".to_vec(),
+                    b"0".to_vec(),
+                ]
+            ),
+            b":1\r\n"
+        );
+    })
+    .await
+    .unwrap();
+    let options = |destination: PathBuf, limits: backup::Limits| backup::ExportOptions {
+        source,
+        destination,
+        source_sha: "a".repeat(40),
+        limits,
+    };
+    let legacy = directory.child("legacy-rejected");
+    assert!(
+        backup::export(
+            options(legacy.clone(), backup::Limits::default()),
+            Arc::new(sider::storage::SystemClock)
+        )
+        .await
+        .is_err()
+    );
+    assert!(!legacy.exists());
+    let small = directory.child("small-rejected");
+    let small_limits = backup::Limits {
+        max_record_bytes: backup::Limits::default().max_record_bytes - 1,
+        ..backup::Limits::default()
+    };
+    assert!(
+        backup::export_memory(
+            options(small.clone(), small_limits),
+            Arc::new(sider::storage::SystemClock)
+        )
+        .await
+        .is_err()
+    );
+    assert!(!small.exists());
+    let archive = directory.child("live-archive");
+    let manifest = backup::export_memory(
+        options(archive.clone(), backup::Limits::default()),
+        Arc::new(sider::storage::SystemClock),
+    )
+    .await
+    .unwrap();
+    assert_eq!(manifest.profile, backup::Profile::Memory);
+    assert_eq!(manifest.entries, 1);
+    assert_eq!(manifest.cursor.epoch, [0; 16]);
+    assert_eq!(manifest.cursor.sequence, 2);
+    backup::verify_memory(
+        &archive,
+        DurableLayout::default(),
+        backup::Limits::default(),
+        Arc::new(sider::storage::SystemClock),
+    )
+    .unwrap();
+    let restored = directory.child("restored-live");
+    backup::restore_memory(
+        backup::RestoreOptions {
+            source: archive,
+            destination: restored.clone(),
+            layout: DurableLayout::default(),
+            limits: backup::Limits::default(),
+        },
+        Arc::new(sider::storage::SystemClock),
+    )
+    .unwrap();
+    let recovered = persistence::recover(
+        AofConfig::new(restored).with_memory_profile(),
+        StoreConfig::default(),
+        Arc::new(sider::storage::SystemClock),
+    )
+    .unwrap();
+    let images = recovered.store.snapshot_memory();
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].key().as_ref(), b"c");
+    drop(recovered);
+    stop.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
 }
 
 #[test]

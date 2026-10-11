@@ -13,7 +13,8 @@ pub use archive::{
     VerifiedBackup, restore, restore_memory, restore_memory_with_faults, verify, verify_memory,
 };
 pub use client::{
-    ExportOptions, export, export_memory, export_memory_stream, export_secure, export_stream,
+    ExportOptions, export, export_memory, export_memory_secure, export_memory_stream,
+    export_secure, export_stream,
 };
 pub use manifest::Manifest;
 pub use memory::{
