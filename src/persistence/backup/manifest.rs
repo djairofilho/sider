@@ -1,11 +1,12 @@
 use serde_json::{Value, json};
 
-use super::{Error, Limits};
+use super::{Error, Limits, Profile};
 use crate::persistence::{DurableLayout, format};
 use crate::replication::Cursor;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Manifest {
+    pub profile: Profile,
     pub sider_version: String,
     /// Operator declaration, without inferring the SHA from the connection or binary.
     pub source_sha: String,
@@ -35,12 +36,13 @@ pub(super) fn require_hex(text: &str, size: usize) -> Result<(), Error> {
 
 impl Manifest {
     pub fn json(&self) -> Value {
+        let (schema, header, record) = self.profile.versions();
         json!({
-            "schema_version": 1, "sider_version": self.sider_version,
+            "schema_version": schema, "sider_version": self.sider_version,
             "source_sha_declared": self.source_sha,
             "cursor": {"epoch": self.cursor.epoch.iter().map(|byte| format!("{byte:02x}")).collect::<String>(), "sequence": self.cursor.sequence},
             "layout": {"shard_count": self.layout.shard_count, "routing_version": self.layout.routing_version},
-            "aof_header_version": format::LAYOUT_VERSION, "record_version": format::VERSION,
+            "aof_header_version": header, "record_version": record,
             "source_limits": {"max_record_bytes":self.source_max_record_bytes,"max_mutations":self.source_max_mutations,"max_snapshot_bytes":self.source_max_snapshot_bytes},
             "validation_max_dataset_bytes":self.validation_max_dataset_bytes,
             "snapshot":{"file":super::SNAPSHOT,"bytes":self.snapshot_bytes,"sha256":self.snapshot_sha256,"entries":self.entries},
@@ -48,8 +50,9 @@ impl Manifest {
         })
     }
 
-    pub(super) fn parse(bytes: &[u8], limits: Limits) -> Result<Self, Error> {
+    pub(super) fn parse(bytes: &[u8], limits: Limits, profile: Profile) -> Result<Self, Error> {
         let value: Value = serde_json::from_slice(bytes)?;
+        let (schema, header, record) = profile.versions();
         let allowed = [
             "schema_version",
             "sider_version",
@@ -66,9 +69,9 @@ impl Manifest {
         ];
         if value.as_object().is_none_or(|map| {
             map.len() != allowed.len() || map.keys().any(|key| !allowed.contains(&key.as_str()))
-        }) || value["schema_version"] != 1
-            || value["aof_header_version"] != format::LAYOUT_VERSION
-            || value["record_version"] != format::VERSION
+        }) || value["schema_version"] != schema
+            || value["aof_header_version"] != header
+            || value["record_version"] != record
             || value["snapshot"]["file"] != super::SNAPSHOT
         {
             return Err(Error::Invalid("manifest schema"));
@@ -89,6 +92,7 @@ impl Manifest {
             .map(|index| u8::from_str_radix(&epoch[index * 2..index * 2 + 2], 16).unwrap())
             .collect();
         let manifest = Self {
+            profile,
             sider_version: text(&value["sider_version"])?,
             source_sha: text(&value["source_sha_declared"])?,
             cursor: Cursor {
@@ -127,7 +131,12 @@ impl Manifest {
             || self.source_max_mutations as usize > limits.max_mutations
             || self.source_max_snapshot_bytes == 0
             || self.source_max_snapshot_bytes > limits.max_snapshot_bytes
-            || self.snapshot_bytes < format::LAYOUT_HEADER_BYTES as u64
+            || self.snapshot_bytes
+                < if self.profile == Profile::Memory {
+                    super::super::memory_format::HEADER_BYTES as u64
+                } else {
+                    format::LAYOUT_HEADER_BYTES as u64
+                }
             || self.snapshot_bytes > limits.max_snapshot_bytes
             || self.entries > self.snapshot_bytes / 12
             || self.validation_max_dataset_bytes == 0

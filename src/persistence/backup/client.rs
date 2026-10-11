@@ -221,6 +221,7 @@ async fn receive(
     file.sync_all()?;
     let (snapshot_sha256, snapshot_bytes) = hash_file(&mut file)?;
     let manifest = Manifest {
+        profile: super::Profile::Legacy,
         sider_version: env!("CARGO_PKG_VERSION").into(),
         source_sha: options.source_sha,
         cursor,

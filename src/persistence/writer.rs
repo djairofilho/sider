@@ -57,7 +57,8 @@ impl AofConfig {
         }
     }
     /// Selects the record-2/header-4-or-5 development profile explicitly.
-    /// Backup, replication transport, and offline migration remain gated.
+    /// Live backup/replication transport and offline migration remain gated.
+    /// Explicit offline memory backup APIs can export/verify/restore this profile.
     pub fn with_memory_profile(mut self) -> Self {
         self.memory_profile = true;
         self
