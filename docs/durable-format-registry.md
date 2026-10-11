@@ -203,8 +203,14 @@ Header 7, same length/sequence/layout, record 2, mixed bit, replica role, epoch
 
 Current production readers must continue rejecting 4/5/7 before record scanning;
 the experimental 6 reader remains isolated. No production format changes are made
-by this proposal. Coordinate acceptance of allocations 7, transport 3 and backup
-schema 3 with the memory contract owner before implementing them.
+by this proposal. The isolated `persistence::composed_format` module encodes and
+validates the header-7 grammar against the literal fixtures, all truncated headers,
+and invalid fields with recomputed checksums. It does not select a supported
+profile or open, scan, repair, append, back up, replicate, or migrate a directory.
+The default reader still rejects version 7 before inspecting records, including
+every torn first-record prefix, and preserves the file bytes.
+Coordinate acceptance of allocations 7, transport 3 and backup schema 3 with
+the memory contract owner before enabling any of them in production.
 
 A first header-7 implementation may support only record-1 profiles with an
 explicit capability allowlist. It must reject every record-2 profile before record
