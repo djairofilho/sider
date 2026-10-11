@@ -269,27 +269,23 @@ async fn serve_prepared_inner(
         .aof
         .as_ref()
         .is_some_and(|aof| aof.is_memory_profile());
-    let runtime = config
-        .replication
-        .as_ref()
-        .filter(|_| !memory_profile)
-        .map(|replication| {
-            let role = if metadata
-                .is_some_and(|metadata| metadata.role == crate::persistence::Role::Primary)
-                || replication.upstream.is_none()
-            {
-                crate::persistence::Role::Primary
-            } else {
-                crate::persistence::Role::Replica
-            };
-            crate::replication::state::Runtime::new(
-                role,
-                crate::replication::Cursor {
-                    epoch: metadata.map_or([0; 16], |metadata| metadata.epoch),
-                    sequence: recovered_sequence,
-                },
-            )
-        });
+    let runtime = config.replication.as_ref().map(|replication| {
+        let role = if metadata
+            .is_some_and(|metadata| metadata.role == crate::persistence::Role::Primary)
+            || replication.upstream.is_none()
+        {
+            crate::persistence::Role::Primary
+        } else {
+            crate::persistence::Role::Replica
+        };
+        crate::replication::state::Runtime::new(
+            role,
+            crate::replication::Cursor {
+                epoch: metadata.map_or([0; 16], |metadata| metadata.epoch),
+                sequence: recovered_sequence,
+            },
+        )
+    });
     let persistence = match prepared.recovered {
         Some(recovered) => {
             let (_, handle, task) = recovered.start();
@@ -331,6 +327,27 @@ async fn serve_prepared_inner(
             persistence.as_ref(),
             config.aof.as_ref(),
         ) {
+            let runtime = runtime.as_ref().expect("replication runtime configured");
+            let context = crate::storage::replication::Context {
+                aof: aof.clone(),
+                runtime: runtime.clone(),
+                layout: aof_config.layout,
+                store_config: StoreConfig {
+                    max_dataset_bytes: config.max_dataset_bytes,
+                },
+                clock: Arc::new(SystemClock),
+                journal_limits: crate::replication::journal::Limits {
+                    max_bytes: replication.backlog_bytes,
+                    max_batches: replication.backlog_batches,
+                    max_frame_bytes: aof_config.limits.max_record_bytes
+                        + crate::replication::protocol::HEADER_BYTES
+                        + 12,
+                },
+                aof_limits: aof_config.limits,
+            };
+            database
+                .promote_replica(context, crate::replication::new_epoch()?)
+                .await?;
             let source = crate::replication::memory_source::Source {
                 database: database.clone(),
                 aof: aof.clone(),
