@@ -42,12 +42,12 @@ both busy. A Luna handoff must identify exact input files, output, invariants,
 validation command, and conditions that trigger escalation. Sol owns integration
 when multiple workstreams touch shared contracts.
 
-The GitHub labels cover the current open queue: `agent:sol` for the epics,
-contract decisions, durable and distributed changes, security, and release
-integration; `agent:luna` for the bounded client audit (#106), search corpus
-(#112), and reference integration (#113). A Luna issue can still require a Sol
-decision or review stated in its body. Labels do not make an issue ready or
-done: check its native `blocked_by` dependencies and acceptance evidence first.
+The `agent:sol` label routes epics, contract decisions, durable and distributed
+changes, security, and release integration. The `agent:luna` label routes the
+bounded client audit (#106), search corpus (#112), and reference integration
+(#113). A Luna issue can still require a Sol decision or review stated in its
+body. Labels do not make an issue ready or done: check native `blocked_by`
+dependencies and acceptance evidence first.
 
 ## Select the next issue
 

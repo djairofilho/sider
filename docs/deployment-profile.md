@@ -98,7 +98,8 @@ Networked production support requires a reviewed
 [TLS, authentication, and ACL implementation](https://github.com/djairofilho/sider/issues/93),
 and complete [release validation](https://github.com/djairofilho/sider/issues/96).
 Automatic failover, online resharding, Redis Cluster, cross-shard transactions,
-RESP3, and Lua are separate open work, not part of the 1.0.1 profile.
+RESP3, and Lua are outside the published 1.0.1 profile. Their development and
+issue states are tracked separately.
 
 ## Evidence and change control
 
