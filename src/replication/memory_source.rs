@@ -106,21 +106,21 @@ async fn serve_inner(
     Ok(())
 }
 
-fn limits(aof: &AofConfig) -> protocol::Limits {
+pub(super) fn limits(aof: &AofConfig) -> protocol::Limits {
     protocol::Limits {
         max_frame_bytes: aof.limits.max_record_bytes + protocol::HEADER_BYTES + 12,
         record: aof.limits,
     }
 }
 
-fn snapshot_ceiling(store_config: StoreConfig) -> u64 {
+pub(super) fn snapshot_ceiling(store_config: StoreConfig) -> u64 {
     (store_config.max_dataset_bytes as u64)
         .saturating_mul(2)
         .max(backup::Limits::default().max_snapshot_bytes)
         .min(backup::MAX_BACKUP_BYTES)
 }
 
-fn hello(aof: &AofConfig, store_config: StoreConfig, cursor: Cursor) -> Hello {
+pub(super) fn hello(aof: &AofConfig, store_config: StoreConfig, cursor: Cursor) -> Hello {
     Hello {
         sider_version: Bytes::from_static(env!("CARGO_PKG_VERSION").as_bytes()),
         record_version: memory_format::RECORD_VERSION,
@@ -478,7 +478,7 @@ async fn expect_ack(
         authority,
     )
     .await?
-        != Message::Ack(cursor)
+    .1 != Message::Ack(cursor)
     {
         return Err(Error::Sequence);
     }

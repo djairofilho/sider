@@ -63,6 +63,17 @@ impl Node {
         upstream: Option<SocketAddr>,
         listen: Option<SocketAddr>,
     ) -> Self {
+        Self::start_at_profile(directory, upstream, listen, false).await
+    }
+    async fn start_memory(directory: &Path, upstream: Option<SocketAddr>) -> Self {
+        Self::start_at_profile(directory, upstream, None, true).await
+    }
+    async fn start_at_profile(
+        directory: &Path,
+        upstream: Option<SocketAddr>,
+        listen: Option<SocketAddr>,
+        memory: bool,
+    ) -> Self {
         fs::create_dir_all(directory).unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_sider"));
         for (name, _) in std::env::vars_os() {
@@ -99,6 +110,9 @@ impl Node {
             .env("SIDER_REPLICATION_RECONNECT_MAX_MS", "100");
         if let Some(upstream) = upstream {
             command.env("SIDER_REPLICA_OF", upstream.to_string());
+        }
+        if memory {
+            command.env("SIDER_AOF_RECORD_VERSION", "2");
         }
         let mut child = process::OwnedChild::spawn(&mut command).unwrap();
         let deadline = Instant::now() + DEADLINE;
@@ -248,6 +262,106 @@ fn replication_metrics(response: Response) -> std::collections::BTreeMap<String,
         .filter_map(|line| line.split_once(':'))
         .map(|(key, value)| (key.to_owned(), value.to_owned()))
         .collect()
+}
+
+async fn caught_up_memory(
+    primary: &Node,
+    replica: &Node,
+) -> std::collections::BTreeMap<String, String> {
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        let source = replication_metrics(primary.command(&[b"INFO", b"replication"]));
+        let follower = replication_metrics(replica.command(&[b"INFO", b"replication"]));
+        if follower
+            .get("replication_connected")
+            .is_some_and(|value| value == "1")
+            && follower.get("replication_epoch") == source.get("replication_epoch")
+            && follower.get("replication_applied_sequence")
+                == source.get("replication_head_sequence")
+        {
+            return follower;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "memory follower did not catch up: {follower:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn memory_replica_process_follows_full_delta_and_reconnects_after_source_restart() {
+    let directory = Directory::new();
+    let source_path = directory.0.join("memory-primary");
+    let follower_path = directory.0.join("memory-replica");
+    let mut primary = Node::start_memory(&source_path, None).await;
+    ok(primary.command(&[
+        b"MEM.CREATE",
+        b"c",
+        b"1",
+        b"2",
+        b"L2SQ",
+        b"p",
+        b"m",
+        b"r",
+        b"t",
+    ]));
+    let vector = [1.0f32.to_le_bytes(), 0.0f32.to_le_bytes()].concat();
+    ok(primary.command(&[
+        b"MEM.PUT", b"c", b"id", b"n", b"content", b"p", b"m", b"r", b"t", &vector, b"-1",
+        b"UPSERT", b"0", b"0",
+    ]));
+    let mut replica = Node::start_memory(&follower_path, Some(primary.internal)).await;
+    let first = caught_up_memory(&primary, &replica).await;
+    assert_eq!(first["replication_role"], "replica");
+    assert_eq!(first["replication_full_syncs_total"], "1");
+    assert_eq!(
+        replica.command(&[b"MEM.GET", b"c", b"id"]),
+        primary.command(&[b"MEM.GET", b"c", b"id"])
+    );
+    assert!(matches!(
+        replica.command(&[b"MEM.DEL", b"c", b"id"]),
+        Response::Error(_)
+    ));
+    ok(primary.command(&[b"MEM.DEL", b"c", b"id"]));
+    caught_up_memory(&primary, &replica).await;
+    assert_eq!(
+        replica.command(&[b"MEM.GET", b"c", b"id"]),
+        primary.command(&[b"MEM.GET", b"c", b"id"])
+    );
+    let upstream = primary.internal;
+    primary.stop();
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        let status = replication_metrics(replica.command(&[b"INFO", b"replication"]));
+        if status["replication_connected"] == "0" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "follower did not observe disconnect"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    primary = Node::start_at_profile(&source_path, None, Some(upstream), true).await;
+    let resumed = caught_up_memory(&primary, &replica).await;
+    assert_eq!(resumed["replication_full_syncs_total"], "2");
+    ok(primary.command(&[
+        b"MEM.PUT", b"c", b"id", b"n", b"next", b"p", b"m", b"r", b"t", &vector, b"-1", b"UPSERT",
+        b"0", b"0",
+    ]));
+    caught_up_memory(&primary, &replica).await;
+    assert_eq!(
+        replica.command(&[b"MEM.GET", b"c", b"id"]),
+        primary.command(&[b"MEM.GET", b"c", b"id"])
+    );
+    replica.stop();
+    replica = Node::start_memory(&follower_path, Some(primary.internal)).await;
+    caught_up_memory(&primary, &replica).await;
+    assert_eq!(
+        replica.command(&[b"MEM.GET", b"c", b"id"]),
+        primary.command(&[b"MEM.GET", b"c", b"id"])
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
