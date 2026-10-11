@@ -905,6 +905,159 @@ fn composed_replica_process_crashes_recover_whole_batches_at_each_boundary() {
     }
 }
 
+struct PauseDuringTcpDisconnect {
+    point: &'static str,
+    armed: AtomicBool,
+    reached: std::sync::mpsc::Sender<&'static str>,
+    resume: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl FaultInjector for PauseDuringTcpDisconnect {
+    fn hit(&self, point: &'static str) -> std::io::Result<()> {
+        if point == self.point && self.armed.swap(false, Ordering::SeqCst) {
+            self.reached
+                .send(point)
+                .map_err(|_| std::io::Error::other("disconnect observer lost"))?;
+            self.resume
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(10))
+                .map_err(|_| std::io::Error::other("disconnect pause not resumed"))?;
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn composed_replica_disconnect_during_commit_reconnects_after_whole_batch() {
+    use crate::replication::protocol::{self, Message};
+
+    let limits = protocol::Limits::default();
+    let deadline = Duration::from_secs(5);
+    let base = Cursor {
+        epoch: EPOCH,
+        sequence: 0,
+    };
+    let next = Cursor {
+        sequence: 1,
+        ..base
+    };
+    for point in [
+        "before_append",
+        "after_append",
+        "before_sync",
+        "after_sync",
+        "before_reply",
+        "replica_mixed_before_first_apply",
+        "replica_mixed_after_first_apply",
+        "replica_mixed_after_all_apply",
+    ] {
+        let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let fault = Arc::new(PauseDuringTcpDisconnect {
+            point,
+            armed: AtomicBool::new(false),
+            reached: reached_tx,
+            resume: std::sync::Mutex::new(resume_rx),
+        });
+        let follower = Harness::new(4096, fault.clone()).await;
+        fault.armed.store(true, Ordering::SeqCst);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let config = crate::replication::config::Config {
+            upstream: Some(listener.local_addr().unwrap()),
+            ..Default::default()
+        };
+        let (stop, shutdown) = watch::channel(false);
+        let following = tokio::spawn(crate::replication::session::follow(
+            follower.db.clone(),
+            follower.context.clone(),
+            config,
+            shutdown,
+        ));
+        let (mut socket, _) = tokio::time::timeout(deadline, listener.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        let (_, Message::ComposedHello(mut peer)) =
+            protocol::read_composed_authorized(&mut socket, limits, deadline, |_| true)
+                .await
+                .unwrap()
+        else {
+            panic!("{point}: expected composed hello");
+        };
+        assert_eq!(peer.base.cursor, Some(base), "{point}");
+        peer.base.cursor = Some(base);
+        protocol::write_composed(&mut socket, &Message::ComposedHello(peer), limits, deadline)
+            .await
+            .unwrap();
+        protocol::write_composed(&mut socket, &Message::Continue(base), limits, deadline)
+            .await
+            .unwrap();
+        assert_eq!(
+            protocol::read_composed_authorized(&mut socket, limits, deadline, |_| true)
+                .await
+                .unwrap()
+                .1,
+            Message::Ack(base),
+            "{point}"
+        );
+        protocol::write_composed(
+            &mut socket,
+            &Message::Batch {
+                sequence: 1,
+                batch: batch(b"left", b"right"),
+            },
+            limits,
+            deadline,
+        )
+        .await
+        .unwrap();
+        let reached = tokio::task::spawn_blocking(move || reached_rx.recv_timeout(deadline))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reached, point);
+        drop(socket);
+        resume_tx.send(()).unwrap();
+        wait_for_cursor(&follower.context.runtime, next).await;
+
+        let (mut reconnected, _) = tokio::time::timeout(deadline, listener.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        let (_, Message::ComposedHello(peer)) =
+            protocol::read_composed_authorized(&mut reconnected, limits, deadline, |_| true)
+                .await
+                .unwrap()
+        else {
+            panic!("{point}: expected reconnect hello");
+        };
+        assert_eq!(peer.base.cursor, Some(next), "{point}");
+        stop.send_replace(true);
+        following.await.unwrap().unwrap();
+        assert_eq!(follower.context.aof.status().await.unwrap().0, 1);
+        let snapshot = follower
+            .db
+            .snapshot(Some(&follower.context.aof))
+            .await
+            .unwrap();
+        assert_eq!(snapshot.mutations, batch(b"left", b"right").mutations);
+        let (directory, config, quota, writer) = follower.stop().await;
+        writer.unwrap();
+        let recovered = persistence::recover_composed_legacy_mixed(
+            config,
+            quota,
+            Arc::new(SystemClock),
+            Arc::new(NoFaults),
+        )
+        .unwrap();
+        assert_eq!(recovered.metadata.sequence, 1, "{point}");
+        assert_eq!(recovered.store.len(), 2, "{point}");
+        drop(recovered);
+        cleanup(&directory);
+    }
+}
+
 struct PauseBeforeApply {
     reached: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
     resume: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
