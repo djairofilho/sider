@@ -1265,6 +1265,7 @@ async fn composed_replica_refuses_partial_frames_bad_full_and_sequence_errors() 
     )
     .await;
     composed_connection_closes(&mut socket).await;
+    assert_eq!(composed_admin(&replica, "--status")["sequence"], 11);
     assert_composed_pair(&replica, b"persisted-left", b"persisted-right");
 }
 
