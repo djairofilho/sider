@@ -247,12 +247,10 @@ impl ServerConfig {
     /// Port zero remains valid for an ephemeral bind.
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.composed_aof
-            && (self.aof.is_none()
-                || self.aof.as_ref().is_some_and(|aof| aof.is_memory_profile())
-                || self.replication.is_some())
+            && (self.aof.is_none() || self.aof.as_ref().is_some_and(|aof| aof.is_memory_profile()))
         {
             return Err(ConfigError::InvalidServerLimits {
-                reason: "composed AOF requires record version 1 and SIDER_AOF_DIR without replication",
+                reason: "composed AOF requires record version 1 and SIDER_AOF_DIR",
             });
         }
         if let Some(address) = self.composed_export_addr
@@ -528,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    fn composed_profile_requires_local_record_one_aof() {
+    fn composed_profile_requires_record_one_aof() {
         let configured = config_with(&[
             ("SIDER_AOF_DIR", "composed-aof"),
             ("SIDER_AOF_COMPOSED", "1"),
@@ -550,15 +548,17 @@ mod tests {
                 ("SIDER_AOF_COMPOSED", "1"),
                 ("SIDER_AOF_RECORD_VERSION", "2"),
             ],
-            vec![
-                ("SIDER_AOF_DIR", "aof"),
-                ("SIDER_AOF_COMPOSED", "1"),
-                ("SIDER_REPLICATION_ADDR", "127.0.0.1:0"),
-            ],
             vec![("SIDER_AOF_DIR", "aof"), ("SIDER_AOF_COMPOSED", "yes")],
         ] {
             assert!(config_with(&values).is_err());
         }
+        let replicated = config_with(&[
+            ("SIDER_AOF_DIR", "aof"),
+            ("SIDER_AOF_COMPOSED", "1"),
+            ("SIDER_REPLICATION_ADDR", "127.0.0.1:0"),
+        ])
+        .unwrap();
+        assert!(replicated.replication.is_some());
         let export = config_with(&[
             ("SIDER_AOF_DIR", "aof"),
             ("SIDER_AOF_COMPOSED", "1"),

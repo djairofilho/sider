@@ -54,6 +54,12 @@ struct Node {
     resp: SocketAddr,
     internal: SocketAddr,
 }
+#[derive(Clone, Copy)]
+enum AofProfile {
+    Legacy,
+    Memory,
+    Composed,
+}
 impl Node {
     async fn start(directory: &Path, upstream: Option<SocketAddr>) -> Self {
         Self::start_at(directory, upstream, None).await
@@ -63,16 +69,19 @@ impl Node {
         upstream: Option<SocketAddr>,
         listen: Option<SocketAddr>,
     ) -> Self {
-        Self::start_at_profile(directory, upstream, listen, false).await
+        Self::start_at_profile(directory, upstream, listen, AofProfile::Legacy).await
     }
     async fn start_memory(directory: &Path, upstream: Option<SocketAddr>) -> Self {
-        Self::start_at_profile(directory, upstream, None, true).await
+        Self::start_at_profile(directory, upstream, None, AofProfile::Memory).await
+    }
+    async fn start_composed(directory: &Path, upstream: Option<SocketAddr>) -> Self {
+        Self::start_at_profile(directory, upstream, None, AofProfile::Composed).await
     }
     async fn start_at_profile(
         directory: &Path,
         upstream: Option<SocketAddr>,
         listen: Option<SocketAddr>,
-        memory: bool,
+        profile: AofProfile,
     ) -> Self {
         fs::create_dir_all(directory).unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_sider"));
@@ -111,8 +120,14 @@ impl Node {
         if let Some(upstream) = upstream {
             command.env("SIDER_REPLICA_OF", upstream.to_string());
         }
-        if memory {
-            command.env("SIDER_AOF_RECORD_VERSION", "2");
+        match profile {
+            AofProfile::Legacy => {}
+            AofProfile::Memory => {
+                command.env("SIDER_AOF_RECORD_VERSION", "2");
+            }
+            AofProfile::Composed => {
+                command.env("SIDER_AOF_COMPOSED", "1");
+            }
         }
         let mut child = process::OwnedChild::spawn(&mut command).unwrap();
         let deadline = Instant::now() + DEADLINE;
@@ -299,6 +314,152 @@ async fn caught_up_memory(
     }
 }
 
+fn composed_exec(node: &Node, left: &[u8], right: &[u8]) {
+    let mut stream = node.connect();
+    assert_eq!(
+        request(&mut stream, &[b"MULTI"]),
+        Response::Simple(b"OK".to_vec())
+    );
+    assert_eq!(
+        request(&mut stream, &[b"SET", b"a", left]),
+        Response::Simple(b"QUEUED".to_vec())
+    );
+    assert_eq!(
+        request(&mut stream, &[b"SET", b"b", right]),
+        Response::Simple(b"QUEUED".to_vec())
+    );
+    assert_eq!(
+        request(&mut stream, &[b"EXEC"]),
+        Response::Array(Some(vec![
+            Response::Simple(b"OK".to_vec()),
+            Response::Simple(b"OK".to_vec()),
+        ]))
+    );
+}
+
+fn composed_admin(node: &Node, operation: &str) -> serde_json::Value {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_sider-replica"));
+    for (name, _) in std::env::vars_os() {
+        if name
+            .to_string_lossy()
+            .to_ascii_uppercase()
+            .starts_with("SIDER_")
+        {
+            command.env_remove(name);
+        }
+    }
+    let output = command
+        .env("SIDER_SECURITY_PROFILE", "legacy-loopback")
+        .args([
+            "--addr",
+            &node.internal.to_string(),
+            "--profile",
+            "composed",
+            operation,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn composed_process_replicates_mixed_exec_and_recovers_follower() {
+    let directory = Directory::new();
+    let primary_path = directory.0.join("composed-primary");
+    let follower_path = directory.0.join("composed-follower");
+    let mut primary = Node::start_composed(&primary_path, None).await;
+    composed_exec(&primary, b"first-left", b"first-right");
+    let mut follower = Node::start_composed(&follower_path, Some(primary.internal)).await;
+    let first = caught_up_memory(&primary, &follower).await;
+    assert_eq!(first["replication_role"], "replica");
+    assert_eq!(first["replication_full_syncs_total"], "1");
+    assert_eq!(composed_admin(&follower, "--status")["role"], "replica");
+    for (key, value) in [
+        (b"a".as_slice(), b"first-left".as_slice()),
+        (b"b", b"first-right"),
+    ] {
+        assert_eq!(
+            follower.command(&[b"GET", key]),
+            Response::Bulk(Some(value.to_vec()))
+        );
+    }
+    assert!(matches!(
+        follower.command(&[b"SET", b"a", b"forbidden"]),
+        Response::Error(_)
+    ));
+    let mut watched = primary.connect();
+    assert_eq!(
+        request(&mut watched, &[b"WATCH", b"a", b"b"]),
+        Response::Simple(b"OK".to_vec())
+    );
+    assert_eq!(
+        request(&mut watched, &[b"MULTI"]),
+        Response::Simple(b"OK".to_vec())
+    );
+    assert_eq!(
+        request(&mut watched, &[b"SET", b"a", b"discarded"]),
+        Response::Simple(b"QUEUED".to_vec())
+    );
+    ok(primary.command(&[b"SET", b"b", b"watch-conflict"]));
+    assert_eq!(request(&mut watched, &[b"EXEC"]), Response::Array(None));
+    caught_up_memory(&primary, &follower).await;
+    assert_eq!(
+        follower.command(&[b"GET", b"a"]),
+        Response::Bulk(Some(b"first-left".to_vec()))
+    );
+    composed_exec(&primary, b"second-left", b"second-right");
+    caught_up_memory(&primary, &follower).await;
+    follower.stop();
+    follower = Node::start_composed(&follower_path, Some(primary.internal)).await;
+    let resumed = caught_up_memory(&primary, &follower).await;
+    assert_eq!(resumed["replication_full_syncs_total"], "0");
+    assert_eq!(resumed["replication_partial_syncs_total"], "1");
+    for (key, value) in [
+        (b"a".as_slice(), b"second-left".as_slice()),
+        (b"b", b"second-right"),
+    ] {
+        assert_eq!(
+            follower.command(&[b"GET", key]),
+            Response::Bulk(Some(value.to_vec()))
+        );
+    }
+    let upstream = primary.internal;
+    primary.stop();
+    primary =
+        Node::start_at_profile(&primary_path, None, Some(upstream), AofProfile::Composed).await;
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        let restarted = caught_up_memory(&primary, &follower).await;
+        if restarted["replication_full_syncs_total"] == "1" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "composed full sync was not counted"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        follower.command(&[b"GET", b"a"]),
+        Response::Bulk(Some(b"second-left".to_vec()))
+    );
+    primary.stop();
+    assert_eq!(composed_admin(&follower, "--promote")["role"], "primary");
+    composed_exec(&follower, b"promoted-left", b"promoted-right");
+    follower.stop();
+    follower = Node::start_composed(&follower_path, None).await;
+    assert_eq!(composed_admin(&follower, "--status")["role"], "primary");
+    assert_eq!(
+        follower.command(&[b"GET", b"b"]),
+        Response::Bulk(Some(b"promoted-right".to_vec()))
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn memory_replica_process_follows_full_delta_and_reconnects_after_source_restart() {
     let directory = Directory::new();
@@ -367,7 +528,7 @@ async fn memory_replica_process_follows_full_delta_and_reconnects_after_source_r
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    primary = Node::start_at_profile(&source_path, None, Some(upstream), true).await;
+    primary = Node::start_at_profile(&source_path, None, Some(upstream), AofProfile::Memory).await;
     let resumed = caught_up_memory(&primary, &replica).await;
     assert_eq!(resumed["replication_full_syncs_total"], "2");
     ok(primary.command(&[

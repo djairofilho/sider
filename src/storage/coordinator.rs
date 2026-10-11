@@ -76,13 +76,18 @@ pub(super) enum Control {
 
 impl Worker {
     fn supports_coordinated_mode(&self, mode: &Mode) -> bool {
-        self.replication.is_none()
-            && match mode {
-                Mode::InMemory => self.aof.is_none(),
-                Mode::Composed(expected) => self.aof.as_ref().is_some_and(|actual| {
-                    actual.is_composed_legacy_mixed() && actual.same_writer(expected)
-                }),
+        match mode {
+            Mode::InMemory => self.replication.is_none() && self.aof.is_none(),
+            Mode::Composed(expected) => {
+                !self
+                    .replication
+                    .as_ref()
+                    .is_some_and(|runtime| runtime.readonly())
+                    && self.aof.as_ref().is_some_and(|actual| {
+                        actual.is_composed_legacy_mixed() && actual.same_writer(expected)
+                    })
             }
+        }
     }
 
     pub(super) fn coordination_control(&mut self, control: Control) {
@@ -210,7 +215,12 @@ impl DbHandle {
         &self,
         keys: Vec<Bytes>,
     ) -> Result<(Reply, Vec<WatchToken>), DbError> {
-        if self.replication.is_some() || self.composed_aof.is_none() {
+        if self
+            .replication
+            .as_ref()
+            .is_some_and(|runtime| runtime.readonly())
+            || self.composed_aof.is_none()
+        {
             return Err(DbError::Unavailable);
         }
         let deadline = Instant::now()
@@ -249,7 +259,7 @@ impl DbHandle {
 
     /// Executes a dataset-only queue across owners under exclusive admission.
     /// The explicit local composed profile appends one record before application;
-    /// RESP EXEC can select it locally, while network replica sessions remain gated.
+    /// RESP EXEC can select it on a writable primary.
     /// After acceptance, caller cancellation does not stop owner application.
     pub(crate) async fn execute_coordinated(
         &self,
@@ -279,7 +289,11 @@ impl DbHandle {
         }) {
             return Ok(Reply::Error(ExecutionError::ConnectionOnly));
         }
-        if self.replication.is_some() {
+        if self
+            .replication
+            .as_ref()
+            .is_some_and(|runtime| runtime.readonly())
+        {
             return Err(DbError::Unavailable);
         }
         let watch_keys = watched

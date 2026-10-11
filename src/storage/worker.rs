@@ -264,17 +264,17 @@ impl DbHandle {
 
     /// Selects the explicit record-1 mixed profile for a library handle.
     /// Bind every owner worker to this same writer before running them.
-    /// The executable cannot select this profile yet.
+    /// A readonly replica can bind the handle for snapshot installation, while
+    /// coordinated client writes still fail before owner preparation.
     pub fn with_composed_aof(
         mut self,
         aof: crate::persistence::AofHandle,
     ) -> Result<Self, ConfigError> {
         if !aof.is_composed_legacy_mixed()
             || aof.layout().shard_count as usize != self.requests.len()
-            || self.replication.is_some()
         {
             return Err(ConfigError::InvalidServerLimits {
-                reason: "composed AOF requires a matching standalone mixed-owner handle",
+                reason: "composed AOF requires a matching mixed-owner handle",
             });
         }
         self.mixed_unpersisted = false;
