@@ -555,4 +555,99 @@ mod tests {
         symlink("nested", &alias).unwrap();
         assert!(Generation::server(&alias, false, false).is_err());
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn security_windows_restricted_files_accept_private_acl_and_reject_broad_grants() {
+        use std::{fs, process::Command};
+        struct Directory(std::path::PathBuf, std::path::PathBuf);
+        impl Drop for Directory {
+            fn drop(&mut self) {
+                let resolved = fs::canonicalize(&self.0).ok();
+                let root = fs::canonicalize(&self.1).ok();
+                if root.is_some()
+                    && resolved.as_ref().and_then(|path| path.parent()) == root.as_deref()
+                    && self.0.file_name().is_some_and(|name| {
+                        name.to_string_lossy()
+                            .starts_with("sider-security-windows-")
+                    })
+                {
+                    let _ = fs::remove_dir_all(&self.0);
+                }
+            }
+        }
+        fn icacls(path: &Path, args: &[&str]) {
+            let output = Command::new("icacls.exe")
+                .arg(path)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "ACL setup failed");
+        }
+        let identity = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "[Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+            ])
+            .output()
+            .unwrap();
+        assert!(identity.status.success());
+        let sid = String::from_utf8(identity.stdout)
+            .unwrap()
+            .trim()
+            .to_owned();
+        assert!(sid.starts_with("S-1-"));
+        let system_drive = std::env::var_os("SystemDrive").unwrap();
+        let root = std::path::PathBuf::from(format!("{}\\", system_drive.to_string_lossy()));
+        let directory = Directory(
+            root.join(format!(
+                "sider-security-windows-{}-{}",
+                std::process::id(),
+                time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+            )),
+            root,
+        );
+        fs::create_dir(&directory.0).unwrap();
+        icacls(&directory.0, &["/grant:r", &format!("*{sid}:(OI)(CI)F")]);
+        icacls(&directory.0, &["/inheritance:r"]);
+        let (manifest, files) = fixture(1);
+        for (name, bytes) in &files {
+            fs::write(directory.0.join(name), bytes).unwrap();
+        }
+        fs::write(
+            directory.0.join(MANIFEST),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let read = restricted_files(&directory.0, CLIENT).unwrap();
+        assert_eq!(
+            read.get("client-policy.json"),
+            files.get("client-policy.json")
+        );
+        assert!(
+            Generation::validate(
+                read.get(MANIFEST).unwrap(),
+                read.get("manifest-after").unwrap(),
+                &read,
+                CLIENT,
+                true,
+                false,
+                false
+            )
+            .is_ok()
+        );
+
+        icacls(&directory.0, &["/grant", "*S-1-1-0:(OI)(CI)F"]);
+        assert!(restricted_files(&directory.0, CLIENT).is_err());
+        icacls(&directory.0, &["/remove:g", "*S-1-1-0"]);
+        assert!(restricted_files(&directory.0, CLIENT).is_ok());
+
+        let policy = directory.0.join("client-policy.json");
+        icacls(&policy, &["/grant", "*S-1-1-0:R"]);
+        assert!(restricted_files(&directory.0, CLIENT).is_err());
+        icacls(&policy, &["/remove:g", "*S-1-1-0"]);
+        assert!(restricted_files(&directory.0, CLIENT).is_ok());
+    }
 }

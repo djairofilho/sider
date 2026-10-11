@@ -12,9 +12,12 @@ try {
         if ($null -eq $raw.DiscretionaryAcl) { throw 'null DACL' }
         foreach ($rule in $descriptor.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
             if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
+            if (($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { continue }
             if ($rule.IdentityReference.Value -in $trusted) { continue }
             $mask = [int64]$rule.FileSystemRights -band 0xffffffffL
-            if ($sensitive -or ($mask -band 0x500D0156L) -ne 0) { throw 'access' }
+            # An ancestor may let another principal create a sibling directory;
+            # it must not let that principal rename, remove, or alter this path.
+            if ($sensitive -or ($mask -band 0x500D0152L) -ne 0) { throw 'access' }
         }
     }
     $directory = [IO.Path]::GetFullPath($env:SIDER_SECURITY_READ_DIR)
@@ -33,7 +36,7 @@ try {
         if (($attributes -band ([IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint)) -ne 0) { throw 'type' }
         $file = [IO.FileStream]::new($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
         try {
-            Assert-Descriptor ($file.GetAccessControl([Security.AccessControl.AccessControlSections]'Owner,Access')) $true
+            Assert-Descriptor ($file.GetAccessControl()) $true
             if ($file.Length -eq 0 -or $file.Length -gt 4194304) { throw 'size' }
             $buffer = [byte[]]::new([int]$file.Length)
             $position = 0
