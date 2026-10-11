@@ -48,3 +48,6 @@ may miss peaks. The load oracle is prepared before timing; throughput includes
 client framing and response comparison. This toy corpus and one
 machine cannot justify a production performance or relevance claim. These are
 source-checkout observations, not candidate-package release receipts.
+
+The separate [index screening protocol](index-screening.md) uses this corpus
+to test whether derived approximate candidates warrant implementation.
