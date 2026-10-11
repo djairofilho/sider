@@ -177,6 +177,71 @@ fn cleanup(directory: &Path) {
 }
 
 #[tokio::test]
+async fn promoted_composed_writer_publishes_one_transport3_frame_for_mixed_batch() {
+    let harness = Harness::new(4096, Arc::new(NoFaults)).await;
+    let promoted = harness
+        .db
+        .promote_replica(harness.context.clone(), [9; 16])
+        .await
+        .unwrap();
+    assert_eq!(promoted.sequence, 0);
+    let journal = harness.context.runtime.journal().unwrap();
+    let mut subscriber = journal.subscribe(promoted).unwrap();
+    let mixed = batch(b"left", b"right");
+    assert_eq!(harness.context.aof.append(mixed.clone()).await.unwrap(), 1);
+    let entry = tokio::time::timeout(Duration::from_secs(5), subscriber.next())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(entry.cursor.epoch, promoted.epoch);
+    assert_eq!(entry.cursor.sequence, 1);
+    let limits = crate::replication::protocol::Limits::default();
+    assert!(crate::replication::protocol::decode(entry.frame.clone(), limits).is_err());
+    assert_eq!(
+        crate::replication::protocol::decode_composed(entry.frame, limits).unwrap(),
+        crate::replication::protocol::Message::Batch {
+            sequence: 1,
+            batch: mixed,
+        }
+    );
+    assert_eq!(journal.status().unwrap().batches, 1);
+    let (directory, config, quota, writer) = harness.stop().await;
+    writer.unwrap();
+    let standalone = crate::ServerConfig {
+        aof: Some(config.clone()),
+        composed_aof: true,
+        shards: 2,
+        max_dataset_bytes: quota.max_dataset_bytes,
+        ..crate::ServerConfig::default()
+    };
+    assert!(matches!(
+        crate::server::prepare(&standalone).await,
+        Err(crate::server::ServerError::Config(
+            crate::ConfigError::InvalidServerLimits {
+                reason: "persisted composed replication role requires an explicit replication configuration"
+            }
+        ))
+    ));
+    let restarted = persistence::recover_composed_legacy_mixed(
+        config,
+        quota,
+        Arc::new(SystemClock),
+        Arc::new(NoFaults),
+    )
+    .unwrap();
+    assert_eq!(restarted.metadata.sequence, 1);
+    assert_eq!(
+        restarted.metadata.replication,
+        Some(ReplicationMetadata {
+            role: Role::Primary,
+            epoch: promoted.epoch,
+        })
+    );
+    drop(restarted);
+    cleanup(&directory);
+}
+
+#[tokio::test]
 async fn full_sync_then_one_mixed_batch_advances_cursor_after_both_owners() {
     let harness = Harness::new(4096, Arc::new(NoFaults)).await;
     let installed = Cursor {

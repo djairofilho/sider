@@ -108,6 +108,18 @@ async fn prepare_inner(
     {
         return Err(ConfigError::InvalidServerLimits { reason: "persisted replica requires configured upstream; use local promotion to change the role" }.into());
     }
+    if config.composed_aof
+        && recovered
+            .as_ref()
+            .and_then(|state| state.metadata.replication)
+            .is_some()
+        && config.replication.is_none()
+    {
+        return Err(ConfigError::InvalidServerLimits {
+            reason: "persisted composed replication role requires an explicit replication configuration",
+        }
+        .into());
+    }
     if let Some(security) = security {
         security.validate(config).await?;
     }

@@ -336,11 +336,6 @@ impl AofHandle {
         &self,
         journal: crate::replication::journal::Journal,
     ) -> Result<(), AofError> {
-        if self.composed_profile {
-            return Err(AofError::Migration(
-                "composed replication transport is not activated",
-            ));
-        }
         let (reply, response) = oneshot::channel();
         self.requests
             .send(Request::Journal(journal, reply))
@@ -1101,14 +1096,22 @@ impl Writer {
         }
         let sequence = self.sequence.checked_add(1).ok_or(AofError::Sequence)?;
         let replication_frame = if self.journal.is_some() {
+            let message = crate::replication::protocol::Message::Batch {
+                sequence,
+                batch: batch.clone(),
+            };
+            let limits = crate::replication::protocol::Limits {
+                max_frame_bytes: self.config.limits.max_record_bytes
+                    + crate::replication::protocol::HEADER_BYTES
+                    + 12,
+                record: self.config.limits,
+            };
             Some(
-                crate::replication::protocol::encode(
-                    &crate::replication::protocol::Message::Batch {
-                        sequence,
-                        batch: batch.clone(),
-                    },
-                    crate::replication::protocol::Limits::default(),
-                )
+                (if self.profile == Profile::ComposedLegacyMixed {
+                    crate::replication::protocol::encode_composed(&message, limits)
+                } else {
+                    crate::replication::protocol::encode(&message, limits)
+                })
                 .map_err(|error| match error {
                     crate::replication::protocol::Error::Record(error) => AofError::Format(error),
                     _ => AofError::Sequence,
@@ -1877,13 +1880,6 @@ mod composed_local_tests {
             },
             Header {
                 mixed_owner_batch: false,
-                ..header
-            },
-            Header {
-                replication: Some(ReplicationMetadata {
-                    role: Role::Primary,
-                    epoch: [1; 16],
-                }),
                 ..header
             },
         ] {
