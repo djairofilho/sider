@@ -132,7 +132,7 @@ fn mixed_owner_crash_child() {
         drop(global);
         let (stop, shutdown) = watch::channel(false);
         let (handle, owners) = worker::channel_with_stores(2, TIMEOUT, shutdown, stores).unwrap();
-        let handle = handle.with_composed_aof(aof.clone());
+        let handle = handle.with_composed_aof(aof.clone()).unwrap();
         let tasks = owners
             .into_iter()
             .map(|owner| tokio::spawn(owner.with_aof(aof.clone(), 0).run()))
