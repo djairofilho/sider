@@ -314,6 +314,41 @@ impl Store {
         {
             member.validate(descriptor).map_err(memory_error)?;
         }
+        if let Operation::Search {
+            descriptor,
+            vector,
+            k,
+            namespace,
+            metadata,
+        } = &operation
+        {
+            descriptor.validate().map_err(memory_error)?;
+            if vector.len() != descriptor.dimension as usize * 4 {
+                return Err(ExecutionError::Memory("ERR memory vector length mismatch"));
+            }
+            if vector.chunks_exact(4).any(|coordinate| {
+                !f32::from_le_bytes(coordinate.try_into().expect("four-byte coordinate"))
+                    .is_finite()
+            }) {
+                return Err(ExecutionError::Memory(
+                    "ERR memory vector contains non-finite value",
+                ));
+            }
+            if !(1..=super::memory::MAX_SEARCH_K).contains(k) {
+                return Err(ExecutionError::Memory("ERR memory k is out of range"));
+            }
+            if namespace.len() > 256 || metadata.len() > 32 {
+                return Err(ExecutionError::Memory("ERR memory limit exceeded"));
+            }
+            for (field, value) in metadata {
+                if field.is_empty()
+                    || field.len() > 64
+                    || matches!(value, super::memory::Scalar::Bytes(bytes) if bytes.len() > 4096)
+                {
+                    return Err(ExecutionError::Memory("ERR memory limit exceeded"));
+                }
+            }
+        }
         let now = self.clock.now();
         self.expire_key(key, now);
         let current = match self.values.get(key).map(|entry| &entry.value) {
@@ -351,12 +386,67 @@ impl Store {
                     "ERR memory collection does not exist",
                 )),
                 Operation::Info | Operation::Get { .. } => Ok((Reply::Bulk(None), None)),
+                Operation::Search { .. } => Ok((Reply::Array(Vec::new()), None)),
                 Operation::Pttl { .. } => Ok((Reply::Integer(-2), None)),
                 _ => Ok((Reply::Integer(0), None)),
             };
         };
         if matches!(operation, Operation::Info) {
             return Ok((descriptor_reply(collection.descriptor()), None));
+        }
+        if let Operation::Search {
+            descriptor,
+            vector,
+            k,
+            namespace,
+            metadata,
+        } = &operation
+        {
+            let stored = collection.descriptor();
+            if descriptor.provider != stored.provider
+                || descriptor.model != stored.model
+                || descriptor.revision != stored.revision
+                || descriptor.transform != stored.transform
+            {
+                return Err(ExecutionError::Memory("ERR memory model identity mismatch"));
+            }
+            if descriptor.dimension != stored.dimension {
+                return Err(ExecutionError::Memory("ERR memory vector length mismatch"));
+            }
+            let entry = self.values.get(key).expect("existing memory entry");
+            let hits = collection
+                .search_with_visibility(
+                    vector,
+                    *k,
+                    namespace,
+                    metadata,
+                    self.clock.unix_millis(),
+                    |member| {
+                        entry
+                            .member_deadlines
+                            .get(&member.id)
+                            .is_none_or(|deadline| *deadline > now)
+                    },
+                )
+                .map_err(|error| match error {
+                    MemoryError::Quota => {
+                        ExecutionError::Memory("ERR memory search work limit exceeded")
+                    }
+                    other => memory_error(other),
+                })?;
+            return Ok((
+                Reply::Array(
+                    hits.into_iter()
+                        .map(|(id, distance)| {
+                            Reply::Array(vec![
+                                Reply::Bulk(Some(id)),
+                                Reply::Bulk(Some(Bytes::copy_from_slice(&distance.to_le_bytes()))),
+                            ])
+                        })
+                        .collect(),
+                ),
+                None,
+            ));
         }
         let id = match &operation {
             Operation::Put { member, .. } => &member.id,
@@ -365,7 +455,7 @@ impl Store {
             | Operation::Pttl { id }
             | Operation::Expire { id, .. }
             | Operation::Persist { id } => id,
-            _ => unreachable!("create and info handled above"),
+            _ => unreachable!("create, info and search handled above"),
         };
         if id.is_empty() || id.len() > 256 {
             return Err(ExecutionError::Memory("ERR memory limit exceeded"));
@@ -483,7 +573,7 @@ impl Store {
                 replacement.deadline = None;
                 Edit::Upsert(replacement)
             }
-            _ => unreachable!("create and info handled above"),
+            _ => unreachable!("create, info and search handled above"),
         };
         let mutation = self.apply_memory_edit(key, &collection, edit)?;
         Ok((Reply::Integer(1), Some(mutation)))

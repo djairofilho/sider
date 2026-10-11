@@ -22,6 +22,7 @@ pub(crate) fn name(raw: &[u8]) -> Option<&'static str> {
         "mem.pttl",
         "mem.expire",
         "mem.persist",
+        "mem.search",
     ]
     .into_iter()
     .find(|kind| raw.eq_ignore_ascii_case(kind.as_bytes()))
@@ -74,9 +75,12 @@ pub(crate) fn parse(raw: &[u8], args: Vec<Bytes>) -> Result<Command, RequestErro
         "mem.info" => 1,
         "mem.expire" => 3,
         "mem.put" => 13,
+        "mem.search" => 9,
         _ => 2,
     };
-    if (kind == "mem.put" && args.len() < arity) || (kind != "mem.put" && args.len() != arity) {
+    if ((kind == "mem.put" || kind == "mem.search") && args.len() < arity)
+        || (kind != "mem.put" && kind != "mem.search" && args.len() != arity)
+    {
         return Err(RequestError::WrongArity(kind));
     }
     let mut args = args.into_iter();
@@ -191,6 +195,61 @@ pub(crate) fn parse(raw: &[u8], args: Vec<Bytes>) -> Result<Command, RequestErro
                 member: Box::new(member),
                 ttl,
                 condition,
+            }
+        }
+        "mem.search" => {
+            let mut descriptor = identity(&mut args, 1)?;
+            let vector = args.next().unwrap();
+            if vector.is_empty() || !vector.len().is_multiple_of(4) {
+                return Err(error(VECTOR));
+            }
+            bounded(&vector, 4, 4096 * 4)?;
+            if vector.chunks_exact(4).any(|coordinate| {
+                !f32::from_le_bytes(coordinate.try_into().expect("four bytes")).is_finite()
+            }) {
+                return Err(error("ERR memory vector contains non-finite value"));
+            }
+            descriptor.dimension = (vector.len() / 4) as u32;
+            let k = count(&args.next().unwrap(), usize::MAX)?;
+            if !(1..=crate::storage::memory::MAX_SEARCH_K).contains(&k) {
+                return Err(error("ERR memory k is out of range"));
+            }
+            let namespace = args.next().unwrap();
+            bounded(&namespace, 0, 256)?;
+            let metadata_count = count(&args.next().unwrap(), 32)?;
+            if args.len() != metadata_count * 3 {
+                return Err(RequestError::WrongArity(kind));
+            }
+            let mut metadata = BTreeMap::new();
+            for _ in 0..metadata_count {
+                let field = args.next().unwrap();
+                bounded(&field, 1, 64)?;
+                let scalar_type = args.next().unwrap();
+                let raw = args.next().unwrap();
+                let value = if scalar_type.eq_ignore_ascii_case(b"BYTES") {
+                    bounded(&raw, 0, 4096)?;
+                    Scalar::Bytes(raw)
+                } else if scalar_type.eq_ignore_ascii_case(b"I64") {
+                    Scalar::Integer(parse_decimal(&raw).ok_or_else(|| error(ARGUMENT))?)
+                } else if scalar_type.eq_ignore_ascii_case(b"BOOL") {
+                    Scalar::Bool(match raw.as_ref() {
+                        b"0" => false,
+                        b"1" => true,
+                        _ => return Err(error(ARGUMENT)),
+                    })
+                } else {
+                    return Err(error("ERR unsupported memory filter"));
+                };
+                if metadata.insert(field, value).is_some() {
+                    return Err(error(ARGUMENT));
+                }
+            }
+            Operation::Search {
+                descriptor,
+                vector,
+                k,
+                namespace,
+                metadata,
             }
         }
         _ => {

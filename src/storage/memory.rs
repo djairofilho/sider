@@ -5,7 +5,8 @@
 //! the operation clock, shard quota, and durable record limit.
 
 use bytes::Bytes;
-use std::collections::BTreeMap;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BinaryHeap};
 use thiserror::Error;
 
 /// Native and RESP2 lifecycle request; durable activation remains a separate gate.
@@ -35,6 +36,13 @@ pub enum Operation {
     Persist {
         id: Bytes,
     },
+    Search {
+        descriptor: Descriptor,
+        vector: Bytes,
+        k: usize,
+        namespace: Bytes,
+        metadata: BTreeMap<Bytes, Scalar>,
+    },
 }
 
 impl Operation {
@@ -49,10 +57,14 @@ impl Operation {
             Self::Pttl { .. } => "MEM.PTTL",
             Self::Expire { .. } => "MEM.EXPIRE",
             Self::Persist { .. } => "MEM.PERSIST",
+            Self::Search { .. } => "MEM.SEARCH",
         }
     }
     pub fn writes_dataset(&self) -> bool {
-        !matches!(self, Self::Info | Self::Get { .. } | Self::Pttl { .. })
+        !matches!(
+            self,
+            Self::Info | Self::Get { .. } | Self::Pttl { .. } | Self::Search { .. }
+        )
     }
 }
 
@@ -67,6 +79,7 @@ pub const MAX_DIMENSION: usize = 4096;
 pub const MAX_MEMBERS: usize = 1024;
 pub const MAX_COLLECTION_BYTES: usize = 8_388_608;
 pub const MAX_COMPONENTS: usize = 1_048_576;
+pub const MAX_SEARCH_K: usize = 128;
 pub const MAX_EDITS: usize = 64;
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -275,6 +288,101 @@ pub struct Collection {
 }
 
 impl Collection {
+    /// Bounded exact top-k over one immutable owning-worker image.
+    pub fn search(
+        &self,
+        vector: &[u8],
+        k: usize,
+        namespace: &[u8],
+        metadata: &BTreeMap<Bytes, Scalar>,
+        unix_ms: i64,
+    ) -> Result<Vec<(Bytes, f64)>, MemoryError> {
+        self.search_with_visibility(vector, k, namespace, metadata, unix_ms, |_| true)
+    }
+
+    pub(crate) fn search_with_visibility(
+        &self,
+        vector: &[u8],
+        k: usize,
+        namespace: &[u8],
+        metadata: &BTreeMap<Bytes, Scalar>,
+        unix_ms: i64,
+        visible: impl Fn(&Member) -> bool,
+    ) -> Result<Vec<(Bytes, f64)>, MemoryError> {
+        if !(1..=MAX_SEARCH_K).contains(&k) {
+            return Err(MemoryError::Argument);
+        }
+        bounded(namespace, 0, 256)?;
+        if metadata.len() > 32 {
+            return Err(MemoryError::Argument);
+        }
+        for (field, value) in metadata {
+            bounded(field, 1, 64)?;
+            if let Scalar::Bytes(value) = value {
+                bounded(value, 0, 4096)?;
+            }
+        }
+        self.validate_search_vector(vector)?;
+        if self.members.len() > MAX_MEMBERS
+            || self
+                .members
+                .len()
+                .checked_mul(self.descriptor.dimension as usize)
+                .is_none_or(|work| work > MAX_COMPONENTS)
+        {
+            return Err(MemoryError::Quota);
+        }
+        let mut top = BinaryHeap::with_capacity(k);
+        for member in self.members.values() {
+            if member.deadline.is_some_and(|deadline| deadline <= unix_ms)
+                || !visible(member)
+                || member.namespace.as_ref() != namespace
+                || !metadata
+                    .iter()
+                    .all(|(field, value)| member.metadata.get(field) == Some(value))
+            {
+                continue;
+            }
+            let mut distance = 0.0_f64;
+            for (query, stored) in vector.chunks_exact(4).zip(member.vector.chunks_exact(4)) {
+                let query = f32::from_le_bytes(query.try_into().expect("four-byte coordinate"));
+                let stored = f32::from_le_bytes(stored.try_into().expect("four-byte coordinate"));
+                let delta = f64::from(query) - f64::from(stored);
+                distance += delta * delta;
+            }
+            let candidate = SearchHit {
+                id: member.id.clone(),
+                distance,
+            };
+            if top.len() < k {
+                top.push(candidate);
+            } else if top
+                .peek()
+                .is_some_and(|worst| candidate.cmp(worst) == Ordering::Less)
+            {
+                top.pop();
+                top.push(candidate);
+            }
+        }
+        Ok(top
+            .into_sorted_vec()
+            .into_iter()
+            .map(|hit| (hit.id, hit.distance))
+            .collect())
+    }
+
+    fn validate_search_vector(&self, vector: &[u8]) -> Result<(), MemoryError> {
+        if vector.len() != self.descriptor.dimension as usize * 4 {
+            return Err(MemoryError::Dimension);
+        }
+        if vector.chunks_exact(4).any(|coordinate| {
+            !f32::from_le_bytes(coordinate.try_into().expect("four-byte coordinate")).is_finite()
+        }) {
+            return Err(MemoryError::NonFinite);
+        }
+        Ok(())
+    }
+
     pub fn new(descriptor: Descriptor) -> Result<Self, MemoryError> {
         descriptor.validate()?;
         let logical_bytes = descriptor.logical_bytes();
@@ -403,6 +511,28 @@ impl Collection {
             .take(budget.min(MAX_EDITS))
             .map(|(id, _)| Edit::Remove(id.clone()))
             .collect()
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct SearchHit {
+    id: Bytes,
+    distance: f64,
+}
+
+impl Eq for SearchHit {}
+
+impl Ord for SearchHit {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.distance
+            .total_cmp(&other.distance)
+            .then_with(|| self.id.cmp(&other.id))
+    }
+}
+
+impl PartialOrd for SearchHit {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
