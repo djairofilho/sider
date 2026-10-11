@@ -42,6 +42,7 @@ pub struct PreparedServer {
     recovered: Option<crate::persistence::Recovered>,
     config: ServerConfig,
     replication_listener: Option<TcpListener>,
+    composed_export_listener: Option<TcpListener>,
 }
 
 pub async fn prepare(config: &ServerConfig) -> Result<PreparedServer, ServerError> {
@@ -114,11 +115,16 @@ async fn prepare_inner(
         Some(replication) => Some(TcpListener::bind(replication.listen).await?),
         None => None,
     };
+    let composed_export_listener = match config.composed_export_addr {
+        Some(address) => Some(TcpListener::bind(address).await?),
+        None => None,
+    };
     Ok(PreparedServer {
         stores,
         recovered,
         config: config.clone(),
         replication_listener,
+        composed_export_listener,
     })
 }
 
@@ -255,6 +261,12 @@ async fn serve_prepared_inner(
     internal_security: Option<InternalAdmission>,
 ) -> Result<(), ServerError> {
     config.validate()?;
+    if config.composed_export_addr.is_some() && security.is_some() {
+        return Err(ConfigError::InvalidServerLimits {
+            reason: "composed export requires the explicit legacy-loopback security profile",
+        }
+        .into());
+    }
     if prepared.config != config {
         return Err(ConfigError::InvalidServerLimits {
             reason: "configuration differs from recovered state",
@@ -329,6 +341,39 @@ async fn serve_prepared_inner(
         .map(TcpListener::local_addr)
         .transpose()?;
     let replication_listener = prepared.replication_listener;
+    let composed_export_addr = prepared
+        .composed_export_listener
+        .as_ref()
+        .map(TcpListener::local_addr)
+        .transpose()?;
+    if let Some(export_listener) = prepared.composed_export_listener {
+        let (aof, _) = persistence.as_ref().expect("composed export requires AOF");
+        let export_db = database.clone();
+        let export_aof = aof.clone();
+        let export_config = config.aof.clone().expect("composed export requires AOF");
+        let export_epoch = crate::replication::new_epoch()?;
+        let export_shutdown = receiver.clone();
+        let export_connections = config.max_connections;
+        let export_dataset_bytes = config.max_dataset_bytes;
+        let export_timeout = config.request_timeout;
+        workers.spawn(async move {
+            if let Err(error) = crate::replication::composed::serve_export(
+                export_listener,
+                export_db,
+                export_aof,
+                export_config,
+                export_epoch,
+                export_dataset_bytes,
+                export_shutdown,
+                export_connections,
+                export_timeout,
+            )
+            .await
+            {
+                tracing::error!(%error, "composed export listener terminated with failure");
+            }
+        });
+    }
     if memory_profile {
         if let (Some(listener), Some(replication), Some((aof, _)), Some(aof_config)) = (
             replication_listener,
@@ -616,6 +661,12 @@ async fn serve_prepared_inner(
                 internal_security.is_some(),
             )
         })
+        .transpose()?;
+    let _composed_export_ready = config
+        .composed_export_ready_file
+        .as_ref()
+        .zip(composed_export_addr)
+        .map(|(path, address)| crate::readiness::ReadyFile::create(path, address))
         .transpose()?;
     let _ready = config
         .ready_file

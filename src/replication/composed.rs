@@ -1,14 +1,88 @@
 //! Explicit transport-3 export of a record-1 snapshot.
-//! The caller owns capture/sequence consistency; this API does not start a listener.
+//! The caller owns capture/sequence consistency; the explicit local server can
+//! also serve one-shot exports through a loopback listener.
 
+use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::sync::{Semaphore, watch};
+use tokio::task::JoinSet;
 
 use super::Cursor;
-use super::protocol::{self, ComposedHello, Limits, Message, Reject};
-use crate::persistence::{AofHandle, format};
+use super::protocol::{self, ComposedHello, Hello, Limits, Message, Reject};
+use crate::persistence::{AofConfig, AofHandle, composed_format, format};
 use crate::storage::{Mutation, worker::DbHandle};
+
+/// Serve one-shot backup exports from the explicit local composed profile.
+/// Plaintext sessions are admitted only from loopback; replica sessions are not accepted.
+#[allow(clippy::too_many_arguments)] // Caller passes explicit listener ownership and bounded source resources.
+pub(crate) async fn serve_export(
+    listener: TcpListener,
+    database: DbHandle,
+    aof: AofHandle,
+    config: AofConfig,
+    epoch: [u8; 16],
+    max_dataset_bytes: usize,
+    mut shutdown: watch::Receiver<bool>,
+    max_connections: usize,
+    deadline: Duration,
+) -> Result<(), super::Error> {
+    if !listener.local_addr()?.ip().is_loopback()
+        || !aof.is_composed_legacy_mixed()
+        || epoch == [0; 16]
+    {
+        return Err(super::Error::Sequence);
+    }
+    let profile = ComposedHello {
+        base: Hello {
+            sider_version: Bytes::from_static(env!("CARGO_PKG_VERSION").as_bytes()),
+            record_version: composed_format::RecordVersion::Legacy as u32,
+            shard_count: config.layout.shard_count,
+            routing_version: config.layout.routing_version,
+            max_record_bytes: config.limits.max_record_bytes as u32,
+            max_mutations: config.limits.max_mutations as u32,
+            max_snapshot_bytes: super::memory_source::snapshot_ceiling(
+                crate::storage::StoreConfig { max_dataset_bytes },
+            ),
+            cursor: None,
+        },
+        aof_header_version: composed_format::HEADER_VERSION,
+        required_capabilities: composed_format::MIXED_OWNER_BATCH,
+    };
+    let limits = super::memory_source::limits(&config);
+    let slots = Arc::new(Semaphore::new(max_connections));
+    let mut sessions = JoinSet::new();
+    loop {
+        tokio::select! {
+            biased;
+            () = super::session::stopped(&mut shutdown) => break,
+            Some(result) = sessions.join_next() => match result {
+                Ok(Ok(())) => {},
+                Ok(Err(error)) => tracing::debug!(%error, "composed export closed"),
+                Err(error) => return Err(error.into()),
+            },
+            accepted = listener.accept() => {
+                let (mut socket, peer) = accepted?;
+                if !peer.ip().is_loopback() { continue; }
+                let Ok(slot) = slots.clone().try_acquire_owned() else { continue; };
+                let database = database.clone();
+                let aof = aof.clone();
+                let profile = profile.clone();
+                sessions.spawn(async move {
+                    let _slot = slot;
+                    socket.set_nodelay(true)?;
+                    export_database(&mut socket, &database, &aof, profile, epoch, limits, deadline).await
+                });
+            }
+        }
+    }
+    sessions.abort_all();
+    while sessions.join_next().await.is_some() {}
+    Ok(())
+}
 
 /// A validated request bound to one source profile. Only negotiation can create it.
 pub struct ExportAdmission {
