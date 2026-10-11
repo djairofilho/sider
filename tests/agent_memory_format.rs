@@ -391,3 +391,83 @@ fn memory_format_production_refusal_preserves_every_torn_memory_prefix() {
         }
     }
 }
+
+#[test]
+fn composed_header_production_refusal_preserves_torn_records() {
+    use sha2::{Digest, Sha256};
+    use sider::persistence::{self, AofConfig, AofError};
+    use sider::storage::{StoreConfig, SystemClock};
+    use std::sync::Arc;
+
+    // Literal header-7 fixtures from docs/durable-format-registry.md.
+    let profiles = [
+        (
+            hex("53 49 44 45 52 41 4f 46 07 00 00 00 40 00 00 00 \
+                 09 00 00 00 00 00 00 00 04 00 00 00 01 00 00 00 \
+                 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 \
+                 00 00 00 00 00 00 00 00 00 00 00 00 fa fc 1a 97"),
+            format::encode(
+                &format::Record::Seal {
+                    sequence: 9,
+                    entries: 0,
+                    digest: 0,
+                },
+                format::Limits::default(),
+            )
+            .unwrap(),
+        ),
+        (
+            hex("53 49 44 45 52 41 4f 46 07 00 00 00 40 00 00 00 \
+                 09 00 00 00 00 00 00 00 04 00 00 00 01 00 00 00 \
+                 02 00 00 00 01 00 00 00 02 00 00 00 01 02 03 04 \
+                 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 f5 46 fd ba"),
+            memory_format::encode(
+                &Record::Snapshot(Mutation::Image {
+                    key: Bytes::from_static(b"c"),
+                    collection: Collection::new(descriptor()).unwrap(),
+                    key_deadline: None,
+                }),
+                format::Limits::default(),
+            )
+            .unwrap(),
+        ),
+    ];
+
+    for (header, record) in profiles {
+        assert_eq!(header.len(), 64);
+        assert_eq!(
+            format::checksum(&header[..60]),
+            u32::from_le_bytes(header[60..].try_into().unwrap())
+        );
+        let directory = TestDirectory::new();
+        let file = directory.path().join("generation-00000000000000000000.aof");
+        for prefix in 0..=record.len() {
+            let bytes = [header.as_slice(), &record[..prefix]].concat();
+            std::fs::write(&file, &bytes).unwrap();
+            let before = Sha256::digest(&bytes);
+            assert!(
+                matches!(
+                    persistence::recover(
+                        AofConfig::new(directory.path().to_owned()),
+                        StoreConfig::default(),
+                        Arc::new(SystemClock),
+                    ),
+                    Err(AofError::Format(format::FormatError::Version(7)))
+                ),
+                "record version {}, prefix {prefix}",
+                header[32]
+            );
+            assert_eq!(Sha256::digest(std::fs::read(&file).unwrap()), before);
+            assert!(
+                !std::fs::read_dir(directory.path())
+                    .unwrap()
+                    .any(|entry| entry
+                        .unwrap()
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("tail-")),
+                "refusal attempted tail repair"
+            );
+        }
+    }
+}
