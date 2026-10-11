@@ -1,7 +1,9 @@
 # Codec RESP2
 
-The `sider::resp` module represents and encodes the five RESP2 types without
-knowing commands, sockets, or storage. Representing a frame does not mean
+This page records the RESP2 codec contract. The current checkout extends it
+with the [negotiated RESP3 subset](resp3.md); the published 1.0.1 binary is
+RESP2 only. The `sider::resp` module represents and encodes the five RESP2 types
+without knowing commands, sockets, or storage. Representing a frame does not mean
 accepting it as a request: that validation belongs to the command parser.
 
 ## Contents
@@ -48,8 +50,10 @@ Leading zeroes can be normalized on output.
 
 Simple strings and errors cannot contain CR or LF. Bulk strings accept every byte,
 including CRLF, NUL, and invalid UTF-8 sequences. Delimiters still require exact
-CRLF. The codec does not accept RESP3 prefixes or inline commands. These types and
-delimiters follow the [RESP specification](https://redis.io/docs/latest/develop/reference/protocol-spec/).
+CRLF. The published 1.0.1 codec does not accept RESP3 prefixes; the current
+checkout adds the bounded types described in [the RESP3 guide](resp3.md).
+Neither version accepts inline commands. These types and delimiters follow the
+[RESP specification](https://redis.io/docs/latest/develop/reference/protocol-spec/).
 
 ## Limits
 

@@ -1,13 +1,17 @@
 # 1.0 subset matrix
 
-This is the technical consolidation for R11-01 and R11-02. The checkout prepares
-package `1.0.0`; candidate build testing and publication depend on the gates and
-exact files. Internal milestones and the R10 baseline retained `0.1.0`, without
-expanding the historical 0.1 release or approving the current candidate.
+This is the technical consolidation for R11-01 and R11-02. Packages `1.0.0` and
+`1.0.1` were published with candidate evidence tied to their exact files and
+source SHAs. Internal milestones and the R10 baseline retained `0.1.0`.
+Historical comparisons below are not evidence for a different build. See the
+[current deployment profile](deployment-profile.md) for operating limits.
 
 The Redis contract uses server and `redis-cli` **8.10.1**, with a Linux amd64 image
 pinned by tag and digest in [releases/plan.json](../releases/plan.json).
-Every form below uses nonempty RESP2 arrays of non-null bulk strings.
+The published 1.0.1 forms below use nonempty RESP2 arrays of non-null bulk
+strings. The current checkout adds negotiated [RESP3 responses](resp3.md) and
+`HELLO 2/3`, without changing the required array-of-bulk request shape; those
+changes are not part of the 1.0.1 release evidence.
 Names and options are ASCII case-insensitive; keys, values, members, fields,
 and channels preserve arbitrary bytes, including empty and non-UTF-8 bytes.
 `[argument]` means optional; `...` repeats the preceding group.

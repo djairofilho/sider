@@ -1,5 +1,11 @@
 # Consistent backup and restoration
 
+This procedure describes the published 1.0.1 package. The current checkout's
+protected executable with an internal listener is unavailable until the
+[security implementation](security-implementation.md) completes internal
+revocation. Use its explicit `legacy-loopback` profile only in a controlled
+development environment.
+
 `sider-backup` captures a consistent point from the primary over TCP and produces
 a sealed AOF snapshot, a manifest, and checksums. Restoration verifies the set
 before creating a new data directory. Use the executable from the
@@ -18,7 +24,8 @@ SIDER_REPLICATION_ADDR=127.0.0.1:6381 ./sider
 
 In PowerShell, set the same `$env:SIDER_...` variables before starting
 `.\sider.exe`. The address requires a literal IP and port. This listener does not
-use RESP or accept Redis clients. It has no authentication or TLS; keep it on
+use RESP or accept Redis clients. The published 1.0.1 listener has no authentication
+or TLS; keep it on
 loopback or the service's controlled private network.
 
 For ephemeral ports in tests, use `SIDER_REPLICATION_ADDR=127.0.0.1:0` and
@@ -155,3 +162,8 @@ SIDER_BACKUP_PACKAGE_DIR=/path/extracted/sider-vTARGET-VERSION \
 The result records selected paths and observed data. Provenance from the distributed
 archive, SHA, and hashes still require separate evidence of building, packaging,
 and extraction. This test does not issue release approval.
+
+The [operator recovery drill](recovery-drill.md) exercises the published package
+with a deterministic dataset near the default 64 MiB quota on one and four shards.
+It retains raw output, measures verification/restoration and AOF recovery phases,
+and checks corrupted or incompatible copies while preserving valid originals.

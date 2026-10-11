@@ -4,9 +4,10 @@ Sider is an in-memory database server project written in Rust.
 Its goal is to provide an explicit subset of Redis compatibility over RESP2.
 The name is Redis spelled backward.
 
-This checkout prepares package `1.0.1`. Publication depends on validating the
-candidate build and its files; the [release notes](releases/notes/v1.0.1.md)
-describe the scope without replacing gate receipts.
+The published package is `1.0.1`; the current checkout contains staged work
+after that release. Publication of another package depends on validating its
+candidate build and files. The [1.0.1 release notes](releases/notes/v1.0.1.md)
+describe the published scope without replacing gate receipts.
 
 The binary serves strings, multikey operations, `SET` options, and TTL over RESP2/TCP.
 Hashes, lists, sets, and sorted sets share TTL, quota, and typed persistence.
@@ -22,7 +23,9 @@ and durable batches, resumes available history, and allows manual promotion.
 Replicas require the same version and shard configuration; Pub/Sub remains local.
 [Consistent backup](docs/backup.md) exports data while traffic continues,
 with integrity verification and restoration into a new directory.
-Authentication, TLS, and automatic failover are not available yet; use a controlled environment.
+The published 1.0.1 package has no authentication, TLS, or automatic failover.
+Use the [controlled single-host deployment profile](docs/deployment-profile.md)
+with a loopback client listener; shared-network use is outside that profile.
 
 The [strings guide](docs/strings.md) describes commands and limits.
 The [collections](docs/collections.md) and [sorted sets](docs/sorted-sets.md) guides
@@ -40,6 +43,10 @@ checkpoints; 1.0 and explicitly registered patches have candidate and final rele
 a candidate and final release with the same SHA and approved files.
 The [execution plan through v1](docs/execution-to-v1.md) summarizes the current state,
 next deliverable, and criteria for each version.
+The [agent development guide](docs/agent-development.md) routes the current GitHub
+issues by dependency, acceptance evidence, and model. The
+[next development plan](docs/next-development.md) records the active workstreams;
+its proposals do not expand the released 1.0.1 contract.
 
 CI and automatic publication are deferred until after 1.0. Through and including 1.0,
 development uses local validation and releases are published manually.
@@ -64,12 +71,31 @@ git clone https://github.com/djairofilho/sider.git
 cd sider
 cargo run --locked -- --help
 cargo run --locked -- --version
-cargo run --locked
 ```
 
 The repository is public and can be cloned without authentication.
 
-Without arguments, the program validates configuration and opens the TCP listener.
+The current checkout defaults to a protected security profile that requires a
+validated `SIDER_SECURITY_DIR`. Protected startup on Windows and protected
+internal replication are still gated in this development stage. For a controlled
+loopback development instance, select `SIDER_SECURITY_PROFILE=legacy-loopback`
+explicitly. In a POSIX shell:
+
+```sh
+SIDER_SECURITY_PROFILE=legacy-loopback cargo run --locked
+```
+
+In PowerShell:
+
+```powershell
+$env:SIDER_SECURITY_PROFILE = 'legacy-loopback'
+try {
+    cargo run --locked
+} finally {
+    Remove-Item Env:SIDER_SECURITY_PROFILE
+}
+```
+
 Use Ctrl+C to shut down. In another terminal, a RESP2 client can send the supported
 commands. Without `SIDER_AOF_DIR`, data is lost when the process terminates.
 With AOF, recovery completes before binding and follows the synchronization policy
@@ -80,6 +106,8 @@ described in the [persistence guide](docs/persistence.md).
 | Variable | Default | Format |
 | --- | --- | --- |
 | `SIDER_ADDR` | `127.0.0.1:6379` | IP address and port; IPv6 in brackets |
+| `SIDER_SECURITY_PROFILE` | `protected` in the development checkout | Use `legacy-loopback` only for controlled plaintext development |
+| `SIDER_SECURITY_DIR` | Unset | Absolute directory containing the validated protected generation; required for protected startup |
 | `SIDER_READY_FILE` | Unset | New readiness file with PID, IP, and actual port |
 | `SIDER_MAX_DATASET_BYTES` | `67108864` | Positive logical quota, distinct from RSS; no eviction |
 | `SIDER_SHARDS` | `1` | Between 1 and 256 workers, with divided quota and fixed configuration |
@@ -99,14 +127,19 @@ To try another configuration in PowerShell:
 
 ```powershell
 $env:SIDER_ADDR = '127.0.0.1:6380'
-cargo run --locked
-Remove-Item Env:SIDER_ADDR
+$env:SIDER_SECURITY_PROFILE = 'legacy-loopback'
+try {
+    cargo run --locked
+} finally {
+    Remove-Item Env:SIDER_ADDR
+    Remove-Item Env:SIDER_SECURITY_PROFILE
+}
 ```
 
 In a POSIX shell:
 
 ```sh
-SIDER_ADDR=127.0.0.1:6380 cargo run --locked
+SIDER_SECURITY_PROFILE=legacy-loopback SIDER_ADDR=127.0.0.1:6380 cargo run --locked
 ```
 
 ## Checking changes
@@ -171,8 +204,21 @@ with manual execution and evidence on the required platforms.
 | [docs/compatibility-matrix.md](docs/compatibility-matrix.md) | Supported forms, restrictions, and evidence by capability |
 | [docs/testing.md](docs/testing.md) | Local tests and Redis reference reproduction |
 | [docs/resp.md](docs/resp.md) | RESP2 codec contracts, limits, and usage |
+| [docs/resp3.md](docs/resp3.md) | Experimental RESP3 subset and validation scope |
 | [docs/network.md](docs/network.md) | TCP configuration, acceptance, timeouts, and shutdown |
 | [docs/pubsub.md](docs/pubsub.md) | Binary channels, subscriber mode, bounded queues, and Pub/Sub differential tests |
+| [docs/agent-development.md](docs/agent-development.md) | Issue routing and autonomous development workflow |
+| [docs/next-development.md](docs/next-development.md) | Operational and AI-memory development fronts |
+| [docs/deployment-profile.md](docs/deployment-profile.md) | Supported deployment boundary and preflight |
+| [docs/client-integration.md](docs/client-integration.md) | Client handshake audit and supported paths |
+| [docs/recovery-drill.md](docs/recovery-drill.md) | Backup and AOF recovery evidence |
+| [docs/resource-envelope.md](docs/resource-envelope.md) | Resource workload and measurement contract |
+| [docs/redis-benchmarks.md](docs/redis-benchmarks.md) | Comparative benchmark method and limits |
+| [docs/security-boundary.md](docs/security-boundary.md) | Network exposure and authentication contract |
+| [docs/agent-memory-v1.md](docs/agent-memory-v1.md) | Proposed AI memory contract and persistence reservations |
+| [docs/lua-scripting.md](docs/lua-scripting.md) | Scripting contract and isolated containment spike |
+| [docs/cross-shard-transactions.md](docs/cross-shard-transactions.md) | Proposed mixed-owner transaction contract |
+| [docs/durable-format-registry.md](docs/durable-format-registry.md) | Proposed AOF, replication, and backup format composition |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Workflow and review criteria |
 
 ## Next step

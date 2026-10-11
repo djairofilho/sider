@@ -1,8 +1,14 @@
 # Candidate package benchmarks
 
+The separate [Sider versus pinned Redis comparison](redis-benchmarks.md) runs
+equivalent workloads and records paired performance observations. It writes an
+independent descriptive report, without changing this release gate's contract.
+
 The `benchmarks` gate runs the Linux GNU x86_64 binary extracted from the
 candidate package and produces reproducible loopback measurements. It does not
 establish superiority over Redis or a throughput or latency commitment.
+This candidate-package benchmark is separate from the Sider-only operating
+envelope in [resource-envelope.md](resource-envelope.md).
 
 The workload starts only when the operator sets `SIDER_BENCH_IDLE_MACHINE=1`.
 Compile first and reserve the machine for the test. The variable records that
