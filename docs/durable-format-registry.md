@@ -134,8 +134,10 @@ Proposed backup manifest schema 3 retains schema 2's fields and adds mandatory
 preserving the source codec/capabilities. Verify cross-checks these manifest
 fields against the actual header before replay. Restore uses a new directory
 with the same profile; it does not inherit source role, epoch, credentials or
-TTL duration. Schema 1/2 and transport 1/2 remain immutable. This is a proposed
-schema; current backup code still only implements schema 1.
+TTL duration. Schema 1/2 and transport 1/2 remain immutable. The explicit
+schema-3 stream export, verification and isolated restore library paths are now
+implemented for record 1 with the mixed bit. No server listener or executable
+selects them; default recovery still refuses the restored header-7 directory.
 
 ## Offline migration and rollback
 
@@ -232,8 +234,8 @@ the captured Hello to that exact admitted profile; a mismatch emits no snapshot.
 No network listener or backup archive path selects transport 3 yet.
 No public AOF configuration selects that profile; default recovery still rejects
 version 7 before inspecting records, including every torn first-record prefix,
-and preserves the file bytes. Backup and a production transport-3 session remain
-unavailable.
+and preserves the file bytes. The backup CLI and a production transport-3 session
+remain unavailable.
 Coordinate acceptance of allocations 7, transport 3 and backup schema 3 with
 the memory contract owner before enabling any of them in production.
 
