@@ -10,12 +10,19 @@ use crate::persistence::DurableLayout;
 
 pub enum Action {
     Export(ExportOptions),
+    ExportMemory(ExportOptions),
     Verify {
         source: PathBuf,
         layout: DurableLayout,
         limits: Limits,
     },
+    VerifyMemory {
+        source: PathBuf,
+        layout: DurableLayout,
+        limits: Limits,
+    },
     Restore(RestoreOptions),
+    RestoreMemory(RestoreOptions),
 }
 
 pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Error> {
@@ -44,6 +51,7 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
                 | "--max-snapshot-bytes"
                 | "--max-dataset-bytes"
                 | "--timeout-ms"
+                | "--record-version"
         ) {
             return Err(Error::Invalid("unknown option"));
         }
@@ -69,6 +77,12 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
             .map_err(|_| Error::Invalid("integer out of range"))
     }
     let mut limits = Limits::default();
+    let memory = match values.remove("--record-version") {
+        None => false,
+        Some(version) if version == "1" => false,
+        Some(version) if version == "2" => true,
+        Some(_) => return Err(Error::Invalid("record version must be 1 or 2")),
+    };
     for (name, field) in [
         ("--max-record-bytes", &mut limits.max_record_bytes),
         ("--max-mutations", &mut limits.max_mutations),
@@ -98,12 +112,17 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
             .into_string()
             .map_err(|_| Error::Invalid("invalid SHA"))?;
         super::manifest::require_hex(&source_sha, 40)?;
-        Action::Export(ExportOptions {
+        let options = ExportOptions {
             source,
             destination,
             source_sha,
             limits,
-        })
+        };
+        if memory {
+            Action::ExportMemory(options)
+        } else {
+            Action::Export(options)
+        }
     } else {
         let layout = DurableLayout {
             shard_count: u32::try_from(number(required(&mut values, "--shards")?)?)
@@ -114,17 +133,30 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
         layout.validate()?;
         layout.quota(limits.max_dataset_bytes, 0)?;
         if action == "restore" {
-            Action::Restore(RestoreOptions {
+            let options = RestoreOptions {
                 source: source.into(),
                 destination: required(&mut values, "--destination")?.into(),
                 layout,
                 limits,
-            })
+            };
+            if memory {
+                Action::RestoreMemory(options)
+            } else {
+                Action::Restore(options)
+            }
         } else {
-            Action::Verify {
-                source: source.into(),
-                layout,
-                limits,
+            if memory {
+                Action::VerifyMemory {
+                    source: source.into(),
+                    layout,
+                    limits,
+                }
+            } else {
+                Action::Verify {
+                    source: source.into(),
+                    layout,
+                    limits,
+                }
             }
         }
     };

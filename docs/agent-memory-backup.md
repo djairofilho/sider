@@ -1,12 +1,12 @@
-# Staged memory backup library
+# Staged memory backup
 
 This development slice implements schema-2 archive export, verification and
 restoration for issue #110. It is not part of the published 1.0.1 package and
-does not complete the memory durability contract. The default server and backup
-CLI retain record 1. An explicit transport-2 snapshot producer and live backup
-consumer are now available as library APIs. The development server can expose
-an explicitly configured live record-2 source on its internal listener; native
-replication and the default backup CLI remain separate gates.
+does not complete the memory durability contract. The server and backup CLI
+default to record 1. An explicit transport-2 snapshot producer and live backup
+consumer are available as library APIs. The development server can expose a
+record-2 source on its configured internal listener, and `sider-backup` can select
+record 2 explicitly. Native replication remains a separate gate.
 
 ## Explicit profiles
 
@@ -16,6 +16,7 @@ replication and the default backup CLI remain separate gates.
 | Existing `verify`, `restore` | Schema 1, header 2, record 1 | Original legacy profile |
 | `export_memory_offline` | Stopped AOF explicitly configured with `with_memory_profile`, header 4/5, record 2 | Schema 2, header 4, record 2 |
 | `export_memory`, `export_memory_stream` | Explicit transport-2 memory snapshot source | Schema 2, header 4, record 2 |
+| `export_memory_secure` | Authenticated transport-2 memory snapshot source | Schema 2, header 4, record 2 |
 | `verify_memory`, `restore_memory` | Schema 2, header 4, record 2 | Verified original memory profile |
 
 No API infers a profile from the current values. Memory verification refuses
@@ -96,8 +97,25 @@ and emits its sequence with a zero epoch because no replica stream is active.
 It checks transport, record version, and receiver capacity before capture.
 Plaintext source connections require loopback; protected connections require a
 current internal backup role and recheck authorization during transfer. The
-listener accepts only a snapshot export request in this stage. The default CLI
-does not select the memory profile.
+listener accepts only a snapshot export request in this stage.
+
+The development CLI selects this profile with `--record-version 2` on each
+operation. With no flag, or with `--record-version 1`, it retains the schema-1
+path. It does not infer a profile from the source or archive:
+
+```sh
+./sider-backup export --record-version 2 --source 127.0.0.1:6381 \
+  --destination /backups/memory-001 --source-sha SHA_OF_SOURCE_BINARY
+./sider-backup verify --record-version 2 --source /backups/memory-001 \
+  --shards 1 --routing 1
+./sider-backup restore --record-version 2 --source /backups/memory-001 \
+  --destination /data/restored-memory --shards 1 --routing 1
+```
+
+The export command uses the configured internal security profile: mutual TLS
+in protected mode, or explicit loopback plaintext in `legacy-loopback` mode.
+The default limits still apply. Raise receiver limits explicitly when the
+source advertises larger record, mutation, snapshot, or dataset capacities.
 
 ## Verify and restore
 
@@ -139,8 +157,8 @@ Focused Windows tests cover mixed types/memory, schema/version preflight,
 elapsed TTL, binary data, corruption, incomplete source history, source locking,
 quota/layout rejection, and injected partial writes and publication failures.
 Memory-specific child process/power-loss gates, Linux filesystem checks, the
-extracted-package exercise, the default CLI integration, replica synchronization,
-and full release gates remain pending.
+extracted-package exercise, replica synchronization, and full release gates
+remain pending.
 
 ## Verification commands
 

@@ -11,7 +11,7 @@ fn main() -> ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
     if args.len() == 1 && args[0] == "--help" {
         println!(
-            "Usage: sider-backup export --source IP:PORT --destination NEW_DIRECTORY --source-sha SHA\n     sider-backup verify --source BACKUP --shards N --routing 1\n     sider-backup restore --source BACKUP --destination NEW_DIRECTORY --shards N --routing 1\nLimits: --max-record-bytes N --max-mutations N --max-snapshot-bytes N --max-dataset-bytes N --timeout-ms N"
+            "Usage: sider-backup export --source IP:PORT --destination NEW_DIRECTORY --source-sha SHA [--record-version 1|2]\n     sider-backup verify --source BACKUP --shards N --routing 1 [--record-version 1|2]\n     sider-backup restore --source BACKUP --destination NEW_DIRECTORY --shards N --routing 1 [--record-version 1|2]\nRecord version defaults to 1; select 2 explicitly for memory backups.\nLimits: --max-record-bytes N --max-mutations N --max-snapshot-bytes N --max-dataset-bytes N --timeout-ms N"
         );
         return ExitCode::SUCCESS;
     }
@@ -22,34 +22,20 @@ fn main() -> ExitCode {
     let result = backup::cli::parse(args).and_then(|action| {
         let clock = Arc::new(SystemClock);
         match action {
-            Action::Export(options) => {
-                let security = sider::security::StartupSecurity::from_env()
-                    .and_then(|profile| profile.tool(options.source))
-                    .map_err(|_| backup::Error::Invalid("security configuration unavailable"))?;
-                let runtime = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()?;
-                let result = if let Some(generation) = security {
-                    runtime.block_on(backup::export_secure(
-                        options,
-                        clock,
-                        &generation
-                            .internal
-                            .ok_or(backup::Error::Invalid("security configuration unavailable"))?
-                            .transport,
-                    ))
-                } else {
-                    eprintln!("legacy-loopback profile: plaintext and unauthenticated");
-                    runtime.block_on(backup::export(options, clock))
-                };
-                result.map(|manifest| manifest.json())
-            }
+            Action::Export(options) => export(options, false, clock),
+            Action::ExportMemory(options) => export(options, true, clock),
             Action::Verify {
                 source,
                 layout,
                 limits,
             } => backup::verify(&source, layout, limits, clock).map(report),
+            Action::VerifyMemory {
+                source,
+                layout,
+                limits,
+            } => backup::verify_memory(&source, layout, limits, clock).map(report),
             Action::Restore(options) => backup::restore(options, clock).map(report),
+            Action::RestoreMemory(options) => backup::restore_memory(options, clock).map(report),
         }
     });
     match result {
@@ -58,10 +44,42 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("backup recusado: {error}");
+            eprintln!("backup rejected: {error}");
             ExitCode::FAILURE
         }
     }
+}
+
+fn export(
+    options: backup::ExportOptions,
+    memory: bool,
+    clock: Arc<SystemClock>,
+) -> Result<serde_json::Value, backup::Error> {
+    let security = sider::security::StartupSecurity::from_env()
+        .and_then(|profile| profile.tool(options.source))
+        .map_err(|_| backup::Error::Invalid("security configuration unavailable"))?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    let manifest = if let Some(generation) = security {
+        let transport = &generation
+            .internal
+            .ok_or(backup::Error::Invalid("security configuration unavailable"))?
+            .transport;
+        if memory {
+            runtime.block_on(backup::export_memory_secure(options, clock, transport))?
+        } else {
+            runtime.block_on(backup::export_secure(options, clock, transport))?
+        }
+    } else {
+        eprintln!("legacy-loopback profile: plaintext and unauthenticated");
+        if memory {
+            runtime.block_on(backup::export_memory(options, clock))?
+        } else {
+            runtime.block_on(backup::export(options, clock))?
+        }
+    };
+    Ok(manifest.json())
 }
 
 fn report(verified: backup::VerifiedBackup) -> serde_json::Value {
