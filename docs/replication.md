@@ -68,8 +68,11 @@ For plaintext development, explicitly choose `SIDER_SECURITY_PROFILE=legacy-loop
 the client listener, internal listener, and upstream must be literal loopback
 addresses. Protected internal transport requires a validated security generation.
 The process test covers loopback full sync, mixed-owner batches, partial resume,
-source restart, promotion, and recovery. It does not establish protected-network
-deployment, every crash/network boundary, or release approval.
+source restart, promotion, and recovery. A separate in-process live-session test
+uses mutual TLS and internal replica policy for composed full sync and mixed-owner
+incremental replication, then revokes that role and checks that the session drops
+without applying the next batch. These tests do not establish protected-network
+process startup, every crash/network boundary, or release approval.
 
 | Variable | Default | Contract |
 | --- | --- | --- |

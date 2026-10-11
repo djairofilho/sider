@@ -317,7 +317,7 @@ proof is concentrated at failure boundaries and release integration:
 | [Coordinator](../src/storage/coordinator.rs) prepares owners and appends one durable batch under exclusive admission | Boundary fault injection through publication and ACK |
 | [AOF recovery](../src/persistence/writer.rs) stages mixed records before applying any owner | Exact candidate and migration compatibility evidence |
 | [Replica storage](../src/storage/replication.rs) installs snapshots and applies one mixed batch before cursor advancement | Network disconnect and crash cases at each append/apply/flush boundary |
-| [Transport-3 session](../src/replication/session.rs) performs FULL, CONTINUE, ACK, and loopback process recovery | Protected network test and complete failure matrix |
+| [Transport-3 session](../src/replication/session.rs) performs FULL, CONTINUE, ACK, loopback process recovery, and a protected in-process live session | Protected process deployment and complete failure matrix |
 
 The staged implementation plan is:
 
@@ -342,7 +342,9 @@ writer/recovery, nine process-kill boundaries, a schema-3 backup path, and a
 loopback process follower with source restart. The controlled TCP source proves
 that rejected transfers leave both old owners visible and that ACK survives an
 immediate process kill. Tests do not cover every network commit boundary, power
-loss, protected transport, or a native release candidate.
+loss, protected process deployment, or a native release candidate. An in-process
+live session additionally verifies mutual TLS and replica-role authorization for
+composed full sync and mixed-owner batches, followed by role revocation.
 
 ## Required deterministic tests
 

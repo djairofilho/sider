@@ -1239,9 +1239,19 @@ impl Consumer {
     async fn new(role: sider::persistence::Role) -> Self {
         Self::with_faults(role, Arc::new(sider::persistence::NoFaults)).await
     }
+    async fn new_composed(role: sider::persistence::Role) -> Self {
+        Self::with_profile(role, Arc::new(sider::persistence::NoFaults), true).await
+    }
     async fn with_faults(
         role: sider::persistence::Role,
         faults: Arc<dyn sider::persistence::FaultInjector>,
+    ) -> Self {
+        Self::with_profile(role, faults, false).await
+    }
+    async fn with_profile(
+        role: sider::persistence::Role,
+        faults: Arc<dyn sider::persistence::FaultInjector>,
+        composed: bool,
     ) -> Self {
         use sider::{
             persistence::{self, AofConfig, ReplicationMetadata},
@@ -1255,18 +1265,21 @@ impl Consumer {
         ));
         let mut config = AofConfig::new(directory.clone());
         config.compact_after_bytes = 0;
-        config.layout.shard_count = 1;
+        config.layout.shard_count = if composed { 2 } else { 1 };
         let layout = config.layout;
         let aof_limits = config.limits;
         let clock = Arc::new(sider::storage::SystemClock);
         let store_config = StoreConfig {
             max_dataset_bytes: 262144,
         };
-        let recovered =
-            persistence::recover_with_faults(config, store_config, clock.clone(), faults).unwrap();
+        let recovered = if composed {
+            persistence::recover_composed(config, store_config, clock.clone()).unwrap()
+        } else {
+            persistence::recover_with_faults(config, store_config, clock.clone(), faults).unwrap()
+        };
         let (_, aof, writer) = recovered.start();
         let cursor = Cursor {
-            epoch: [0; 16],
+            epoch: if composed { [3; 16] } else { [0; 16] },
             sequence: 0,
         };
         aof.install_snapshot(
@@ -1281,14 +1294,27 @@ impl Consumer {
         .unwrap();
         let runtime = Runtime::new(role, cursor);
         let (stop, shutdown) = tokio::sync::watch::channel(false);
-        let (database, owners) = worker::channel_with_stores(
-            8,
-            DEADLINE,
-            shutdown,
-            vec![Store::with_config(store_config, clock.clone()).unwrap()],
-        )
-        .unwrap();
+        let stores = (0..layout.shard_count)
+            .map(|owner| {
+                Store::with_config(
+                    StoreConfig {
+                        max_dataset_bytes: layout
+                            .quota(store_config.max_dataset_bytes, owner as usize)
+                            .unwrap(),
+                    },
+                    clock.clone(),
+                )
+                .unwrap()
+            })
+            .collect();
+        let (database, owners) =
+            worker::channel_with_stores(8, DEADLINE, shutdown, stores).unwrap();
         let database = database.with_replication(runtime.clone());
+        let database = if composed {
+            database.with_composed_aof(aof.clone()).unwrap()
+        } else {
+            database
+        };
         let mut workers = tokio::task::JoinSet::new();
         for owner in owners {
             workers.spawn(
@@ -1925,6 +1951,134 @@ async fn security_live_consumer_replica_installs_streams_and_stops_on_role_revoc
         replica.database.execute(Command::Get { key }).await,
         Err(sider::storage::worker::DbError::ShuttingDown)
     );
+    let finished = tokio::spawn(async { Ok(()) });
+    replica.finish(finished).await;
+    source.finish(server).await;
+}
+
+#[tokio::test]
+async fn security_composed_replica_streams_mixed_batch_and_fences_revoked_role() {
+    use sider::command::{Command, Reply};
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let remote = certs.leaf(PEER, 2, None);
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let primary_runtime = sider::security::GenerationRuntime::new(runtime_generation(
+        1,
+        &certs,
+        &primary,
+        &crl,
+        runtime_policy(&["replica"]),
+        false,
+    ))
+    .unwrap();
+    let outgoing =
+        json!({"version":1,"instance_id":"holder-b","principals":[],"upstream_principal":SERVER});
+    let replica_runtime = sider::security::GenerationRuntime::new(runtime_generation(
+        1, &certs, &remote, &crl, outgoing, true,
+    ))
+    .unwrap();
+    let source = Consumer::new_composed(sider::persistence::Role::Primary).await;
+    let replica = Consumer::new_composed(sider::persistence::Role::Replica).await;
+    let keys = [Bytes::from_static(b"a"), Bytes::from_static(b"b")];
+    assert_ne!(
+        source.context.layout.shard_for(&keys[0]).unwrap(),
+        source.context.layout.shard_for(&keys[1]).unwrap()
+    );
+    let set_pair = |value| {
+        keys.iter()
+            .cloned()
+            .map(|key| Command::Set {
+                key,
+                value: Bytes::from_static(value),
+            })
+            .collect()
+    };
+    assert_eq!(
+        source
+            .database
+            .execute_batch(set_pair(b"snapshot"), Vec::new())
+            .await
+            .unwrap(),
+        Reply::Array(vec![Reply::Ok, Reply::Ok])
+    );
+    let (address, server) = source.listen(&primary_runtime).await;
+    let config = sider::replication::config::Config {
+        upstream: Some(address),
+        frame_timeout: Duration::from_secs(2),
+        sync_timeout: DEADLINE,
+        reconnect_min: Duration::from_millis(20),
+        reconnect_max: Duration::from_millis(50),
+        ..Default::default()
+    };
+    let follower = tokio::spawn(sider::replication::session::follow_live(
+        replica.database.clone(),
+        replica.context.clone(),
+        config,
+        replica.stop.subscribe(),
+        replica_runtime.internal().await.unwrap(),
+    ));
+    for expected in [b"snapshot".as_slice(), b"incremental".as_slice()] {
+        if expected == b"incremental" {
+            source
+                .database
+                .execute_batch(set_pair(b"incremental"), Vec::new())
+                .await
+                .unwrap();
+        }
+        timeout(DEADLINE, async {
+            loop {
+                let mut matched = true;
+                for key in &keys {
+                    matched &= replica
+                        .database
+                        .execute(Command::Get { key: key.clone() })
+                        .await
+                        .unwrap()
+                        == Reply::Bulk(Some(Bytes::copy_from_slice(expected)));
+                }
+                if matched {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("both composed owners replicate over the protected session");
+    }
+    let applied = replica.context.runtime.status().applied;
+    assert!(replica.context.runtime.status().connected);
+    primary_runtime
+        .activate(runtime_generation(
+            2,
+            &certs,
+            &primary,
+            &crl,
+            runtime_policy(&["monitor"]),
+            false,
+        ))
+        .await
+        .unwrap();
+    source
+        .database
+        .execute_batch(set_pair(b"denied"), Vec::new())
+        .await
+        .unwrap();
+    timeout(DEADLINE, async {
+        while replica.context.runtime.status().connected {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("revocation closes the composed replication session");
+    assert_eq!(replica.context.runtime.status().applied, applied);
+    assert!(!replica.context.runtime.status().connected);
+    replica.stop.send_replace(true);
+    timeout(DEADLINE, follower).await.unwrap().unwrap().unwrap();
+    assert_eq!(replica.context.runtime.status().applied, applied);
     let finished = tokio::spawn(async { Ok(()) });
     replica.finish(finished).await;
     source.finish(server).await;
