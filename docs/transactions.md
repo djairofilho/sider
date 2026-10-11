@@ -1,12 +1,16 @@
 # Transactions
 
 `MULTI`, `EXEC`, `DISCARD`, `WATCH`, and `UNWATCH` belong to the TCP connection.
-A transaction may access one shard. Keys and arguments retain arbitrary bytes;
-hash tags can place related keys in the same shard.
+A transaction may access one shard by default. With `SIDER_AOF_COMPOSED=1`,
+record version 1, and a local AOF directory, `EXEC` may coordinate several
+shards. Keys and arguments retain arbitrary bytes; hash tags can place related
+keys in the same shard.
 The library-only `DbHandle::with_unpersisted_multi_owner()` opt-in can execute a
 mixed-owner `execute_batch` with in-memory workers. It refuses AOF and replication
 and is not available through RESP `MULTI`/`EXEC`. Its staged contract and remaining
 proof work are in [cross-shard transactions](cross-shard-transactions.md).
+The composed server profile has no replication session or internal export
+listener yet and rejects a replication configuration at startup.
 
 ## Queueing and execution
 
@@ -15,8 +19,10 @@ and has no effect until `EXEC`. `EXEC` returns an array of replies in command or
 an empty queue returns an empty array. `DISCARD` removes the queue and observations.
 EOF, cancellation, and shutdown also discard a queue not yet sent to the worker.
 
-An arity or parsing error, an attempt to cross shards, or a queue limit makes the
-transaction invalid. `EXEC` then returns `EXECABORT` and no queued command runs.
+An arity or parsing error, an unsupported cross-shard command, or a queue limit
+makes the transaction invalid. Without the composed profile, any attempt to cross
+shards also invalidates the queue. `EXEC` then returns `EXECABORT` and no queued
+command runs.
 Nested `MULTI` and `WATCH` inside `MULTI` return an error without invalidating the
 previous queue. `EXEC` and `DISCARD` outside `MULTI` return an error.
 
@@ -30,11 +36,18 @@ and quota, and gathers final post-images in one `ResolvedBatch`. Only touched ke
 enter temporary state. No other request from that shard interleaves with the batch.
 The global snapshot barrier retains request admission through application and reply,
 including when the client cancels its wait after acceptance.
+In the composed profile, a supervised coordinator holds global exclusion,
+prepares every owner, appends one sorted AOF batch, and applies all owners before
+releasing observations. Cross-shard `MGET`, `EXISTS`, `DEL`, and `MSET` are
+supported inside `EXEC`; standalone multi-key commands still require one shard.
 
 ## WATCH and resource release
 
 `WATCH key [key ...]` observes keys until `EXEC`, `DISCARD`, `UNWATCH`, or the end
 of the connection. A write by the same connection also invalidates observation.
+One `WATCH` command still requires its keys to share a shard. In the composed
+profile, a watched key may be on a different shard from commands queued later;
+the coordinator checks its token before preparing any owner.
 Writing the same value, creating and removing a key, or reaching its expiration
 deadline are conflicts. Removing an already absent key is not a conflict. `EXEC`
 with a conflict returns a null array (`*-1\r\n`) and neither writes nor applies the
@@ -66,6 +79,9 @@ append is accepted, a short hub section applies database changes and performs
 ephemeral effects in command order. It does not await sockets. Pub/Sub is not in
 the AOF. An append/fsync failure or record-size rejection prevents both batch
 application and pending publications and subscriptions.
+These Pub/Sub semantics remain available to single-shard transactions. A
+cross-shard composed queue containing Pub/Sub or `INFO` is rejected before
+participant preparation and returns `EXECABORT`.
 
 A subscription inside `EXEC` changes the format of later `PING`s. Database commands
 already queued keep running, and the connection ends in the mode corresponding to

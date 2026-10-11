@@ -21,12 +21,15 @@ implement the Redis Cluster protocol or its slots. There is no online resharding
 
 ## Multi-key commands and progress
 
-`DEL`, `EXISTS`, `MGET`, and `MSET` require all keys to be in one shard. The router
+Outside `EXEC`, `DEL`, `EXISTS`, `MGET`, and `MSET` require all keys to be in one shard. The router
 checks the whole command before sending and returns
 `CROSSSLOT Keys in request don't hash to the same slot` when it finds a crossing.
 No worker receives part of a rejected operation. Duplicates, key ordering, and the
 last MSET value retain their original semantics. The connection remains usable
 after rejection.
+The explicitly selected local composed AOF profile permits these commands to
+cross owners inside `EXEC`, where one coordinator owns the complete transaction.
+The default profile retains the single-shard rule.
 
 Commands with no key use worker zero. Each connection still has one in-flight
 request. Queues for separate shards allow independent progress; clients contending
