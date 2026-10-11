@@ -339,12 +339,14 @@ The staged implementation plan is:
 Issue #92 remains open until crash/network evidence satisfies all four acceptance
 criteria. Focused tests exercise coordinated mixed-owner RESP EXEC, actual
 writer/recovery, nine process-kill boundaries, a schema-3 backup path, and a
-loopback process follower with source restart. The controlled TCP source proves
-that rejected transfers leave both old owners visible and that ACK survives an
-immediate process kill. Tests do not cover every network commit boundary, power
-loss, protected process deployment, or a native release candidate. An in-process
-live session additionally verifies mutual TLS and replica-role authorization for
-composed full sync and mixed-owner batches, followed by role revocation.
+loopback process follower with source restart. The controlled TCP source checks
+every truncated byte prefix of an incremental mixed-owner frame and a corrupt
+frame checksum: neither yields an ACK or changes either old owner. It also proves
+that ACK survives an immediate process kill. Tests do not cover every network
+commit boundary, power loss, protected process deployment, or a native release
+candidate. An in-process live session additionally verifies mutual TLS and
+replica-role authorization for composed full sync and mixed-owner batches,
+followed by role revocation.
 
 ## Required deterministic tests
 

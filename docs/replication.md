@@ -219,7 +219,9 @@ cargo test --locked --test replication_network composed_replica_refuses_partial_
 types/TTL/transactions and export; invalid transfer and ACK followed by crash;
 slow replica and history loss; primary restart; and lagging promotion with
 upstream cutoff. Development tests additionally exercise composed process
-replication and a controlled transport-3 failure source.
+replication and a controlled transport-3 failure source. The latter rejects every
+truncated byte prefix and a corrupt checksum of an incremental mixed-owner frame
+without advancing the follower cursor or changing either owner.
 `replication_persistence` includes six controlled kills during installation, at the
 three publication points for each role. Storage tests verify the barrier,
 cancellation, quota, and absence of mixed state across shards.
