@@ -1,7 +1,7 @@
 //! Isolated codec for the proposed 64-byte composed AOF header (version 7).
 //!
-//! Parsing a header does not select a supported profile. Production recovery,
-//! append, backup, replication, and migration still reject version 7. This module
+//! Parsing a header does not select a supported profile. The explicit composed
+//! profile uses this grammar; default readers still reject version 7. This module
 //! has no directory-opening, record-scanning, or tail-repair API.
 
 use std::io::{self, Read};

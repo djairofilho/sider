@@ -1,5 +1,5 @@
 //! Explicit development profile selection; never inferred from current values.
-use super::{DurableLayout, ReplicationMetadata, Role, composed_format, format, memory_format};
+use super::{DurableLayout, ReplicationMetadata, composed_format, format, memory_format};
 use crate::storage::{Mutation, ResolvedBatch, Value};
 use std::io::{Read, Write};
 
@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 pub(super) enum Profile {
     Legacy,
     Memory,
-    /// Internal record-1 coordination and replica proof; public configuration cannot select it.
+    /// Explicit record-1 mixed-owner profile; incompatible readers still reject header 7.
     ComposedLegacyMixed,
 }
 
@@ -24,9 +24,6 @@ impl Profile {
         replication: Option<ReplicationMetadata>,
     ) -> Result<(), format::FormatError> {
         if self == Self::ComposedLegacyMixed {
-            if replication.is_some_and(|metadata| metadata.role != Role::Replica) {
-                return Err(format::FormatError::Corrupt("unsupported composed role"));
-            }
             output.write_all(&composed_format::encode_header(composed_format::Header {
                 sequence,
                 layout,
@@ -52,9 +49,6 @@ impl Profile {
             let header = composed_format::read_header(input)?;
             if header.record_version != composed_format::RecordVersion::Legacy
                 || !header.mixed_owner_batch
-                || header
-                    .replication
-                    .is_some_and(|metadata| metadata.role != Role::Replica)
             {
                 return Err(format::FormatError::Corrupt("unsupported composed profile"));
             }
