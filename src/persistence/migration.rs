@@ -12,6 +12,11 @@ use super::writer::{DirectoryLock, recover_read_only, sync_directory};
 use super::{AofConfig, AofError, DurableLayout, RecoveryMetadata};
 use crate::storage::{Clock, Mutation, Store, StoreConfig};
 
+mod memory;
+pub use memory::{
+    MemoryMigrationReport, migrate_memory_offline, migrate_memory_offline_with_faults,
+};
+
 #[derive(Clone, Debug)]
 pub struct MigrationOptions {
     pub source: AofConfig,

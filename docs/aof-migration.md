@@ -1,5 +1,10 @@
 # Offline AOF migration
 
+The procedure and CLI below remain record 1. Development has a separate,
+explicit library API for [offline migration to the memory profile](agent-memory-migration.md).
+It writes header 4/record 2 into a new directory and does not activate a public
+server profile, CLI upgrade option or live replication transport.
+
 Partitioning is part of the directory's durable configuration. Recovery checks
 the shard count and routing version before repairing a tail or accepting data.
 Changing `SIDER_SHARDS` does not redistribute an existing AOF.
