@@ -1,0 +1,59 @@
+TRANSIENT_SERVICE=sider-lua-delegated-1180.service
+Running as unit: sider-lua-delegated-1180.service; invocation ID: 2ed65d59c21145dbb6ff3fb9af7a5e4a
+DELEGATION PLATFORM
+Sat Oct 10 08:10:43 UTC 2026
+uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)
+Linux DESKTOP-UVOITNB 6.6.87.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun  5 18:30:46 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux
+systemd 255 (255.4-1ubuntu8.17)
+DELEGATED_ROOT=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service
+cpuset cpu io memory pids
+ENABLED_CONTROLLERS
+cpu memory pids
+SPIKE platform=linux architecture=x86_64 mlua=0.12.2 Lua=5.4 vm_limit=8388608
+PASS case=boundary-denied source_gate=closed killed_reaped=true error=No such file or directory (os error 2)
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=binary result=OK binary instructions=0 max_depth=1 tails=0 vm_bytes=13877 elapsed_us=75 version=Lua 5.4 status=exit status: 0 elapsed_us=7944 cpu_us=Some(837) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=sandbox result=OK sandbox instructions=0 max_depth=2 tails=0 vm_bytes=16278 elapsed_us=178 version=Lua 5.4 status=exit status: 0 elapsed_us=9738 cpu_us=Some(986) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=fresh-env result=OK fresh-env instructions=0 max_depth=2 tails=0 vm_bytes=14460 elapsed_us=91 version=Lua 5.4 status=exit status: 0 elapsed_us=8783 cpu_us=Some(900) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=fresh-env result=OK fresh-env instructions=0 max_depth=2 tails=0 vm_bytes=14460 elapsed_us=95 version=Lua 5.4 status=exit status: 0 elapsed_us=10645 cpu_us=Some(902) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=syntax result=ERROR syntax status=exit status: 0 elapsed_us=9072 cpu_us=Some(860) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=bytecode result=ERROR syntax status=exit status: 0 elapsed_us=10705 cpu_us=Some(849) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=loop result=ERROR instructions status=exit status: 0 elapsed_us=29633 cpu_us=Some(25015) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=depth result=ERROR depth status=exit status: 0 elapsed_us=16634 cpu_us=Some(998) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=tail result=OK tail instructions=4000 max_depth=1 tails=1001 vm_bytes=14403 elapsed_us=802 version=Lua 5.4 status=exit status: 0 elapsed_us=8453 cpu_us=Some(1552) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=allocation result=ERROR memory status=exit status: 0 elapsed_us=8531 cpu_us=Some(3983) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=compiler-stress result=ERROR runtime fixture_detail=RuntimeError("C stack overflow\nstack traceback:\n\t[C]: in ?\n\t[C]: in ?") status=exit status: 0 elapsed_us=10512 cpu_us=Some(1046) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=hook-cancel result=ERROR cancelled status=exit status: 0 elapsed_us=19804 cpu_us=Some(11129) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=os-cancel result=CANCELLED status=signal: 9 (SIGKILL) elapsed_us=27785 cpu_us=Some(45) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=os-cpu result=CPU_KILLED status=signal: 9 (SIGKILL) elapsed_us=119141 cpu_us=Some(113508) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=os-kernel-cpu result=CPU_KILLED status=signal: 9 (SIGKILL) elapsed_us=126661 cpu_us=Some(106813) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=os-memory result=MEMORY_KILLED status=signal: 9 (SIGKILL) elapsed_us=143265 cpu_us=Some(113907) windows_peak_within_limit=None memory_events=low 0;high 0;max 35;oom 1;oom_kill 1;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=os-pids result=OK os-pids denied status=exit status: 0 elapsed_us=27741 cpu_us=Some(509) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux root=/sys/fs/cgroup/system.slice/sider-lua-delegated-1180.service memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=native-call result=WALL_KILLED status=signal: 9 (SIGKILL) elapsed_us=503978 cpu_us=Some(456) windows_peak_within_limit=None memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+SUMMARY failures=0 full_contract_proven=false
+REMAINING_HELPER_GROUPS
+DELEGATED_MATRIX_COMPLETE
+Finished with result: success
+Main processes terminated with: code=exited/status=0
+Service runtime: 1.193s
+CPU time consumed: 550ms
+Memory peak: 292.0K
+Memory swap peak: 0B
+PASS transient service subtree removed

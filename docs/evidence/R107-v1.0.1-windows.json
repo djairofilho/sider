@@ -1,0 +1,2361 @@
+{
+    "schema_version":  1,
+    "issue":  107,
+    "runbook_version":  1,
+    "recorded_date":  "2026-10-10",
+    "source_sha":  "b738a0b4f97074fe272bc21f1eacf5db93cd020e",
+    "platform":  "Windows 11 Pro 10.0.26300 x64 MSVC, NTFS",
+    "status":  "windows package drill passed; Ubuntu and optional replica promotion pending",
+    "final_attempt":  2,
+    "limitations":  [
+                        "These observations are not a recovery-time guarantee or release gate receipt.",
+                        "Only attempt 2 validates the earlier monotonic elapsed-time TTL anchor. Neither attempt executes the later absolute-deadline bracket oracle; see separate final evidence.",
+                        "The debug test harness performs full data comparison; timings include that work.",
+                        "No native Ubuntu package execution, replica promotion, power loss, or storage-device-failure result is claimed.",
+                        "Large AOF and backup files are retained only at the recorded temporary paths and are not versioned; move them to durable storage before temporary cleanup."
+                    ],
+    "native_checks":  [
+                          {
+                              "command":  "cargo clippy --locked --test recovery_drill -- -D warnings",
+                              "exit_code":  0
+                          },
+                          {
+                              "command":  "cargo test --locked --test recovery_drill -- --nocapture",
+                              "exit_code":  0,
+                              "passed":  10,
+                              "ignored_opt_in_test":  1
+                          }
+                      ],
+    "package_checks":  [
+                           "manifest and archive SHA-256 against published checksum list",
+                           "archive size/hash and source SHA/version/target against schema 2 manifest",
+                           "all four extracted executable hashes against exact archive member bytes",
+                           "literal server and backup CLI version output"
+                       ],
+    "raw_archive":  {
+                        "file":  "R107-v1.0.1-windows-raw.zip",
+                        "bytes":  310555,
+                        "sha256":  "c3f22d2b608e105e3de7ba1276370218e7055a5a4d02deb74ba286c52cea2077",
+                        "contains":  "Both attempts raw stdout/stderr, Cargo logs, commands, exits, context, phase journals, copied runner, manifest/checksums, and runner support sources; excludes large AOF/backup files and release executables"
+                    },
+    "attempts":  [
+                     {
+                         "attempt":  1,
+                         "retained_directory":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1",
+                         "runner":  {
+                                        "command":  "cargo test --locked --test recovery_drill -- --ignored --exact extracted_package_operator_recovery_drill --nocapture",
+                                        "runner_checkout_sha":  "0f0f232f56fd42b88a56e61954f2bc892458f04d",
+                                        "runner_test_sha256":  "7a031032d9b5ac14d9ca39cac4bddd211f1d49fa5ce2797a90b754ee19fa405b",
+                                        "started_unix_ms":  1791611297336
+                                    },
+                         "validates_anchored_absolute_ttl":  false,
+                         "ttl_oracle":  "reduced PTTL after restore only; superseded by attempt 2",
+                         "result":  {
+                                        "detail":  {
+                                                       "linux":  "pending",
+                                                       "replica_promotion":  "pending optional separate drill",
+                                                       "results":  [
+                                                                       {
+                                                                           "bulk_payload_bytes":  66560000,
+                                                                           "cut":  38,
+                                                                           "digest_sha256":  "4ec432af9a7a99af453ae41ee3e5a163cec0a2c3ad1facc1c10caa41f21c0e8d",
+                                                                           "logical_bytes":  66578821,
+                                                                           "long_ttl_before_ms":  3599994,
+                                                                           "long_ttl_restored_ms":  3566067,
+                                                                           "shard_usage":  [
+                                                                                               66578821
+                                                                                           ],
+                                                                           "shards":  1,
+                                                                           "transactions_after":  2716,
+                                                                           "transactions_before":  6,
+                                                                           "transactions_final":  2722
+                                                                       },
+                                                                       {
+                                                                           "bulk_payload_bytes":  66560000,
+                                                                           "cut":  46,
+                                                                           "digest_sha256":  "1407019fa4fb67c427f7baf527d68090b044d53afd9b6b4f6b781c30a63c45e0",
+                                                                           "logical_bytes":  66578821,
+                                                                           "long_ttl_before_ms":  3599995,
+                                                                           "long_ttl_restored_ms":  3567173,
+                                                                           "shard_usage":  [
+                                                                                               16644323,
+                                                                                               16644326,
+                                                                                               16645849,
+                                                                                               16644323
+                                                                                           ],
+                                                                           "shards":  4,
+                                                                           "transactions_after":  2785,
+                                                                           "transactions_before":  5,
+                                                                           "transactions_final":  2787
+                                                                       }
+                                                                   ],
+                                                       "source_sha":  "b738a0b4f97074fe272bc21f1eacf5db93cd020e"
+                                                   },
+                                        "issue":  107,
+                                        "platform":  "windows",
+                                        "schema":  1,
+                                        "status":  "success"
+                                    },
+                         "package":  {
+                                         "archive":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc.zip",
+                                         "archive_sha256":  "40c9f8363d2d9524815f240466b44efdaa4dcb857a536218b541eb403fe547e1",
+                                         "binaries":  [
+                                                          {
+                                                              "bytes":  2900992,
+                                                              "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc\\sider.exe",
+                                                              "sha256":  "2ffe4aa76fd42e450bce2dfac49139c5ab9caff0b1608219298a4640b3d4068a"
+                                                          },
+                                                          {
+                                                              "bytes":  966656,
+                                                              "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc\\sider-backup.exe",
+                                                              "sha256":  "85406acb9fe9a409dc63c3e209d372001e9a5b52d51766764fc5cc1aeb13654f"
+                                                          },
+                                                          {
+                                                              "bytes":  687616,
+                                                              "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc\\sider-replica.exe",
+                                                              "sha256":  "1e8d9813f03ab99513766bad92189ceb2bea353c1434196ef02390ce493d8cbe"
+                                                          },
+                                                          {
+                                                              "bytes":  437760,
+                                                              "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc\\sider-aof-migrate.exe",
+                                                              "sha256":  "c3dde28d0543014ba9a88cc028833c37cdaad160867e7fcb2b757a894e3a3e7f"
+                                                          }
+                                                      ],
+                                         "checksums_sha256":  "09209e0a2666ec45dfed2b5411f398363304675a02a1aa1aeea6e0709b4d5794",
+                                         "manifest_sha256":  "d577be2462fd31b234879e2a9d9928d1d69d3d8dde801df85c43554be2b74543",
+                                         "source_sha":  "b738a0b4f97074fe272bc21f1eacf5db93cd020e",
+                                         "target":  "x86_64-pc-windows-msvc"
+                                     },
+                         "host":  {
+                                      "workload_isolation":  "no competing benchmark, build, or load test",
+                                      "filesystem":  "NTFS",
+                                      "storage":  "C: SSDG3NVME1T-W NVMe SSD, temporary evidence and AOF on local volume",
+                                      "cpu":  "Intel Core i5-9300H, 4 cores / 8 logical processors",
+                                      "os":  "Microsoft Windows 11 Pro 10.0.26300 x64",
+                                      "package_release":  "https://github.com/djairofilho/sider/releases/tag/v1.0.1",
+                                      "shutdown":  "forced termination of exact owned child PID",
+                                      "ram_bytes":  34188873728
+                                  },
+                         "phase_journal_monotonic":  true,
+                         "timings_ms":  [
+                                            {
+                                                "phase":  "verify",
+                                                "shards":  1,
+                                                "elapsed_ms":  2449.2347
+                                            },
+                                            {
+                                                "phase":  "restore",
+                                                "shards":  1,
+                                                "elapsed_ms":  6011.4286
+                                            },
+                                            {
+                                                "phase":  "restored_ready",
+                                                "shards":  1,
+                                                "elapsed_ms":  2113.0615000000003
+                                            },
+                                            {
+                                                "phase":  "restore_to_data_validated",
+                                                "shards":  1,
+                                                "elapsed_ms":  17589.372900000002
+                                            },
+                                            {
+                                                "phase":  "aof_restart_ready",
+                                                "shards":  1,
+                                                "elapsed_ms":  925.045
+                                            },
+                                            {
+                                                "phase":  "aof_restart_to_data_validated",
+                                                "shards":  1,
+                                                "elapsed_ms":  9645.001499999998
+                                            },
+                                            {
+                                                "phase":  "tail_recovery_ready",
+                                                "shards":  1,
+                                                "elapsed_ms":  2613.499
+                                            },
+                                            {
+                                                "phase":  "tail_recovery_to_data_validated",
+                                                "shards":  1,
+                                                "elapsed_ms":  18461.3057
+                                            },
+                                            {
+                                                "phase":  "negative_cases",
+                                                "shards":  1,
+                                                "elapsed_ms":  132123.6679
+                                            },
+                                            {
+                                                "phase":  "verify",
+                                                "shards":  4,
+                                                "elapsed_ms":  2315.8701
+                                            },
+                                            {
+                                                "phase":  "restore",
+                                                "shards":  4,
+                                                "elapsed_ms":  6387.0273
+                                            },
+                                            {
+                                                "phase":  "restored_ready",
+                                                "shards":  4,
+                                                "elapsed_ms":  1973.3258999999998
+                                            },
+                                            {
+                                                "phase":  "restore_to_data_validated",
+                                                "shards":  4,
+                                                "elapsed_ms":  16933.3731
+                                            },
+                                            {
+                                                "phase":  "aof_restart_ready",
+                                                "shards":  4,
+                                                "elapsed_ms":  976.0378
+                                            },
+                                            {
+                                                "phase":  "aof_restart_to_data_validated",
+                                                "shards":  4,
+                                                "elapsed_ms":  9553.261199999999
+                                            },
+                                            {
+                                                "phase":  "tail_recovery_ready",
+                                                "shards":  4,
+                                                "elapsed_ms":  1903.6932
+                                            },
+                                            {
+                                                "phase":  "tail_recovery_to_data_validated",
+                                                "shards":  4,
+                                                "elapsed_ms":  17062.5934
+                                            },
+                                            {
+                                                "phase":  "negative_cases",
+                                                "shards":  4,
+                                                "elapsed_ms":  134179.0503
+                                            }
+                                        ],
+                         "cargo_exit_code":  0,
+                         "test_elapsed_seconds":  466.52,
+                         "validates_absolute_deadline_brackets":  false
+                     },
+                     {
+                         "attempt":  2,
+                         "retained_directory":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2",
+                         "runner":  {
+                                        "command":  "cargo test --locked --test recovery_drill -- --ignored --exact extracted_package_operator_recovery_drill --nocapture",
+                                        "debug_assertions":  true,
+                                        "runner_checkout_sha":  "0f0f232f56fd42b88a56e61954f2bc892458f04d",
+                                        "runner_test_sha256":  "cb561e15b6545ef4aafc89b5e68c46f5d9327cb22b8c2a3698e981df6a98231c",
+                                        "started_unix_ms":  1791611849888
+                                    },
+                         "validates_anchored_absolute_ttl":  true,
+                         "ttl_oracle":  "PTTL plus full monotonic elapsed time equals anchor within 250 ms on restore, restart, and tail repair",
+                         "result":  {
+                                        "detail":  {
+                                                       "linux":  "pending",
+                                                       "replica_promotion":  "pending optional separate drill",
+                                                       "results":  [
+                                                                       {
+                                                                           "bulk_payload_bytes":  66560000,
+                                                                           "cut":  38,
+                                                                           "digest_sha256":  "4ec432af9a7a99af453ae41ee3e5a163cec0a2c3ad1facc1c10caa41f21c0e8d",
+                                                                           "logical_bytes":  66578821,
+                                                                           "long_ttl_before_ms":  3599994,
+                                                                           "long_ttl_restored_ms":  3566464,
+                                                                           "shard_usage":  [
+                                                                                               66578821
+                                                                                           ],
+                                                                           "shards":  1,
+                                                                           "transactions_after":  2919,
+                                                                           "transactions_before":  5,
+                                                                           "transactions_final":  2921
+                                                                       },
+                                                                       {
+                                                                           "bulk_payload_bytes":  66560000,
+                                                                           "cut":  71,
+                                                                           "digest_sha256":  "1407019fa4fb67c427f7baf527d68090b044d53afd9b6b4f6b781c30a63c45e0",
+                                                                           "logical_bytes":  66578821,
+                                                                           "long_ttl_before_ms":  3599996,
+                                                                           "long_ttl_restored_ms":  3565469,
+                                                                           "shard_usage":  [
+                                                                                               16644323,
+                                                                                               16644326,
+                                                                                               16645849,
+                                                                                               16644323
+                                                                                           ],
+                                                                           "shards":  4,
+                                                                           "transactions_after":  2748,
+                                                                           "transactions_before":  5,
+                                                                           "transactions_final":  2750
+                                                                       }
+                                                                   ],
+                                                       "source_sha":  "b738a0b4f97074fe272bc21f1eacf5db93cd020e"
+                                                   },
+                                        "issue":  107,
+                                        "platform":  "windows",
+                                        "schema":  1,
+                                        "status":  "success"
+                                    },
+                         "package":  {
+                                         "archive":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc.zip",
+                                         "archive_sha256":  "40c9f8363d2d9524815f240466b44efdaa4dcb857a536218b541eb403fe547e1",
+                                         "binaries":  [
+                                                          {
+                                                              "bytes":  2900992,
+                                                              "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc\\sider.exe",
+                                                              "sha256":  "2ffe4aa76fd42e450bce2dfac49139c5ab9caff0b1608219298a4640b3d4068a"
+                                                          },
+                                                          {
+                                                              "bytes":  966656,
+                                                              "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc\\sider-backup.exe",
+                                                              "sha256":  "85406acb9fe9a409dc63c3e209d372001e9a5b52d51766764fc5cc1aeb13654f"
+                                                          },
+                                                          {
+                                                              "bytes":  687616,
+                                                              "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc\\sider-replica.exe",
+                                                              "sha256":  "1e8d9813f03ab99513766bad92189ceb2bea353c1434196ef02390ce493d8cbe"
+                                                          },
+                                                          {
+                                                              "bytes":  437760,
+                                                              "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc\\sider-aof-migrate.exe",
+                                                              "sha256":  "c3dde28d0543014ba9a88cc028833c37cdaad160867e7fcb2b757a894e3a3e7f"
+                                                          }
+                                                      ],
+                                         "checksums_sha256":  "09209e0a2666ec45dfed2b5411f398363304675a02a1aa1aeea6e0709b4d5794",
+                                         "manifest_sha256":  "d577be2462fd31b234879e2a9d9928d1d69d3d8dde801df85c43554be2b74543",
+                                         "source_sha":  "b738a0b4f97074fe272bc21f1eacf5db93cd020e",
+                                         "target":  "x86_64-pc-windows-msvc"
+                                     },
+                         "host":  {
+                                      "workload_isolation":  "no competing benchmark, build, or load test",
+                                      "filesystem":  "NTFS",
+                                      "storage":  "C: SSDG3NVME1T-W NVMe SSD, temporary evidence and AOF on local volume",
+                                      "cpu":  "Intel Core i5-9300H, 4 cores / 8 logical processors",
+                                      "os":  "Microsoft Windows 11 Pro 10.0.26300 x64",
+                                      "package_release":  "https://github.com/djairofilho/sider/releases/tag/v1.0.1",
+                                      "shutdown":  "forced termination of exact owned child PID",
+                                      "ram_bytes":  34188873728
+                                  },
+                         "phase_journal_monotonic":  true,
+                         "timings_ms":  [
+                                            {
+                                                "phase":  "verify",
+                                                "shards":  1,
+                                                "elapsed_ms":  2276.4318000000003
+                                            },
+                                            {
+                                                "phase":  "restore",
+                                                "shards":  1,
+                                                "elapsed_ms":  5994.271699999999
+                                            },
+                                            {
+                                                "phase":  "restored_ready",
+                                                "shards":  1,
+                                                "elapsed_ms":  1160.2413000000001
+                                            },
+                                            {
+                                                "phase":  "restore_to_data_validated",
+                                                "shards":  1,
+                                                "elapsed_ms":  15958.9769
+                                            },
+                                            {
+                                                "phase":  "verify_to_data_validated",
+                                                "shards":  1,
+                                                "elapsed_ms":  18240.0695
+                                            },
+                                            {
+                                                "phase":  "aof_restart_ready",
+                                                "shards":  1,
+                                                "elapsed_ms":  1830.1493
+                                            },
+                                            {
+                                                "phase":  "aof_restart_to_data_validated",
+                                                "shards":  1,
+                                                "elapsed_ms":  10236.4514
+                                            },
+                                            {
+                                                "phase":  "tail_recovery_ready",
+                                                "shards":  1,
+                                                "elapsed_ms":  2840.3805
+                                            },
+                                            {
+                                                "phase":  "tail_recovery_to_data_validated",
+                                                "shards":  1,
+                                                "elapsed_ms":  17993.3011
+                                            },
+                                            {
+                                                "phase":  "negative_cases",
+                                                "shards":  1,
+                                                "elapsed_ms":  130878.39159999999
+                                            },
+                                            {
+                                                "phase":  "verify",
+                                                "shards":  4,
+                                                "elapsed_ms":  2305.768
+                                            },
+                                            {
+                                                "phase":  "restore",
+                                                "shards":  4,
+                                                "elapsed_ms":  6347.651
+                                            },
+                                            {
+                                                "phase":  "restored_ready",
+                                                "shards":  4,
+                                                "elapsed_ms":  1798.3918999999999
+                                            },
+                                            {
+                                                "phase":  "restore_to_data_validated",
+                                                "shards":  4,
+                                                "elapsed_ms":  17139.7452
+                                            },
+                                            {
+                                                "phase":  "verify_to_data_validated",
+                                                "shards":  4,
+                                                "elapsed_ms":  19450.259
+                                            },
+                                            {
+                                                "phase":  "aof_restart_ready",
+                                                "shards":  4,
+                                                "elapsed_ms":  1670.4659
+                                            },
+                                            {
+                                                "phase":  "aof_restart_to_data_validated",
+                                                "shards":  4,
+                                                "elapsed_ms":  10698.5629
+                                            },
+                                            {
+                                                "phase":  "tail_recovery_ready",
+                                                "shards":  4,
+                                                "elapsed_ms":  2976.1405
+                                            },
+                                            {
+                                                "phase":  "tail_recovery_to_data_validated",
+                                                "shards":  4,
+                                                "elapsed_ms":  18340.4566
+                                            },
+                                            {
+                                                "phase":  "negative_cases",
+                                                "shards":  4,
+                                                "elapsed_ms":  128657.80559999999
+                                            }
+                                        ],
+                         "cargo_exit_code":  0,
+                         "test_elapsed_seconds":  462.45,
+                         "validates_absolute_deadline_brackets":  false
+                     }
+                 ],
+    "raw_file_inventory":  [
+                               {
+                                   "path":  "windows-attempt-1/context.json",
+                                   "bytes":  501,
+                                   "sha256":  "1ca2c7fc781c2174a82469a885cbedf509621ee5e8ece2ec45a6474e9f7db567"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/package.json",
+                                   "bytes":  1548,
+                                   "sha256":  "4ff420ba25cf39d6ac00819a7fd089fe91f377715c7c4c95610668f8b7c896b2"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/phases.jsonl",
+                                   "bytes":  8066,
+                                   "sha256":  "aba20a48880efbf33aed17aae6feaf0b800e2e01a7b14776b1284339eeabf157"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/recovery_drill.rs",
+                                   "bytes":  35847,
+                                   "sha256":  "7a031032d9b5ac14d9ca39cac4bddd211f1d49fa5ce2797a90b754ee19fa405b"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/release-manifest.json",
+                                   "bytes":  867041,
+                                   "sha256":  "d577be2462fd31b234879e2a9d9928d1d69d3d8dde801df85c43554be2b74543"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/release-SHA256SUMS",
+                                   "bytes":  765,
+                                   "sha256":  "09209e0a2666ec45dfed2b5411f398363304675a02a1aa1aeea6e0709b4d5794"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/result.json",
+                                   "bytes":  1258,
+                                   "sha256":  "bbfd09f855b82ffd68150a2da2011ead712a0b8ddded45888276aca4e37570a4"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/runner.json",
+                                   "bytes":  332,
+                                   "sha256":  "ee72b8bd168c7b98cdf10042377c6a1ffb86876316395aace4e004a177b80304"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/aof-restart.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "e45e54d9d806892c3e5a105641d3eb4adc729f69092e9b1e7e745e161aa2e362"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/aof-restart.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/aof-restart-command.json",
+                                   "bytes":  712,
+                                   "sha256":  "6531164a7ec75d6e7b4110b11fc6c1c7a09b131035ffe05fbdd78b7b98d7b595"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/aof-restart-internal.json",
+                                   "bytes":  45,
+                                   "sha256":  "1613084093d83228bc4d32fd6aadc6425785deb62ea3a3571bad6bd71b4d8b97"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/aof-restart-ready.json",
+                                   "bytes":  45,
+                                   "sha256":  "a098d4deae8a8bda1c0ab1294226079560fc5c25f2911db3a42c4afcc5437948"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/backup/backup-manifest.json",
+                                   "bytes":  748,
+                                   "sha256":  "9566659c68901c275b84f1afb41f94c61bc5fe2675ceec0f2cb15e72e7b7205a"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/backup/SHA256SUMS",
+                                   "bytes":  166,
+                                   "sha256":  "2ee545959ee3e5d0b7873be442ecf15d84ee46f1bc2afe809f8d943b1bf982ad"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/corrupt-aof.stderr",
+                                   "bytes":  145,
+                                   "sha256":  "d78dc0ce2c46f5e6eb34af2702091f358516c80055c66825310d26dd94afe28a"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/corrupt-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/corrupt-aof-command.json",
+                                   "bytes":  717,
+                                   "sha256":  "89d21350682f5f86ef5af2d03d7b13ecdb4c5afef4ed7b3fae6a5b3b84aaa2ac"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/corrupt-backup/backup-manifest.json",
+                                   "bytes":  748,
+                                   "sha256":  "9566659c68901c275b84f1afb41f94c61bc5fe2675ceec0f2cb15e72e7b7205a"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/corrupt-backup/SHA256SUMS",
+                                   "bytes":  166,
+                                   "sha256":  "2ee545959ee3e5d0b7873be442ecf15d84ee46f1bc2afe809f8d943b1bf982ad"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/corrupt-restore.stderr",
+                                   "bytes":  59,
+                                   "sha256":  "0700e6930cb92fb1514c70d9c9aee0fa22a1dd5b08938a350a171e2e14d1400c"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/corrupt-restore.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/corrupt-restore-command.json",
+                                   "bytes":  530,
+                                   "sha256":  "7621e59f1e5a7f2e9ccb2381b5bf9758d432f6ff5607e9ebe24c4ab36ca10e0d"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/corrupt-restore-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/corrupt-verify.stderr",
+                                   "bytes":  59,
+                                   "sha256":  "0700e6930cb92fb1514c70d9c9aee0fa22a1dd5b08938a350a171e2e14d1400c"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/corrupt-verify.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/corrupt-verify-command.json",
+                                   "bytes":  386,
+                                   "sha256":  "70ec8c5e3ac79b0c6c3ec855fa220bdb3a596ebd55d3f890ce8dbbaa3a13bbb4"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/corrupt-verify-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/dataset.json",
+                                   "bytes":  2185,
+                                   "sha256":  "d19543dcbf89cb831fecea23bced96286b7a516f6df47f7af70c86508d5d1f93"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/existing-destination.stderr",
+                                   "bytes":  94,
+                                   "sha256":  "1740ec9c5dd7580b2af4390037bd8f33a253c130626c59faddc9bfa175bf5450"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/existing-destination.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/existing-destination-command.json",
+                                   "bytes":  514,
+                                   "sha256":  "606d0207c4be488efd6383b0889c90c0c57b9b3287615764890bb9d361219022"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/existing-destination-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/export.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/export.stdout",
+                                   "bytes":  621,
+                                   "sha256":  "9e7fa87b0ad54ebdeefea706690dbadf39c240fb0419dc2debd07b278a1a5ccd"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/export-command.json",
+                                   "bytes":  438,
+                                   "sha256":  "a5bfa795079ce5f6b0506d1999c495d311c270efe44c82f7c3745c14099f1558"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/export-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/incompatible-aof.stderr",
+                                   "bytes":  283,
+                                   "sha256":  "e0f5e15ef59e9ed8a46a602eac130af2196986da44b7c315c19dc7cb753a3d0a"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/incompatible-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/incompatible-aof-command.json",
+                                   "bytes":  732,
+                                   "sha256":  "d7f454680c98a5d1beebb57a04a342f92f881f13361698ea771471e4c7a5f2b7"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/incompatible-restore.stderr",
+                                   "bytes":  70,
+                                   "sha256":  "d119bd20124d1b2d7c80c25d68e713e54efb1d1ad23fe8237c739f71ada8ebab"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/incompatible-restore.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/incompatible-restore-command.json",
+                                   "bytes":  526,
+                                   "sha256":  "0cdc21e736e04113a767ed472c42b8de63bb17dbc5193317511f2dd07f54c564"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/incompatible-restore-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/incompatible-verify.stderr",
+                                   "bytes":  70,
+                                   "sha256":  "d119bd20124d1b2d7c80c25d68e713e54efb1d1ad23fe8237c739f71ada8ebab"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/incompatible-verify.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/incompatible-verify-command.json",
+                                   "bytes":  378,
+                                   "sha256":  "7ae5c05b5f35fc03a3456f245732b5c1168bed4a5db1790eac27a39151bbd8e4"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/incompatible-verify-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/primary.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "0f5892fb91db18947707c2b580926b36a8eaf5cce9044037c91a4689a3d81be4"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/primary.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/primary-after-restart.json",
+                                   "bytes":  330,
+                                   "sha256":  "ac1a93d80d8ae4d9fb8c24a3304c77e4032903f217b82c44b5d81dc326c713e4"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/primary-before-restart.json",
+                                   "bytes":  324,
+                                   "sha256":  "f9e2d5cb993105903408b8f2e5ea14d9835202da00d4a55fdfe3e2ac3bbe1cf3"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/primary-command.json",
+                                   "bytes":  705,
+                                   "sha256":  "b9bcbc0574dc8d0bca42679846944cebd784e8c43ad4ed5d3c7c15b426e551aa"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/primary-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "db82fc3eb44c590a4c5232aba2e04916cf59d201d5a3b0b2a7cadb217d8ed7ba"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/primary-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "de1edbf61c445e0b515674dfea06298bf7a5b48b43e06c7f2c296f0c268f753d"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/restore.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/restore.stdout",
+                                   "bytes":  698,
+                                   "sha256":  "8827afcdc511b4f3367911784272963307c4051a7e1ed96fb0dee75ad545b0a2"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/restore-command.json",
+                                   "bytes":  513,
+                                   "sha256":  "0468ba2cc5cd925cd1c810ecc9b2809941993a3d00bc0a29dc8b1401a7bcb8ee"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/restored.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "cc4cb72182ee38bf103c740bd57b2576a4d9d109fdc9b34cb1ae86a4be582d24"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/restored.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/restored-command.json",
+                                   "bytes":  707,
+                                   "sha256":  "ab018f99b30f8b9e3bb6fb015ae45e524534275c6a003b3ab171afc42b017b12"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/restored-internal.json",
+                                   "bytes":  45,
+                                   "sha256":  "b11028bf438231298ea286fcbf467feef04317811f7b9339b7abac8f3e792e24"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/restored-ready.json",
+                                   "bytes":  45,
+                                   "sha256":  "c465e53547ec36c271b6ecad98d8208025bae2dcd3a1ef73700ac8c1a25807a7"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/restore-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/tail-recovery.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "0be8219895ad6b5d0a83ea94d91e033f6a9ef30ea40ff8b5cbfc1952cd8c722b"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/tail-recovery.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/tail-recovery-command.json",
+                                   "bytes":  724,
+                                   "sha256":  "f56c891c5b0b16dfeb5aa5d0d738c63edbc023395d15adb54bfffc258a67ab4b"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/tail-recovery-internal.json",
+                                   "bytes":  45,
+                                   "sha256":  "2fbe1c9b65eb13f501c6e782c8d8d1f585829003112c137d6a2d4090aa166fc1"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/tail-recovery-ready.json",
+                                   "bytes":  45,
+                                   "sha256":  "de323cb2f4be57bfcb76426282c070b98806be2d7da80805582e6ade8b4cc70a"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/unknown-version-aof.stderr",
+                                   "bytes":  145,
+                                   "sha256":  "642a344e5493faf8d49cdb6bdbc8c6002fda7420b2173443c43deb1fcb3fc40f"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/unknown-version-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/unknown-version-aof-command.json",
+                                   "bytes":  740,
+                                   "sha256":  "ab6eea19860e3192b4f9baa43a0739c0f2c139d6617d7b5c4febe79ccb8ff29a"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/verify.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/verify.stdout",
+                                   "bytes":  698,
+                                   "sha256":  "8827afcdc511b4f3367911784272963307c4051a7e1ed96fb0dee75ad545b0a2"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/verify-command.json",
+                                   "bytes":  377,
+                                   "sha256":  "9c602b209ae22f7a898687f04d9e4a9f59fac0a42761b96ec49fb233785e362f"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-1/verify-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/aof-restart.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "86ef14da9853bcc621b22f43707c2e57e0d31c9b48cd03f50609041103ea393d"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/aof-restart.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/aof-restart-command.json",
+                                   "bytes":  712,
+                                   "sha256":  "10b2755fcc82863d01cbc0aed6f5ae6f1f83418a3afe413cef74f73fc05b6b86"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/aof-restart-internal.json",
+                                   "bytes":  45,
+                                   "sha256":  "801eb12bfe0315b01bf88b98005ecbf180e0ea0d1182de0cbe8ee57c12811fad"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/aof-restart-ready.json",
+                                   "bytes":  45,
+                                   "sha256":  "22fea232a77eb5015a6d570c00c62e5a109227fb5fb090c4f08166d74fd28a1f"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/backup/backup-manifest.json",
+                                   "bytes":  746,
+                                   "sha256":  "a3e6d116093c3c0e641280a97ede8a6b156791072e9a2ad5086b1cbfc8dac28d"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/backup/SHA256SUMS",
+                                   "bytes":  166,
+                                   "sha256":  "76ba48f4ee3f10b6460176bd54c588d6d6b597712f8b6b28f865cd69e8b55ce2"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/corrupt-aof.stderr",
+                                   "bytes":  145,
+                                   "sha256":  "0d1fa4115221a8693d4ab1f91f4858192be728ce6cafe1d77a579880463eb6d5"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/corrupt-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/corrupt-aof-command.json",
+                                   "bytes":  717,
+                                   "sha256":  "9822d818825f9f04e3a188bb897bc18e65e72531b14777aae02561185e259957"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/corrupt-backup/backup-manifest.json",
+                                   "bytes":  746,
+                                   "sha256":  "a3e6d116093c3c0e641280a97ede8a6b156791072e9a2ad5086b1cbfc8dac28d"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/corrupt-backup/SHA256SUMS",
+                                   "bytes":  166,
+                                   "sha256":  "76ba48f4ee3f10b6460176bd54c588d6d6b597712f8b6b28f865cd69e8b55ce2"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/corrupt-restore.stderr",
+                                   "bytes":  59,
+                                   "sha256":  "0700e6930cb92fb1514c70d9c9aee0fa22a1dd5b08938a350a171e2e14d1400c"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/corrupt-restore.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/corrupt-restore-command.json",
+                                   "bytes":  530,
+                                   "sha256":  "d972289ff2026cbb278b824158befb3fef421a3e27cc36c1e67b5a606e716fc7"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/corrupt-restore-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/corrupt-verify.stderr",
+                                   "bytes":  59,
+                                   "sha256":  "0700e6930cb92fb1514c70d9c9aee0fa22a1dd5b08938a350a171e2e14d1400c"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/corrupt-verify.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/corrupt-verify-command.json",
+                                   "bytes":  386,
+                                   "sha256":  "e860fa023d6b3948257ad47d6f7e7f036d64f54bc7c51ee781b47ede65d044f2"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/corrupt-verify-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/dataset.json",
+                                   "bytes":  2185,
+                                   "sha256":  "ca9e7ab41dea34a647d5fafabb7b06274aa67ec498e11338fd69e51600b92b60"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/existing-destination.stderr",
+                                   "bytes":  94,
+                                   "sha256":  "1740ec9c5dd7580b2af4390037bd8f33a253c130626c59faddc9bfa175bf5450"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/existing-destination.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/existing-destination-command.json",
+                                   "bytes":  514,
+                                   "sha256":  "57d9f64ba2713403977a8b19a517b1f1305eb063fde957e88bc7093656d53593"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/existing-destination-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/export.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/export.stdout",
+                                   "bytes":  619,
+                                   "sha256":  "35e5b42095bf512846a9020650a15ba9b3211990e3756ba53ab0dba00ae22e6f"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/export-command.json",
+                                   "bytes":  438,
+                                   "sha256":  "e5d5d745216af9ba32c4ff93585caed98bc7779c45f8a97a44655f90adea0ffe"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/export-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/incompatible-aof.stderr",
+                                   "bytes":  283,
+                                   "sha256":  "7c82ec838074163fde4a79e7f2cd926b9f058c82fe7b6d164899a239f9aa01f1"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/incompatible-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/incompatible-aof-command.json",
+                                   "bytes":  732,
+                                   "sha256":  "539518375457119c5658e4181a6195dff632876a458bde0a8e2108dd09249645"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/incompatible-restore.stderr",
+                                   "bytes":  70,
+                                   "sha256":  "d119bd20124d1b2d7c80c25d68e713e54efb1d1ad23fe8237c739f71ada8ebab"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/incompatible-restore.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/incompatible-restore-command.json",
+                                   "bytes":  526,
+                                   "sha256":  "6444734ac88971798e97898660a5b9284d1a4244d1de15fe48145b573374e12d"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/incompatible-restore-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/incompatible-verify.stderr",
+                                   "bytes":  70,
+                                   "sha256":  "d119bd20124d1b2d7c80c25d68e713e54efb1d1ad23fe8237c739f71ada8ebab"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/incompatible-verify.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/incompatible-verify-command.json",
+                                   "bytes":  378,
+                                   "sha256":  "0ee89d533e1130f5e308736742ccd1f3c417d08e3855ba72c00e732e2eb65a69"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/incompatible-verify-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/primary.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "6254391ed98a627aecd05ce31f8dba692e07ab4bafb22c4dc9e0a421f658e053"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/primary.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/primary-after-restart.json",
+                                   "bytes":  330,
+                                   "sha256":  "aef493a6964779c33cb0f2fcf65c248f5f61e6ed9ce087283557f707500d4873"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/primary-before-restart.json",
+                                   "bytes":  324,
+                                   "sha256":  "d978c8588a6ba6d4ba1c87353cb230772c18f1886d937015ef1f5ad439cd1efe"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/primary-command.json",
+                                   "bytes":  705,
+                                   "sha256":  "e6c167238a4069b4e6c7f8d1bc2ccae61f71840f3f5898e9a0fcadc4aa093f3b"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/primary-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "e3792aa94eff8107ed397a904d9e81ab03c3e6a82669e2eaee4f78ec3f6c017d"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/primary-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "1b49f51eeafb4931345aee820fa495b2479b6232e1d13f03f2b44c907ff4b367"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/restore.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/restore.stdout",
+                                   "bytes":  723,
+                                   "sha256":  "db97155b73f49e9bd7047c22b50a53f45b2f69a5acf7c389ac24c1d2e0b2aba6"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/restore-command.json",
+                                   "bytes":  513,
+                                   "sha256":  "f3b7880f7d1031393aa7b339fde4240b8d28b0316329eb59d75a266b9dbbbdfb"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/restored.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "bda3b5a619c0fc363c26de9e8864a54b2f5520819a0f00f4f45308bbd4addc00"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/restored.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/restored-command.json",
+                                   "bytes":  708,
+                                   "sha256":  "96f434872ce7cbd5a7f0b5b1c798ebf3216baf6450595298012317164cfa82cc"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/restored-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "1eb648c940e28f742f1e951e804c442a30aad444bc5840b675508a3f6ab90903"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/restored-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "b6bc9f76d7a08e86ef3af279a6f81adca4642e0501d2d0db1bc0691c07441ac5"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/restore-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/tail-recovery.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "4971d5f0f4ba449e32087d8204c9d66723affb82abe75a0e9015b6bb99d44985"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/tail-recovery.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/tail-recovery-command.json",
+                                   "bytes":  725,
+                                   "sha256":  "6162fd49aecd3c03429bcb2935229673d25a7fc72d547bd505c98fa984f3c176"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/tail-recovery-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "33b3f3c63b13ad5f55b62f81220c08c701974fde744898277ad4e26e45bcefe2"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/tail-recovery-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "151c7f550cc73b45aa16e9bcb34bdbd9939c80d262af50606bebfdbac0cc1ed1"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/unknown-version-aof.stderr",
+                                   "bytes":  145,
+                                   "sha256":  "d8c417fa440b1823e207ede3e5c896e6876036fac37794f103f0601ea2c66725"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/unknown-version-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/unknown-version-aof-command.json",
+                                   "bytes":  741,
+                                   "sha256":  "09b2a35b42503f84eb89c61f02cdc1bcf3b43cadb2bcb074c7321197a49dc90b"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/verify.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/verify.stdout",
+                                   "bytes":  723,
+                                   "sha256":  "db97155b73f49e9bd7047c22b50a53f45b2f69a5acf7c389ac24c1d2e0b2aba6"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/verify-command.json",
+                                   "bytes":  377,
+                                   "sha256":  "2217472d729e490f726c84fc642f13c9be1d8b6b8ab716a5ab90ab1bd91418d1"
+                               },
+                               {
+                                   "path":  "windows-attempt-1/shards-4/verify-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-1-cargo.log",
+                                   "bytes":  1788,
+                                   "sha256":  "2a1884c24b65e9c977686c7bc5c7a2bda9f2930caf8981182b5e8cef2ca8dec4"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/context.json",
+                                   "bytes":  501,
+                                   "sha256":  "1ca2c7fc781c2174a82469a885cbedf509621ee5e8ece2ec45a6474e9f7db567"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/package.json",
+                                   "bytes":  1548,
+                                   "sha256":  "4ff420ba25cf39d6ac00819a7fd089fe91f377715c7c4c95610668f8b7c896b2"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/phases.jsonl",
+                                   "bytes":  8720,
+                                   "sha256":  "e653b12d9fd004f3384487f4175adb26d2a600b7381f66380f0767bdda893f98"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/recovery_drill.rs",
+                                   "bytes":  37413,
+                                   "sha256":  "cb561e15b6545ef4aafc89b5e68c46f5d9327cb22b8c2a3698e981df6a98231c"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/release-manifest.json",
+                                   "bytes":  867041,
+                                   "sha256":  "d577be2462fd31b234879e2a9d9928d1d69d3d8dde801df85c43554be2b74543"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/release-SHA256SUMS",
+                                   "bytes":  765,
+                                   "sha256":  "09209e0a2666ec45dfed2b5411f398363304675a02a1aa1aeea6e0709b4d5794"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/result.json",
+                                   "bytes":  1258,
+                                   "sha256":  "45a6348087878bd47ee550a01b8cfea53f710ba7819f167119b728104b479a49"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/runner.json",
+                                   "bytes":  360,
+                                   "sha256":  "4c1f130f3a911ea86672e4eea9866dd71bc3d8be86335944c8d6805bf821e45e"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/aof-restart.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "3095d783f55b9e5a520e09d5ebdf8cf04363a8b94ab2824edb9ccfcbf3070d43"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/aof-restart.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/aof-restart-command.json",
+                                   "bytes":  713,
+                                   "sha256":  "aa665afa33e4b5f59c2f33309702cad0851e406b42eafb0ba6eeea58427ecad4"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/aof-restart-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "4246e03f8f61054f4f15dea5a5c9e6b34ec4455e793e9e6d8cbb7de753d81249"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/aof-restart-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "a9cb61650d69f526a6c6e1aaebb1d296548ec4a4421566f90f8c03f7b53a03d2"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/backup/backup-manifest.json",
+                                   "bytes":  748,
+                                   "sha256":  "c17d1f0c2df5b8fd13bd5228bec5635032457340f6b98593b7a5b3934017653e"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/backup/SHA256SUMS",
+                                   "bytes":  166,
+                                   "sha256":  "c851c2f4982ac0db30d2417db703df2308d726e998ddacfec5623355f7b92d74"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/corrupt-aof.stderr",
+                                   "bytes":  145,
+                                   "sha256":  "de0271a670a887b557eeddd220b8bae378c12d26120d466b405f8cc2b64a0b4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/corrupt-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/corrupt-aof-command.json",
+                                   "bytes":  717,
+                                   "sha256":  "30a7801b5bee03fb07535bde5471a30cfca827b45867a8ec68ba6b6cddbece33"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/corrupt-backup/backup-manifest.json",
+                                   "bytes":  748,
+                                   "sha256":  "c17d1f0c2df5b8fd13bd5228bec5635032457340f6b98593b7a5b3934017653e"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/corrupt-backup/SHA256SUMS",
+                                   "bytes":  166,
+                                   "sha256":  "c851c2f4982ac0db30d2417db703df2308d726e998ddacfec5623355f7b92d74"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/corrupt-restore.stderr",
+                                   "bytes":  59,
+                                   "sha256":  "0700e6930cb92fb1514c70d9c9aee0fa22a1dd5b08938a350a171e2e14d1400c"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/corrupt-restore.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/corrupt-restore-command.json",
+                                   "bytes":  530,
+                                   "sha256":  "1d89f41f93cbcf593f29714d3dc60f6f483d59378e3646458d636783cbd13bbd"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/corrupt-restore-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/corrupt-verify.stderr",
+                                   "bytes":  59,
+                                   "sha256":  "0700e6930cb92fb1514c70d9c9aee0fa22a1dd5b08938a350a171e2e14d1400c"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/corrupt-verify.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/corrupt-verify-command.json",
+                                   "bytes":  386,
+                                   "sha256":  "c379cca91c5f8b8dff341036de124a14c1019d0ca70e6da7b0b520d46695db75"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/corrupt-verify-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/dataset.json",
+                                   "bytes":  2185,
+                                   "sha256":  "d19543dcbf89cb831fecea23bced96286b7a516f6df47f7af70c86508d5d1f93"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/existing-destination.stderr",
+                                   "bytes":  94,
+                                   "sha256":  "1740ec9c5dd7580b2af4390037bd8f33a253c130626c59faddc9bfa175bf5450"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/existing-destination.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/existing-destination-command.json",
+                                   "bytes":  514,
+                                   "sha256":  "6b07eab3c090150a687cdf94cee31baa080c9adb660f12cd0f2d4bc2741eea21"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/existing-destination-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/export.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/export.stdout",
+                                   "bytes":  621,
+                                   "sha256":  "5296b12ca7980fd32b405f18e4d890cbd2d553e6d4998040866910a0c97be952"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/export-command.json",
+                                   "bytes":  438,
+                                   "sha256":  "08223ab2f991948d544e42b802c68ebbf022df5f7f13c342b12993aa5a1fe67b"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/export-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/incompatible-aof.stderr",
+                                   "bytes":  283,
+                                   "sha256":  "c86b9b6bc62e200ebc3f65a379a2eb860fa026747a2e7b21c75bf19e1605dbbf"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/incompatible-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/incompatible-aof-command.json",
+                                   "bytes":  732,
+                                   "sha256":  "003b6d02ec746b3c0111f77f17441d28b283529b1e5db5d55468b7359df43b63"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/incompatible-restore.stderr",
+                                   "bytes":  70,
+                                   "sha256":  "d119bd20124d1b2d7c80c25d68e713e54efb1d1ad23fe8237c739f71ada8ebab"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/incompatible-restore.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/incompatible-restore-command.json",
+                                   "bytes":  526,
+                                   "sha256":  "5dd4efc995770c7db1728ef88e2e136db6dce820cc1748ae5834d001c7d6f9cb"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/incompatible-restore-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/incompatible-verify.stderr",
+                                   "bytes":  70,
+                                   "sha256":  "d119bd20124d1b2d7c80c25d68e713e54efb1d1ad23fe8237c739f71ada8ebab"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/incompatible-verify.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/incompatible-verify-command.json",
+                                   "bytes":  378,
+                                   "sha256":  "bbe37ea18eecb7268fd8839d2d424773855ba7fba24ddc89fa6084c23c9578f5"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/incompatible-verify-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/primary.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "f84930b872b2aa651a93b0ff4ed3cd2f13431f8901e72f05434c8ce6957873db"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/primary.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/primary-after-restart.json",
+                                   "bytes":  330,
+                                   "sha256":  "369ea3840e977908f000bbf5d5acd5b78b6fc9ffc76bc4bacdc6b43595503a9b"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/primary-before-restart.json",
+                                   "bytes":  324,
+                                   "sha256":  "9ef5b0a7a722367fbf94bf0b512745a07f47a2ab068c46f773f70a2cfb92a10b"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/primary-command.json",
+                                   "bytes":  705,
+                                   "sha256":  "a363ca3aa9c866e8cc10670dd81d3cfb9cc024c339199d8ad7218cbc023cb054"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/primary-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "23d7f4f0179462b67bd31deab3897a021aa1090fff2959fe10d5d74490e87012"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/primary-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "aea2254a1b90fb6903f6191da1d7fd5ccd1519b3494b46b748fae7509e6cfc90"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/restore.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/restore.stdout",
+                                   "bytes":  698,
+                                   "sha256":  "1b8d3d54764d727e9cd8099886161a5b678033c1bdd4ed673add09a2eb738f55"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/restore-command.json",
+                                   "bytes":  513,
+                                   "sha256":  "7fd97a2bde0caf8e32df2968f81ce3c90f3b6847818bb65b4d28792bd4a65861"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/restored.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "51fe41e82acd4b0870db5fadea5318aa92e5628f04fbe98f4f7db3a3d873bb6e"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/restored.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/restored-command.json",
+                                   "bytes":  708,
+                                   "sha256":  "7bee12c04f63d12ec4df7ac111b59ee74d147b384144939b9eb93b944c1a8f9f"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/restored-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "5da4f878201750c4ef63505692eb073a40e12ca12303566d604a7392b79066cb"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/restored-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "b8226b82ae5454a5eb344ad2318092a8ba97f7985bed9e252062c32752350dc4"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/restore-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/tail-recovery.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "2ac32826f74f43356c3aa6957b3099f66cf7d9c2b27c86a42b790a5e6184dcc7"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/tail-recovery.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/tail-recovery-command.json",
+                                   "bytes":  725,
+                                   "sha256":  "2726c14365d4db477dffe01c0364d4424241aa106f62dc77779f33e9cb4ed17d"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/tail-recovery-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "1bf01023b583b341b870826554482b825b914bbfab8f463794f8f272c3effb50"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/tail-recovery-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "2e7d75617185b73ee82e9758023b08bf965755b0af8b353a3ae8f7f045465d78"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/unknown-version-aof.stderr",
+                                   "bytes":  145,
+                                   "sha256":  "0ccb5ceb1eb6042cfea586f8a7f4a6c5b7809c4145bca954022eeddbcb1a5366"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/unknown-version-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/unknown-version-aof-command.json",
+                                   "bytes":  740,
+                                   "sha256":  "ded70faa7050135e41ac2138c953bd1ce4f1f32374cd587f81a61c844e705ee0"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/verify.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/verify.stdout",
+                                   "bytes":  698,
+                                   "sha256":  "1b8d3d54764d727e9cd8099886161a5b678033c1bdd4ed673add09a2eb738f55"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/verify-command.json",
+                                   "bytes":  377,
+                                   "sha256":  "03e8fe23b46d2f9a5e00428e9334e0267fbeac881525170bfa3ba556040e058b"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-1/verify-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/aof-restart.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "7dc8e16f4c79120d09beb7976845d7030167c3a490b5358917b6c514afeb0815"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/aof-restart.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/aof-restart-command.json",
+                                   "bytes":  713,
+                                   "sha256":  "f9873478ddba2ea4b45feb1a7e18f6f906bff1c3b937b1a1600f5cd5166d3a27"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/aof-restart-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "97b3a00a6926565cfbb0cd404481cf1d9018927ba32f31f66693e5d16e1e48aa"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/aof-restart-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "a1783d9e69739750449db683ec8c9b5d929a169539cffb5fae13145ed5d87f05"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/backup/backup-manifest.json",
+                                   "bytes":  747,
+                                   "sha256":  "340c53e30cb9e5ffb8286d368f3e638214ca1c52399798b8a020d0f8dccc15da"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/backup/SHA256SUMS",
+                                   "bytes":  166,
+                                   "sha256":  "0597a8ad70c638b8210d40a6ac4f1540e8c40fb033dc7b1b0d1fe237d2314fa7"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/corrupt-aof.stderr",
+                                   "bytes":  145,
+                                   "sha256":  "82b246175cc9d5dabfc5acdc91cd8f446cdadc757045f3f68199fed8276821aa"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/corrupt-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/corrupt-aof-command.json",
+                                   "bytes":  717,
+                                   "sha256":  "8d8b5eb29393de77a5d5fe2842cf19eaa3fd52ac04e5702b06668bfca7d7f4ae"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/corrupt-backup/backup-manifest.json",
+                                   "bytes":  747,
+                                   "sha256":  "340c53e30cb9e5ffb8286d368f3e638214ca1c52399798b8a020d0f8dccc15da"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/corrupt-backup/SHA256SUMS",
+                                   "bytes":  166,
+                                   "sha256":  "0597a8ad70c638b8210d40a6ac4f1540e8c40fb033dc7b1b0d1fe237d2314fa7"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/corrupt-restore.stderr",
+                                   "bytes":  59,
+                                   "sha256":  "0700e6930cb92fb1514c70d9c9aee0fa22a1dd5b08938a350a171e2e14d1400c"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/corrupt-restore.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/corrupt-restore-command.json",
+                                   "bytes":  530,
+                                   "sha256":  "a99d53f61f492bd6a3cf98ebad3e8664cf2d2e6a3c86338dd605c73a19990b2b"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/corrupt-restore-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/corrupt-verify.stderr",
+                                   "bytes":  59,
+                                   "sha256":  "0700e6930cb92fb1514c70d9c9aee0fa22a1dd5b08938a350a171e2e14d1400c"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/corrupt-verify.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/corrupt-verify-command.json",
+                                   "bytes":  386,
+                                   "sha256":  "03ad5186ce713248ff2849334cf2f08f1781dc294c143999c7ffcc9f8965fa5d"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/corrupt-verify-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/dataset.json",
+                                   "bytes":  2185,
+                                   "sha256":  "ca9e7ab41dea34a647d5fafabb7b06274aa67ec498e11338fd69e51600b92b60"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/existing-destination.stderr",
+                                   "bytes":  94,
+                                   "sha256":  "1740ec9c5dd7580b2af4390037bd8f33a253c130626c59faddc9bfa175bf5450"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/existing-destination.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/existing-destination-command.json",
+                                   "bytes":  514,
+                                   "sha256":  "9ff862628736ff47b32fe332cbd605e3efc653a722b3a64261fe46072302b6d1"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/existing-destination-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/export.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/export.stdout",
+                                   "bytes":  620,
+                                   "sha256":  "8ababbe19c239ba486c807b9cdf0bcd1aac750938d43aa37a22176d4b920d9fa"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/export-command.json",
+                                   "bytes":  438,
+                                   "sha256":  "0ecc4f6413273319b0601df690a20c15d278fdf63137f9eec2229d4e9b47bf75"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/export-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/incompatible-aof.stderr",
+                                   "bytes":  283,
+                                   "sha256":  "2da0a22c46731483df48694985cda4bdd88e368b2f90f8c618640d3eb6d624d8"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/incompatible-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/incompatible-aof-command.json",
+                                   "bytes":  731,
+                                   "sha256":  "fb06d119f3e5ff48550096a2a0f3f58fc0584a1745a73880703d041c2dc76650"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/incompatible-restore.stderr",
+                                   "bytes":  70,
+                                   "sha256":  "d119bd20124d1b2d7c80c25d68e713e54efb1d1ad23fe8237c739f71ada8ebab"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/incompatible-restore.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/incompatible-restore-command.json",
+                                   "bytes":  526,
+                                   "sha256":  "1d915dd25566cb1352b72e9d2e94f6cc99205e7e25f499e4ae1791c18730f927"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/incompatible-restore-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/incompatible-verify.stderr",
+                                   "bytes":  70,
+                                   "sha256":  "d119bd20124d1b2d7c80c25d68e713e54efb1d1ad23fe8237c739f71ada8ebab"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/incompatible-verify.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/incompatible-verify-command.json",
+                                   "bytes":  378,
+                                   "sha256":  "bc847e490dd50a88189e3da1b1b0cb2763a485ffd81d39ec50767bdc851250db"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/incompatible-verify-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/primary.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "726cd098b7d0d4838b3c347bd9703e89760e30cdb145ee99ace709d7d447f8be"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/primary.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/primary-after-restart.json",
+                                   "bytes":  330,
+                                   "sha256":  "f6938e3872a7ba15f3bd029a5d690d22b365658fd2df2c902ed94d8d4e805beb"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/primary-before-restart.json",
+                                   "bytes":  324,
+                                   "sha256":  "1f094b1ed65ea3f6cbaa3ed5f68207dde777adeaa67b849593666283fe7df40b"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/primary-command.json",
+                                   "bytes":  705,
+                                   "sha256":  "7c9641f00b6d0ead2aa1e999f030ece91a46a7211c92bdda9a0ded20816116e2"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/primary-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "55feb037ea9dc422e3f06835d74a1835d7bdd900d48c849079e1960d0e7dd6bd"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/primary-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "0d28fa382879dacab042f0c230a27a84817452470c931e2d41c894738fd3a0fb"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/restore.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/restore.stdout",
+                                   "bytes":  724,
+                                   "sha256":  "606a26a2c5cd29d936c0b4f57ecd71984f5248a57d2ad4a16823bf50ea4c80e6"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/restore-command.json",
+                                   "bytes":  513,
+                                   "sha256":  "774c6d786670f5eb0d35a83c1cc2fb45ec7d62b27bb1075264dd172bb1bccaab"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/restored.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "7daf5cf1b89cf4c1ba8b029f3cc34360ef5e9bac062d24ba7100b101ccc57b61"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/restored.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/restored-command.json",
+                                   "bytes":  708,
+                                   "sha256":  "6fb3b27815f41331d9749a65039c9e9d4e7753d44dcca39e089e75692b26691f"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/restored-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "9c379e6d7c06b682748c14ed74953b079af1fd2c79546640fecd0e83b8af335b"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/restored-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "3a9a5b135b4ca3299207372ab26f458fb5b86b25ee3c3388bd2688637e0b5c08"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/restore-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/tail-recovery.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "31a8432e2140e601fda0c9d9cb06a7bc9259fb44ac11bf06ac163cb6d6c77ad2"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/tail-recovery.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/tail-recovery-command.json",
+                                   "bytes":  725,
+                                   "sha256":  "e9855c4ad317b6dd3a450f059828bb818bf63cc0fa27e1466ec7071910c5e5ab"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/tail-recovery-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "4a670a05644dd3baacdae4eda9e96fd28ded81dc6371f7b0a94e908168c0cc3d"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/tail-recovery-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "7d339d467ffcb246abd1f1678dbe35a0a018a1fafd8d9f7ec6ab607ed82c6081"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/unknown-version-aof.stderr",
+                                   "bytes":  145,
+                                   "sha256":  "1766c4247b1f90ee1e64ff8201e112dafc514d15b04aa1497f60afdf6fb9a2f3"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/unknown-version-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/unknown-version-aof-command.json",
+                                   "bytes":  740,
+                                   "sha256":  "5382134739d65f8faae30d186831a3220b3468ee3e27f3c3e2d1f2482ce7a352"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/verify.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/verify.stdout",
+                                   "bytes":  724,
+                                   "sha256":  "606a26a2c5cd29d936c0b4f57ecd71984f5248a57d2ad4a16823bf50ea4c80e6"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/verify-command.json",
+                                   "bytes":  377,
+                                   "sha256":  "694029ffc9fb7610a95aad2067743ba3ce79eefd0adf696633969abd86452f24"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/shards-4/verify-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/sider-backup-version.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/sider-backup-version.stdout",
+                                   "bytes":  19,
+                                   "sha256":  "cbf64b086b18f3aa8cefb00dad5dfadedf04b2ec808e2743a73fdeda1ec2452f"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/sider-version.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-2/sider-version.stdout",
+                                   "bytes":  12,
+                                   "sha256":  "978e5f5ba82afbca222123b97b5167f3b37dd2681495f5cd22fe3601f45a0ddc"
+                               },
+                               {
+                                   "path":  "windows-attempt-2-cargo.log",
+                                   "bytes":  1786,
+                                   "sha256":  "0b64527443e5370dbe6b1bbd8299bff01ffef4b9959b691ca1e0e643c7dc26bd"
+                               },
+                               {
+                                   "path":  "runner-support/tests/common/process.rs",
+                                   "bytes":  8839,
+                                   "sha256":  "3396f33930c244cb2f221ba0e1eee2eb93781ab13d6e2f7defbc404c4f7623c3"
+                               },
+                               {
+                                   "path":  "runner-support/tests/common/wire.rs",
+                                   "bytes":  6878,
+                                   "sha256":  "8da2190c61a84d18c625ff84722f2bf1db9828526e7e530c3c538f86991d9dd5"
+                               },
+                               {
+                                   "path":  "runner-support/Cargo.toml",
+                                   "bytes":  724,
+                                   "sha256":  "7892813b1b898a7b639b485f2b3f940fd123c03ffd603e76662561ea94404571"
+                               },
+                               {
+                                   "path":  "runner-support/Cargo.lock",
+                                   "bytes":  16734,
+                                   "sha256":  "191dc0b62d78611fcbe77a90669a407b59dc7c44d5383277925833bb2370ca16"
+                               },
+                               {
+                                   "path":  "runner-support/rust-toolchain.toml",
+                                   "bytes":  86,
+                                   "sha256":  "559f488c181e0e9e77cf17c29de663977f036ec7ff2e2060585714bf53c52d62"
+                               }
+                           ],
+    "large_file_inventory":  [
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/backup/snapshot.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\backup\\snapshot.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "9c206812fd6339c36bc9a07bc62264e5de15df068714735816cbbfbeca15998f",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/corrupt-aof/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\corrupt-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66815216,
+                                     "sha256":  "099332c3e66edb8226d2c529039b5381508497233c9e1b085d0d77d4e5b4ae01",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/corrupt-aof/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\corrupt-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "891d851df44d7968ca9d7b2d8ca9fbf4de4f4969b63f7b35da7c7e0ce93b1e45",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/corrupt-backup/snapshot.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\corrupt-backup\\snapshot.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "221d6fc7139c5421710063080e3ab6139ceaf92c04fa5af55964e0fb5685e664",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/incompatible-aof/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\incompatible-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66815216,
+                                     "sha256":  "099332c3e66edb8226d2c529039b5381508497233c9e1b085d0d77d4e5b4ae01",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/incompatible-aof/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\incompatible-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "a2a8818a76a70a851fdc5a66ddde1108ffd39728daeb2716bb95c8adc820618e",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/incomplete-tail/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\incomplete-tail\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "a2a8818a76a70a851fdc5a66ddde1108ffd39728daeb2716bb95c8adc820618e",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/incomplete-tail/generation-00000000000000000003.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\incomplete-tail\\generation-00000000000000000003.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "fca9a9a8efcd713765b2c74bc3b1946cfa0e5ea03f7534a9d045c7ff5933f2b0",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/incomplete-tail/tail-00000000000000000002-7596-0.bak",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\incomplete-tail\\tail-00000000000000000002-7596-0.bak",
+                                     "bytes":  66565381,
+                                     "sha256":  "a0d24200487b023f98fe237e5c42bb528e628c741699ff8cf1015eba4f0abc2b",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/primary/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\primary\\generation-00000000000000000001.aof",
+                                     "bytes":  66815216,
+                                     "sha256":  "099332c3e66edb8226d2c529039b5381508497233c9e1b085d0d77d4e5b4ae01",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/primary/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\primary\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "a2a8818a76a70a851fdc5a66ddde1108ffd39728daeb2716bb95c8adc820618e",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/restored/generation-00000000000000000000.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\restored\\generation-00000000000000000000.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "9c206812fd6339c36bc9a07bc62264e5de15df068714735816cbbfbeca15998f",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/restored/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\restored\\generation-00000000000000000001.aof",
+                                     "bytes":  66565374,
+                                     "sha256":  "91eba6af7e30d3e3520a95bee992480b29df5a221efd94df1b0a81c898b19d1e",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/unknown-version-aof/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\unknown-version-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66815216,
+                                     "sha256":  "099332c3e66edb8226d2c529039b5381508497233c9e1b085d0d77d4e5b4ae01",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-1/unknown-version-aof/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-1\\unknown-version-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "7380751c055906c4269f81aed616d2d2798c964ec1df82dce883979bb1fb3f64",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/backup/snapshot.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\backup\\snapshot.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "216090221b21de96fc97f9a6787c71b0e8c0ea4e64d802dcbe5871ac11be0e40",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/corrupt-aof/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\corrupt-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66821196,
+                                     "sha256":  "03d23ec8d19e1f07a589133d184d5645f21d8189e4b2c2891bbb0bd5ee8aa707",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/corrupt-aof/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\corrupt-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "4dea331dc41be092f3b1111e8d3651d5eb0f23efc7b59020f9a06aa4033b2cf2",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/corrupt-backup/snapshot.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\corrupt-backup\\snapshot.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "0f846ebe8c1815f868802decf08949e7f4e666eec746c781fbc9699763c2ca75",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/incompatible-aof/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\incompatible-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66821196,
+                                     "sha256":  "03d23ec8d19e1f07a589133d184d5645f21d8189e4b2c2891bbb0bd5ee8aa707",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/incompatible-aof/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\incompatible-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "2a38ec6882d5894418bf2c5aa10b6c7533c0d480d79fe393045b904fc820b65d",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/incomplete-tail/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\incomplete-tail\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "2a38ec6882d5894418bf2c5aa10b6c7533c0d480d79fe393045b904fc820b65d",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/incomplete-tail/generation-00000000000000000003.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\incomplete-tail\\generation-00000000000000000003.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "a184b7263b8f06311ae200904d2e8ff22b473abf86436355e8e3b8fced18832f",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/incomplete-tail/tail-00000000000000000002-24464-0.bak",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\incomplete-tail\\tail-00000000000000000002-24464-0.bak",
+                                     "bytes":  66565381,
+                                     "sha256":  "e1bc69fd1609842eaf2630e1667f8fe7d344a387eae75ed0260ba9173173e279",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/primary/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\primary\\generation-00000000000000000001.aof",
+                                     "bytes":  66821196,
+                                     "sha256":  "03d23ec8d19e1f07a589133d184d5645f21d8189e4b2c2891bbb0bd5ee8aa707",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/primary/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\primary\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "2a38ec6882d5894418bf2c5aa10b6c7533c0d480d79fe393045b904fc820b65d",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/restored/generation-00000000000000000000.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\restored\\generation-00000000000000000000.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "216090221b21de96fc97f9a6787c71b0e8c0ea4e64d802dcbe5871ac11be0e40",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/restored/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\restored\\generation-00000000000000000001.aof",
+                                     "bytes":  66565374,
+                                     "sha256":  "82c0bf34bc4ecce9db28d40e4db5c44bf2b0faea457090cb96e5ca480c99d968",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/unknown-version-aof/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\unknown-version-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66821196,
+                                     "sha256":  "03d23ec8d19e1f07a589133d184d5645f21d8189e4b2c2891bbb0bd5ee8aa707",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-1/shards-4/unknown-version-aof/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-1\\shards-4\\unknown-version-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "0c23b78d639b5e7a5fa6c1d7d701b8a0d3b63524e7bfa728445aefa74473ef78",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/backup/snapshot.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\backup\\snapshot.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "577ecc95efba3ee2b816d8c8761c374cf87899a1f5676ff6221a55175f73216a",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/corrupt-aof/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\corrupt-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66833524,
+                                     "sha256":  "79fc341b35a75b43b07d37b78298ea612525bc6c3357d5c431ca16d3016927db",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/corrupt-aof/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\corrupt-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "4eecbe519daa8cd306a14626201aff17edd2e8044bf695c6a83aebce4e2cebb3",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/corrupt-backup/snapshot.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\corrupt-backup\\snapshot.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "6eaeac4840d909c9b0665b17f7a1936fd84d246ac60017057d14583a791f2c3e",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/incompatible-aof/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\incompatible-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66833524,
+                                     "sha256":  "79fc341b35a75b43b07d37b78298ea612525bc6c3357d5c431ca16d3016927db",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/incompatible-aof/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\incompatible-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "fa5f7ecaabe5aeded2c5190df810ac216e99cce9e7f073ad30026259ead24b36",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/incomplete-tail/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\incomplete-tail\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "fa5f7ecaabe5aeded2c5190df810ac216e99cce9e7f073ad30026259ead24b36",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/incomplete-tail/generation-00000000000000000003.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\incomplete-tail\\generation-00000000000000000003.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "4e9179d1a2b9cb425a479db6901455568bca54956ba595002a07226f46ae1924",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/incomplete-tail/tail-00000000000000000002-25044-0.bak",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\incomplete-tail\\tail-00000000000000000002-25044-0.bak",
+                                     "bytes":  66565381,
+                                     "sha256":  "5285221ad16edcfc09601a6fd7910e3cf01f6b84fce8e624e5d6ecda86f7f05a",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/primary/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\primary\\generation-00000000000000000001.aof",
+                                     "bytes":  66833524,
+                                     "sha256":  "79fc341b35a75b43b07d37b78298ea612525bc6c3357d5c431ca16d3016927db",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/primary/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\primary\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "fa5f7ecaabe5aeded2c5190df810ac216e99cce9e7f073ad30026259ead24b36",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/restored/generation-00000000000000000000.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\restored\\generation-00000000000000000000.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "577ecc95efba3ee2b816d8c8761c374cf87899a1f5676ff6221a55175f73216a",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/restored/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\restored\\generation-00000000000000000001.aof",
+                                     "bytes":  66565374,
+                                     "sha256":  "75fd9e656e63a36f258eef828964dca79e8f966f857b3812b2f7ba6d150dbccd",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/unknown-version-aof/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\unknown-version-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66833524,
+                                     "sha256":  "79fc341b35a75b43b07d37b78298ea612525bc6c3357d5c431ca16d3016927db",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-1/unknown-version-aof/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-1\\unknown-version-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "651e09367e9fba26014c21e3d4a23cb65ed712d9f23b4b5423de1b375f7e0e34",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/backup/snapshot.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\backup\\snapshot.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "b570d5821145105a6e0e766cb8f8230e37343e8630036b78eb9e71cbb5ccd454",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/corrupt-aof/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\corrupt-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66817792,
+                                     "sha256":  "b9942f8ed19a45471b2a23fe9ce28fddd328fbf25ba50deab5dc4aa7afc6532a",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/corrupt-aof/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\corrupt-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "e1f09fee817b8b66af13556022a2aeec021d00b62288b24e41d4327e4fd2c83b",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/corrupt-backup/snapshot.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\corrupt-backup\\snapshot.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "846738945c3686465c0a1de84dcdee6f6d6a7798b60a1b490ce9fdb24286af1c",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/incompatible-aof/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\incompatible-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66817792,
+                                     "sha256":  "b9942f8ed19a45471b2a23fe9ce28fddd328fbf25ba50deab5dc4aa7afc6532a",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/incompatible-aof/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\incompatible-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "b768f37b436f3fcdfd5e4698d9500e2ecf06d5e56d36d8f1766b4cccef573ad8",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/incomplete-tail/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\incomplete-tail\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "b768f37b436f3fcdfd5e4698d9500e2ecf06d5e56d36d8f1766b4cccef573ad8",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/incomplete-tail/generation-00000000000000000003.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\incomplete-tail\\generation-00000000000000000003.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "fdc058c42b44b134f6963d75a7cdd318e67894ce7dad25c17f87cafafaf4d6f0",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/incomplete-tail/tail-00000000000000000002-24688-0.bak",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\incomplete-tail\\tail-00000000000000000002-24688-0.bak",
+                                     "bytes":  66565381,
+                                     "sha256":  "07f31e5e937a6b934d156632884ef10566e3c17fd75ef03ec0e624e065440df5",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/primary/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\primary\\generation-00000000000000000001.aof",
+                                     "bytes":  66817792,
+                                     "sha256":  "b9942f8ed19a45471b2a23fe9ce28fddd328fbf25ba50deab5dc4aa7afc6532a",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/primary/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\primary\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "b768f37b436f3fcdfd5e4698d9500e2ecf06d5e56d36d8f1766b4cccef573ad8",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/restored/generation-00000000000000000000.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\restored\\generation-00000000000000000000.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "b570d5821145105a6e0e766cb8f8230e37343e8630036b78eb9e71cbb5ccd454",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/restored/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\restored\\generation-00000000000000000001.aof",
+                                     "bytes":  66565374,
+                                     "sha256":  "2a8a165723fcb39b760b56678a9fcdca5f9361043c16667dc735aef7cd85854f",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/unknown-version-aof/generation-00000000000000000001.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\unknown-version-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66817792,
+                                     "sha256":  "b9942f8ed19a45471b2a23fe9ce28fddd328fbf25ba50deab5dc4aa7afc6532a",
+                                     "versioned":  false
+                                 },
+                                 {
+                                     "path":  "windows-attempt-2/shards-4/unknown-version-aof/generation-00000000000000000002.aof",
+                                     "retained_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-2\\shards-4\\unknown-version-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "24f37fe150140fbc8cf886e44dbab51411d249499cff11070755f2bf93149a0d",
+                                     "versioned":  false
+                                 }
+                             ]
+}

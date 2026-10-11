@@ -1,0 +1,17 @@
+   Compiling sider-lua-containment-spike v0.0.0 (/mnt/c/Users/Usuario/Documents/Coding/sider-wt-lua-containment/spikes/lua-containment)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.28s
+     Running unittests src/main.rs (/var/tmp/sider-lua-containment-delegated-20261010/debug/deps/sider_lua_containment_spike-7baf14a6b281012e)
+
+running 3 tests
+test mount_tests::escaped_nested_mount_is_rejected ... ok
+test mount_tests::fake_or_stacked_root_is_rejected ... ok
+test mount_tests::genuine_mount_supports_delegated_child ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/bin/windows-job-gate.rs (/var/tmp/sider-lua-containment-delegated-20261010/debug/deps/windows_job_gate-ebef153c4b791bb1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

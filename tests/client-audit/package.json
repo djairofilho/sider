@@ -1,0 +1,7 @@
+{
+  "name": "sider-client-audit",
+  "private": true,
+  "dependencies": {
+    "redis": "4.7.0"
+  }
+}

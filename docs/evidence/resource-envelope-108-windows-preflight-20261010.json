@@ -1,0 +1,259 @@
+{
+  "schema_version": 1,
+  "issue": 108,
+  "recorded_date": "2026-10-10",
+  "status": "preflight_blocked_no_workload",
+  "claim_status": "preparation_only",
+  "native_workload_started": false,
+  "idle_declaration_set": false,
+  "complete_resource_report_created": false,
+  "source": {
+    "git_commit_sha": "0f0f232f56fd42b88a56e61954f2bc892458f04d",
+    "git_tree_sha": "72d02ebbc1b5ca8e65d4c3d53b01c043c2a3ff7c",
+    "worktree_matches_index": true,
+    "compiled_harness_build_relationship": "unverified"
+  },
+  "package": {
+    "manifest_source_sha": "b738a0b4f97074fe272bc21f1eacf5db93cd020e",
+    "manifest_sha256": "d577be2462fd31b234879e2a9d9928d1d69d3d8dde801df85c43554be2b74543",
+    "archive_sha256": "40c9f8363d2d9524815f240466b44efdaa4dcb857a536218b541eb403fe547e1",
+    "binary_sha256": "2ffe4aa76fd42e450bce2dfac49139c5ab9caff0b1608219298a4640b3d4068a",
+    "binary_path": "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc\\sider.exe",
+    "archive_path": "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc.zip",
+    "archive_entry": "sider-v1.0.1-x86_64-pc-windows-msvc/sider.exe",
+    "binary_matches_archive": true
+  },
+  "compiled_harness": {
+    "retained_path": "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-resource-envelope-108-windows\\resource_envelope-ce02c81e399128c6.exe",
+    "sha256": "230e97aa3a4fce0f9f6508aa20d190ef2d6acb9cd7a6924691ee38bf6f44717b",
+    "bytes": 2298368,
+    "build_relationship_to_tree": "unverified"
+  },
+  "host": {
+    "recorded_utc": "2026-10-10T07:36:19.8401488Z",
+    "os": "Microsoft Windows 11 Pro",
+    "version": "10.0.26300",
+    "build": "26300",
+    "memory_bytes": 34188873728,
+    "cpu": [
+      {
+        "Name": "Intel(R) Core(TM) i5-9300H CPU @ 2.40GHz",
+        "NumberOfCores": 4,
+        "NumberOfLogicalProcessors": 8
+      }
+    ],
+    "filesystem": "NTFS",
+    "host_observation_note": "Point-in-time host checks before load; background applications/services remain present; no continuous monitoring during workload"
+  },
+  "preflight": {
+    "formatted_wmi_cpu_percent_busy": [
+      100,
+      100,
+      100,
+      100,
+      100
+    ],
+    "formatted_wmi_cpu_status": "suspect; raw processor-time field did not advance",
+    "raw_counter_bracket_seconds": 5.2681535,
+    "process_snapshot_interval": "five-second wait plus snapshot overhead; adjacent to raw counter bracket",
+    "highest_process_cpu_deltas": [
+      {
+        "id": 10440,
+        "name": "com.docker.backend",
+        "cpu_seconds_delta": 28.453125
+      },
+      {
+        "id": 11184,
+        "name": "Code",
+        "cpu_seconds_delta": 2.53125
+      },
+      {
+        "id": 22988,
+        "name": "Code",
+        "cpu_seconds_delta": 0.609375
+      },
+      {
+        "id": 2084,
+        "name": "Code",
+        "cpu_seconds_delta": 0.578125
+      },
+      {
+        "id": 9592,
+        "name": "opencode",
+        "cpu_seconds_delta": 0.4375
+      },
+      {
+        "id": 2852,
+        "name": "Code",
+        "cpu_seconds_delta": 0.421875
+      },
+      {
+        "id": 13492,
+        "name": "powershell",
+        "cpu_seconds_delta": 0.1875
+      },
+      {
+        "id": 28172,
+        "name": "Code",
+        "cpu_seconds_delta": 0.140625
+      },
+      {
+        "id": 10820,
+        "name": "Code",
+        "cpu_seconds_delta": 0.109375
+      },
+      {
+        "id": 8440,
+        "name": "Code",
+        "cpu_seconds_delta": 0.09375
+      },
+      {
+        "id": 30344,
+        "name": "codex",
+        "cpu_seconds_delta": 0.078125
+      },
+      {
+        "id": 7116,
+        "name": "Code",
+        "cpu_seconds_delta": 0.015625
+      }
+    ],
+    "blocker": "Docker Desktop backend consumed 28.453125 CPU seconds during the observation window; host not idle",
+    "preexisting_processes_stopped": false,
+    "containers_running": 0
+  },
+  "checks": [
+    {
+      "command": "cargo test --offline --test resource_envelope --no-run",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --locked --test resource_envelope -- --nocapture",
+      "exit_code": 0,
+      "passed": 16,
+      "ignored": 1
+    },
+    {
+      "command": "cargo clippy --locked --test resource_envelope -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo doc --locked --no-deps",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo build --locked --release",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0
+    }
+  ],
+  "raw_archive": {
+    "file": "resource-envelope-108-windows-preflight-20261010.zip",
+    "sha256": "3bf14bbcc99f84715946a2808f83c3723a084d9971268f3bd96ee003514a291b",
+    "bytes": 140935,
+    "files": [
+      {
+        "path": "preflight/checks.json",
+        "bytes": 607,
+        "sha256": "9847227932777dfbf025f7f2990e93ee6f582192154bebe79b2c49de7b03b1c5"
+      },
+      {
+        "path": "preflight/host-context.json",
+        "bytes": 621,
+        "sha256": "db1f38bc3686cdc16a5d6bfab61a86aafaaf0923f162100386a31e0dcb9aae21"
+      },
+      {
+        "path": "preflight/host-cpu-before.json",
+        "bytes": 573,
+        "sha256": "58207d7d1884252de64bdba2fd2a9d07edb0917cc88a989d9aa1d709975cf509"
+      },
+      {
+        "path": "preflight/host-idle-diagnostic.json",
+        "bytes": 56837,
+        "sha256": "c01d25144a6e7ff91a2b40f57cbc3d63343191e850a78bf7135b7443230e387f"
+      },
+      {
+        "path": "preflight/host-processes-before.json",
+        "bytes": 54916,
+        "sha256": "9f3972e9f67a00558e7ac7ccc8f0e08a33ee0bea5cf1306ade21dde5f3e72e1b"
+      },
+      {
+        "path": "preflight/native-tests.log",
+        "bytes": 4302,
+        "sha256": "4bb5485589f8efb2f8bc59622656054bf8d6066190d6d12ec1271555ab2c0393"
+      },
+      {
+        "path": "preflight/package-verification.json",
+        "bytes": 714,
+        "sha256": "a7a4918bf4460c65e1a002a0748a123011867d2fba6e3e5c7582af733e7ca757"
+      },
+      {
+        "path": "harness-inputs/Cargo.toml",
+        "bytes": 930,
+        "sha256": "e3b46302815dd5d5a6e76dd797add0cb31d49ee5692f1bffebddd7097d89fdd9"
+      },
+      {
+        "path": "harness-inputs/Cargo.lock",
+        "bytes": 21075,
+        "sha256": "1c560da5a4f0af006a0ad432965e9124ad57e9060934a60be36488e6041dcbec"
+      },
+      {
+        "path": "harness-inputs/rust-toolchain.toml",
+        "bytes": 86,
+        "sha256": "559f488c181e0e9e77cf17c29de663977f036ec7ff2e2060585714bf53c52d62"
+      },
+      {
+        "path": "harness-inputs/tests/resource_envelope.rs",
+        "bytes": 48459,
+        "sha256": "2ebe08cbe9664919ce8bf9be661a46351ba28353ac1f67bc937beb6620b31815"
+      },
+      {
+        "path": "harness-inputs/tests/fixtures/resource-envelope.json",
+        "bytes": 935,
+        "sha256": "f90e1ba198009eac3f954db80ab34390357221dec78b01c40b8964895fd6ebef"
+      },
+      {
+        "path": "harness-inputs/tests/common/process.rs",
+        "bytes": 8839,
+        "sha256": "3396f33930c244cb2f221ba0e1eee2eb93781ab13d6e2f7defbc404c4f7623c3"
+      },
+      {
+        "path": "harness-inputs/tests/common/sider_process.rs",
+        "bytes": 10304,
+        "sha256": "6027726ca06c7c27f042b7521f87228463b918037be6bfd9e5e8e8c10efa929e"
+      },
+      {
+        "path": "harness-inputs/tests/common/wire.rs",
+        "bytes": 6878,
+        "sha256": "8da2190c61a84d18c625ff84722f2bf1db9828526e7e530c3c538f86991d9dd5"
+      },
+      {
+        "path": "harness-inputs/docs/resource-envelope.md",
+        "bytes": 16959,
+        "sha256": "a1ffcbfaf763fea48b27440441033c785a15330a361035efc639e1ef31c1c387"
+      },
+      {
+        "path": "package/release-manifest.json",
+        "bytes": 867041,
+        "sha256": "d577be2462fd31b234879e2a9d9928d1d69d3d8dde801df85c43554be2b74543"
+      },
+      {
+        "path": "package/SHA256SUMS",
+        "bytes": 765,
+        "sha256": "09209e0a2666ec45dfed2b5411f398363304675a02a1aa1aeea6e0709b4d5794"
+      }
+    ]
+  },
+  "retained_directory": "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-resource-envelope-108-windows",
+  "limitations": [
+    "No Windows workload measurements or capacity limits are established.",
+    "Host formatted CPU provider values were suspect; process CPU differences independently showed contention.",
+    "Checks contain summarized receipts; only native-test output and host/preflight files are retained as raw logs.",
+    "Linux schema-2 checks remain pending integration; retained Linux schema-1 evidence is unchanged.",
+    "Binary/compiled-harness hashes identify bytes but do not prove a build relationship to the staged tree."
+  ],
+  "retry": "Rerun host preflight on an idle Windows 11 host, build the harness beforehand, and invoke the same fixture only after reserving the host."
+}

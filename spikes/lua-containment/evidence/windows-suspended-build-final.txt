@@ -1,0 +1,7 @@
+cargo :     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s
+No linha:2 caractere:390
++ ...  failed' }; cargo build --locked --manifest-path spikes/lua-containme ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `d...get(s) in 0.28s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

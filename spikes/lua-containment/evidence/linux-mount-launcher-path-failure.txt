@@ -1,0 +1,19 @@
+TRANSIENT_SERVICE=sider-lua-delegated-1140.service
+Running as unit: sider-lua-delegated-1140.service
+DELEGATION PLATFORM
+Sat Oct 10 08:10:28 UTC 2026
+uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)
+Linux DESKTOP-UVOITNB 6.6.87.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun  5 18:30:46 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux
+systemd 255 (255.4-1ubuntu8.17)
+DELEGATED_ROOT=/sys/fs/cgroup/system.slice/sider-lua-delegated-1140.service
+cpuset cpu io memory pids
+ENABLED_CONTROLLERS
+cpu memory pids
+/mnt/c/Users/Usuario/Documents/Coding/sider-wt-lua-containment/spikes/lua-containment/run-delegated.sh: 28: /debug/sider-lua-containment-spike: not found
+Finished with result: exit-code
+Main processes terminated with: code=exited/status=127
+Service runtime: 73ms
+CPU time consumed: 24ms
+Memory peak: 700.0K
+Memory swap peak: 0B
+PASS transient service subtree removed

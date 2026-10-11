@@ -1,0 +1,10 @@
+cargo : error: cannot update the lock file 
+C:\Users\Usuario\Documents\Coding\sider-wt-lua-containment\spikes\lua-containment\Cargo.lock because --locked was 
+passed to prevent this
+No linha:2 caractere:197
++ ... -build.txt; cargo clippy --locked --manifest-path spikes/lua-containm ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (error: cannot u...to prevent this:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+help: to generate the lock file without accessing the network, remove the --locked flag and use --offline instead.
