@@ -1,9 +1,10 @@
 # Offline AOF migration
 
-The procedure and CLI below remain record 1. Development has a separate,
-explicit library API for [offline migration to the memory profile](agent-memory-migration.md).
-It writes header 4/record 2 into a new directory and does not activate a public
-server profile, CLI upgrade option or live replication transport.
+The default procedure below remains record 1. Development also has an explicit
+CLI upgrade and library API for [offline migration to the memory profile](agent-memory-migration.md).
+Selecting `--record-version 2` writes header 4/record 2 into a new directory.
+A memory source additionally requires `--source-record-version 2`. This does not
+activate a memory server profile or live replication transport.
 
 Partitioning is part of the directory's durable configuration. Recovery checks
 the shard count and routing version before repairing a tail or accepting data.
@@ -47,6 +48,12 @@ Cargo, use `cargo run --locked --bin sider-aof-migrate -- ...`.
 | `--max-dataset-bytes` | `67108864` | Total destination quota |
 | `--source-max-record-bytes` | `67108864` | Accepted source record limit |
 | `--max-record-bytes` | `67108864` | Destination record write limit |
+| `--source-record-version` | `1` | Explicit source codec: `1` for header 1/2/3, `2` for header 4/5 |
+| `--record-version` | `1` | Explicit destination codec: `1` retains the original migration path, `2` writes header 4 |
+
+Omitting both record flags retains the original legacy migration and its exact
+JSON report. A record-2 source requires an explicit record-2 destination; selecting
+source record 2 with default/explicit destination record 1 rejects before source I/O.
 
 The destination quota is divided statically: `total / shards`, plus one byte
 for each index below `total % shards`. Migration rejects a distribution with

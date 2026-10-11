@@ -56,6 +56,8 @@ pub fn options_from_args(
                 | "--max-dataset-bytes"
                 | "--source-max-record-bytes"
                 | "--max-record-bytes"
+                | "--source-record-version"
+                | "--record-version"
         ) {
             return Err(format!("unknown option: {name}"));
         }
@@ -96,6 +98,28 @@ pub fn options_from_args(
     }
     let mut source = AofConfig::new(required(&mut values, "--source")?.into());
     let mut destination = AofConfig::new(required(&mut values, "--destination")?.into());
+    let mut record_version = |name: &str| -> Result<usize, String> {
+        let version = values
+            .remove(name)
+            .map_or(Ok(1), |value| number(value, name))?;
+        if !matches!(version, 1 | 2) {
+            return Err(format!("{name} must be 1 or 2"));
+        }
+        Ok(version)
+    };
+    let source_record = record_version("--source-record-version")?;
+    let destination_record = record_version("--record-version")?;
+    if source_record == 2 && destination_record != 2 {
+        return Err(
+            "record-2 source requires explicit record-2 destination; downgrade refused".into(),
+        );
+    }
+    if source_record == 2 {
+        source = source.with_memory_profile();
+    }
+    if destination_record == 2 {
+        destination = destination.with_memory_profile();
+    }
     source.layout = layout(&mut values, "--source-shards", "--source-routing")?;
     destination.layout = layout(&mut values, "--shards", "--routing")?;
     let mut source_store = StoreConfig::default();
