@@ -104,6 +104,82 @@ fn create(client: &mut TcpStream, key: &[u8]) {
 }
 
 #[tokio::test]
+async fn memory_tcp_search_filters_before_top_k_and_returns_binary_distances() {
+    tcp(ServerConfig::default(), |address| {
+        let mut client = connect(address);
+        create(&mut client, b"c");
+        let mut nearest_ineligible = put(b"c", b"ineligible");
+        nearest_ineligible[3] = b"other".to_vec();
+        assert_eq!(
+            owned_command(&mut client, &nearest_ineligible).bytes,
+            b":1\r\n"
+        );
+        let mut eligible = put(b"c", b"a\0");
+        eligible[9] = [1.0_f32.to_le_bytes(), f32::from_bits(1).to_le_bytes()].concat();
+        eligible[12] = b"1".to_vec();
+        eligible.splice(13..13, [b"rank".to_vec(), b"I64".to_vec(), b"-7".to_vec()]);
+        assert_eq!(owned_command(&mut client, &eligible).bytes, b":1\r\n");
+        let mut args = vec![
+            b"MEM.SEARCH".to_vec(),
+            b"c".to_vec(),
+            b"p".to_vec(),
+            b"m".to_vec(),
+            b"r".to_vec(),
+            b"t".to_vec(),
+            vector(),
+            b"1".to_vec(),
+            b"\0\xff".to_vec(),
+            b"1".to_vec(),
+            b"rank".to_vec(),
+            b"I64".to_vec(),
+            b"-7".to_vec(),
+        ];
+        assert_eq!(
+            owned_command(&mut client, &args).value,
+            array(vec![array(vec![
+                bulk(b"a\0"),
+                bulk(&1.0_f64.to_le_bytes())
+            ])])
+        );
+        args[11] = b"RANGE".to_vec();
+        assert_eq!(
+            owned_command(&mut client, &args).bytes,
+            b"-ERR unsupported memory filter\r\n"
+        );
+        args[11] = b"I64".to_vec();
+        args[1] = b"missing".to_vec();
+        assert_eq!(owned_command(&mut client, &args).bytes, b"*0\r\n");
+        args[1] = b"c".to_vec();
+        args[7] = b"0".to_vec();
+        assert_eq!(
+            owned_command(&mut client, &args).bytes,
+            b"-ERR memory k is out of range\r\n"
+        );
+        args[7] = b"1".to_vec();
+        args[6] = [f32::NAN.to_le_bytes(), 0.0_f32.to_le_bytes()].concat();
+        assert_eq!(
+            owned_command(&mut client, &args).bytes,
+            b"-ERR memory vector contains non-finite value\r\n"
+        );
+        args[6] = vector();
+        args[2] = b"other-provider".to_vec();
+        assert_eq!(
+            owned_command(&mut client, &args).bytes,
+            b"-ERR memory model identity mismatch\r\n"
+        );
+        args[2] = b"p".to_vec();
+        args[9] = b"2".to_vec();
+        args.extend([b"rank".to_vec(), b"I64".to_vec(), b"-7".to_vec()]);
+        assert_eq!(
+            owned_command(&mut client, &args).bytes,
+            b"-ERR invalid memory argument\r\n"
+        );
+        assert_eq!(command(&mut client, &[b"PING"]).bytes, b"+PONG\r\n");
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn memory_tcp_binary_record_fields_identity_replacement_and_absence() {
     tcp(
         ServerConfig {
