@@ -136,6 +136,15 @@ pub enum Message {
         max_record_bytes: u32,
         max_snapshot_bytes: u64,
     },
+    /// Transport-3 export request; the whole durable profile precedes capacities.
+    ComposedExport {
+        sider_version: Bytes,
+        record_version: u32,
+        aof_header_version: u32,
+        required_capabilities: u32,
+        max_record_bytes: u32,
+        max_snapshot_bytes: u64,
+    },
     MemorySnapshotEntry(memory_format::Mutation),
     MemoryBatch {
         sequence: u64,
@@ -301,10 +310,45 @@ fn encode_profile(message: &Message, limits: Limits, version: u16) -> Result<Byt
             body.extend_from_slice(&max_snapshot_bytes.to_le_bytes());
             10
         }
+        Message::ComposedExport {
+            sider_version,
+            record_version,
+            aof_header_version,
+            required_capabilities,
+            max_record_bytes,
+            max_snapshot_bytes,
+        } if version == COMPOSED_VERSION => {
+            if sider_version.is_empty()
+                || sider_version.len() > 32
+                || !sider_version.iter().all(u8::is_ascii_graphic)
+                || *record_version != composed_format::RecordVersion::Legacy as u32
+                || *aof_header_version != composed_format::HEADER_VERSION
+                || *required_capabilities != composed_format::MIXED_OWNER_BATCH
+                || *max_record_bytes == 0
+                || *max_snapshot_bytes == 0
+            {
+                return Err(Error::Invalid("composed export request"));
+            }
+            body.push(sider_version.len() as u8);
+            body.extend_from_slice(sider_version);
+            for value in [
+                record_version,
+                aof_header_version,
+                required_capabilities,
+                max_record_bytes,
+            ] {
+                body.extend_from_slice(&value.to_le_bytes());
+            }
+            body.extend_from_slice(&max_snapshot_bytes.to_le_bytes());
+            10
+        }
         Message::MemorySnapshotEntry(_)
         | Message::MemoryBatch { .. }
         | Message::MemoryExport { .. } => {
             return Err(Error::Invalid("record-2 message requires transport 2"));
+        }
+        Message::ComposedExport { .. } => {
+            return Err(Error::Invalid("composed export requires transport 3"));
         }
         Message::ComposedHello(hello) if version == COMPOSED_VERSION => {
             if hello.base.record_version != composed_format::RecordVersion::Legacy as u32
@@ -485,13 +529,11 @@ fn header(header: &[u8], limits: Limits, expected_version: u16) -> Result<(u8, u
         5 => len == 36,
         9 => len == 1,
         10 => {
-            expected_version != COMPOSED_VERSION
-                && len
-                    <= if expected_version == MEMORY_VERSION {
-                        49
-                    } else {
-                        45
-                    }
+            len <= match expected_version {
+                COMPOSED_VERSION => 57,
+                MEMORY_VERSION => 49,
+                _ => 45,
+            }
         }
         11 | 12 => len == 1,
         13 => len == 24,
@@ -686,7 +728,18 @@ fn decode_profile(frame: Bytes, limits: Limits, version: u16) -> Result<Message,
         10 => {
             let length = fields.byte()? as usize;
             let sider_version = fields.take(length)?;
-            if version == MEMORY_VERSION {
+            if version == COMPOSED_VERSION {
+                let message = Message::ComposedExport {
+                    sider_version,
+                    record_version: fields.u32()?,
+                    aof_header_version: fields.u32()?,
+                    required_capabilities: fields.u32()?,
+                    max_record_bytes: fields.u32()?,
+                    max_snapshot_bytes: fields.u64()?,
+                };
+                encode_profile(&message, limits, version)?;
+                message
+            } else if version == MEMORY_VERSION {
                 let message = Message::MemoryExport {
                     sider_version,
                     record_version: fields.u32()?,

@@ -31,6 +31,17 @@ fn hello() -> ComposedHello {
     }
 }
 
+fn export() -> Message {
+    Message::ComposedExport {
+        sider_version: Bytes::from_static(b"1.0.1"),
+        record_version: 1,
+        aof_header_version: composed_format::HEADER_VERSION,
+        required_capabilities: composed_format::MIXED_OWNER_BATCH,
+        max_record_bytes: 4096,
+        max_snapshot_bytes: 65536,
+    }
+}
+
 fn reseal(frame: &mut [u8]) {
     let digest = format::snapshot_digest(format::checksum(&frame[..20]), &frame[24..]);
     frame[20..24].copy_from_slice(&digest.to_le_bytes());
@@ -138,6 +149,41 @@ fn legacy_records_roundtrip_and_invalid_frames_fail() {
     );
 }
 
+#[test]
+fn composed_export_has_exact_profile_before_capacities() {
+    let limits = Limits::default();
+    let frame = protocol::encode_composed(&export(), limits).unwrap();
+    assert_eq!(frame[10], 10);
+    assert_eq!(u32::from_le_bytes(frame[12..16].try_into().unwrap()), 30);
+    assert_eq!(
+        &frame[24..],
+        &[
+            5, b'1', b'.', b'0', b'.', b'1', 1, 0, 0, 0, // record 1
+            7, 0, 0, 0, // header 7
+            1, 0, 0, 0, // mixed capability
+            0, 16, 0, 0, // 4096 record bytes
+            0, 0, 1, 0, 0, 0, 0, 0, // 65536 snapshot bytes
+        ]
+    );
+    assert_eq!(
+        protocol::decode_composed(frame.clone(), limits).unwrap(),
+        export()
+    );
+    assert!(protocol::decode(frame.clone(), limits).is_err());
+    assert!(protocol::decode_memory(frame.clone(), limits).is_err());
+    assert!(protocol::encode(&export(), limits).is_err());
+    assert!(protocol::encode_memory(&export(), limits).is_err());
+    for length in 0..frame.len() {
+        assert!(protocol::decode_composed(frame.slice(..length), limits).is_err());
+    }
+    for (offset, value) in [(30, 2), (34, 6), (38, 0), (38, 2), (43, 0), (48, 0)] {
+        let mut changed = frame.to_vec();
+        changed[offset] = value;
+        reseal(&mut changed);
+        assert!(protocol::decode_composed(Bytes::from(changed), limits).is_err());
+    }
+}
+
 #[tokio::test]
 async fn admitted_read_rejects_wrong_version_before_payload_allocation() {
     let limits = Limits::default();
@@ -174,5 +220,33 @@ async fn admitted_read_rejects_wrong_version_before_payload_allocation() {
         protocol::read_composed_authorized(&mut input, limits, Duration::from_secs(1), |_| true,)
             .await
             .is_err()
+    );
+}
+
+#[tokio::test]
+async fn export_request_requires_kind_authority_before_payload_read() {
+    let limits = Limits::default();
+    let (mut output, mut input) = duplex(128);
+    protocol::write_composed(&mut output, &export(), limits, Duration::from_secs(1))
+        .await
+        .unwrap();
+    assert_eq!(
+        protocol::read_composed_authorized(&mut input, limits, Duration::from_secs(1), |kind| kind
+            == 10,)
+        .await
+        .unwrap()
+        .1,
+        export()
+    );
+
+    let (mut output, mut input) = duplex(128);
+    protocol::write_composed(&mut output, &export(), limits, Duration::from_secs(1))
+        .await
+        .unwrap();
+    assert!(
+        protocol::read_composed_authorized(&mut input, limits, Duration::from_secs(1), |kind| kind
+            == 1,)
+        .await
+        .is_err()
     );
 }
