@@ -24,6 +24,7 @@ pub(super) struct Transaction {
     queue: Option<Queue>,
     watched: BTreeMap<Bytes, WatchToken>,
     watch_shard: Option<usize>,
+    watch_crossed: bool,
 }
 
 #[derive(Default)]
@@ -88,6 +89,7 @@ impl Transaction {
         {
             self.watched.clear();
             self.watch_shard = None;
+            self.watch_crossed = false;
         }
     }
     pub(super) fn active(&self) -> bool {
@@ -129,6 +131,7 @@ impl Transaction {
                 } else {
                     self.queue = Some(Queue {
                         shard: self.watch_shard,
+                        crossed: self.watch_crossed,
                         ..Queue::default()
                     });
                     ok()
@@ -140,6 +143,7 @@ impl Transaction {
                 } else {
                     self.watched.clear();
                     self.watch_shard = None;
+                    self.watch_crossed = false;
                     ok()
                 }
             }
@@ -149,6 +153,7 @@ impl Transaction {
                 };
                 let watched = std::mem::take(&mut self.watched).into_values().collect();
                 self.watch_shard = None;
+                self.watch_crossed = false;
                 if queue.permission_denied {
                     drop(watched);
                     error(b"NOPERM Permission denied")
@@ -174,9 +179,15 @@ impl Transaction {
                         return Ok(error(b"ERR WATCH key limit exceeded"));
                     }
                     let mut shard = self.watch_shard;
+                    let mut crossed = self.watch_crossed;
                     for key in &keys {
                         if let Err(error) = database.router().select_key(key, &mut shard) {
-                            return Ok(Action::Reply(Frame::Error(Bytes::from(error.to_string()))));
+                            if !config.composed_aof {
+                                return Ok(Action::Reply(Frame::Error(Bytes::from(
+                                    error.to_string(),
+                                ))));
+                            }
+                            crossed = true;
                         }
                     }
                     if !keys.is_empty() {
@@ -189,12 +200,14 @@ impl Transaction {
                         }
                     }
                     self.watch_shard = shard;
+                    self.watch_crossed = crossed;
                     ok()
                 }
             }
             Command::Unwatch if self.queue.is_none() => {
                 self.watched.clear();
                 self.watch_shard = None;
+                self.watch_crossed = false;
                 ok()
             }
             command => {

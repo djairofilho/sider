@@ -101,23 +101,26 @@ fn composed_exec_survives_restart_and_other_readers_refuse_header7() {
         b"*1\r\n*3\r\n$5\r\nright\r\n$4\r\nleft\r\n$5\r\nright\r\n",
     );
 
-    send(&mut first, &[b"WATCH", b"a"], b"+OK\r\n");
+    send(&mut first, &[b"WATCH", b"a", b"b"], b"+OK\r\n");
     send(&mut first, &[b"MULTI"], b"+OK\r\n");
     send(&mut first, &[b"SET", b"b", b"discarded"], b"+QUEUED\r\n");
     send(&mut second, &[b"SET", b"a", b"new"], b"+OK\r\n");
     send(&mut first, &[b"EXEC"], b"*-1\r\n");
     send(&mut first, &[b"GET", b"b"], b"$5\r\nright\r\n");
 
+    send(&mut first, &[b"WATCH", b"a", b"b"], b"+OK\r\n");
+    send(&mut first, &[b"MULTI"], b"+OK\r\n");
+    send(&mut first, &[b"SET", b"a", b"discarded"], b"+QUEUED\r\n");
+    send(&mut second, &[b"SET", b"b", b"right"], b"+OK\r\n");
+    send(&mut first, &[b"EXEC"], b"*-1\r\n");
+    send(&mut first, &[b"GET", b"a"], b"$3\r\nnew\r\n");
+
+    send(&mut first, &[b"WATCH", b"a"], b"+OK\r\n");
+    send(&mut first, &[b"WATCH", b"b"], b"+OK\r\n");
     send(&mut first, &[b"MULTI"], b"+OK\r\n");
     send(
         &mut first,
         &[b"PUBLISH", b"channel", b"message"],
-        b"+QUEUED\r\n",
-    );
-    send(&mut first, &[b"SET", b"a", b"bad"], b"+QUEUED\r\n");
-    send(
-        &mut first,
-        &[b"SET", b"b", b"bad"],
         b"-ERR unsupported cross-shard transaction command\r\n",
     );
     send(
