@@ -102,7 +102,10 @@ The development tree has bounded `MEM.*` lifecycle and exact search stages. Its
 default record-1 AOF profile refuses memory writes; an explicit record-2
 standalone server profile permits durable memory writes and an explicitly
 configured internal listener exports live record-2 backups. Memory replication
-and release evidence remain pending.
+and release evidence remain pending. The internal record-2 replica installation
+path can publish a header-5 snapshot generation and replace owner-worker images
+after durable publication; the server still refuses replica following because
+incremental transport, journal publication, and promotion are not integrated.
 
 For small datasets, exact search supplies a correctness oracle. Approximate
 indexes trade recall for speed and add memory and rebuild costs. Filtered search
