@@ -671,5 +671,27 @@ mod tests {
         icacls(&directory.0, &["/remove:g", "*S-1-1-0"]);
         icacls(&directory.0, &["/grant", "*S-1-1-0:(OI)(CI)(IO)F"]);
         assert!(restricted_files(&nested, CLIENT).is_ok());
+
+        let junction = directory.0.join("junction");
+        let created = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "New-Item -ItemType Junction -Path $env:SIDER_TEST_JUNCTION -Target $env:SIDER_TEST_TARGET | Out-Null",
+            ])
+            .env("SIDER_TEST_JUNCTION", &junction)
+            .env("SIDER_TEST_TARGET", &nested)
+            .output()
+            .unwrap();
+        assert!(created.status.success(), "junction setup failed");
+        use std::os::windows::fs::MetadataExt;
+        assert_ne!(
+            fs::symlink_metadata(&junction).unwrap().file_attributes() & 0x400,
+            0
+        );
+        assert!(restricted_files(&junction, CLIENT).is_err());
+        fs::remove_dir(&junction).unwrap();
+        assert!(restricted_files(&nested, CLIENT).is_ok());
     }
 }
