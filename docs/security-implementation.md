@@ -46,4 +46,11 @@ reads and a child-directory open remain anchored to the original handle, while a
 fresh walk rejects the symlink. This is a directory replacement boundary, not
 complete filesystem race evidence.
 
+The POSIX material reader now rechecks the opened final directory's owner and
+mode before and after each material file read. A focused test changes that
+directory to group-writable after its descriptor was opened; the read fails and
+succeeds only after the mode is restored. This catches a persistent permission
+change at the pinned directory, but does not revalidate ancestor modes after
+the initial walk or prove resistance to a transient change and restore.
+
 Issue #93 still requires broader executable deployment evidence for generation activation, close barriers, reconnects, and operation leases; full real TLS replica/backup/admin allow and deny matrices across certificate chains; further POSIX replacement and concurrent permission-change tests; and the remaining Windows permission cases including alternate owner, file reparse points, and replacement races. The Windows protected startup gate stays closed. Ignored package, external, soak, and release tests have not been promoted into evidence for this feature.
