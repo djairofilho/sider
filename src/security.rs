@@ -63,8 +63,6 @@ pub enum Error {
     Configuration,
     #[error("protected Windows profile unavailable pending filesystem permission validation")]
     PlatformValidation,
-    #[error("protected internal profile unavailable pending generation revocation support")]
-    InternalRuntimeUnavailable,
     #[error("authentication failed")]
     Authentication,
     #[error("permission denied")]

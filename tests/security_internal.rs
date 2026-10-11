@@ -2288,15 +2288,21 @@ fn security_startup_preflight_requires_exact_lanes_and_outgoing_policy() {
 }
 
 #[test]
-fn security_startup_executable_gates_remain_closed() {
+fn security_startup_executable_rejects_missing_material_before_recovery() {
     let directory = StartupDirectory::new();
     let profile = sider::security::StartupSecurity::from_lookup(|name| {
         (name == "SIDER_SECURITY_DIR").then(|| directory.0.clone().into_os_string())
     })
     .unwrap();
+    #[cfg(windows)]
     assert!(matches!(
         profile.preflight(&directory.config()),
-        Err(sider::security::Error::InternalRuntimeUnavailable)
+        Err(sider::security::Error::PlatformValidation)
+    ));
+    #[cfg(unix)]
+    assert!(matches!(
+        profile.preflight(&directory.config()),
+        Err(sider::security::Error::Configuration)
     ));
     #[cfg(windows)]
     assert!(matches!(
@@ -2304,6 +2310,161 @@ fn security_startup_executable_gates_remain_closed() {
         Err(sider::security::Error::PlatformValidation)
     ));
     assert!(!directory.0.join("aof").exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn security_posix_complete_file_generation_serves_client_and_internal_tls() {
+    use sha2::Digest;
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    struct SecurityDirectory(std::path::PathBuf, std::path::PathBuf);
+    impl SecurityDirectory {
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+    impl Drop for SecurityDirectory {
+        fn drop(&mut self) {
+            let resolved = fs::canonicalize(&self.0).ok();
+            let home = fs::canonicalize(&self.1).ok();
+            if home.is_some()
+                && resolved.as_ref().and_then(|path| path.parent()) == home.as_deref()
+                && self.0.file_name().is_some_and(|name| {
+                    name.to_string_lossy()
+                        .starts_with("sider-complete-security-")
+                })
+            {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+    }
+
+    let home = fs::canonicalize(std::env::var_os("HOME").expect("service home")).unwrap();
+    let security_directory = SecurityDirectory(
+        home.join(format!(
+            "sider-complete-security-{}-{}",
+            std::process::id(),
+            time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+        )),
+        home,
+    );
+    fs::create_dir(security_directory.path()).unwrap();
+    fs::set_permissions(security_directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let remote = certs.leaf(PEER, 2, None);
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let files = [
+        (
+            "client-policy.json",
+            br#"{"version":1,"users":[]}"#.to_vec(),
+        ),
+        ("client-cert.pem", primary.0.as_bytes().to_vec()),
+        ("client-key.pem", primary.1.as_bytes().to_vec()),
+        (
+            "internal-policy.json",
+            serde_json::to_vec(&runtime_policy(&["monitor"])).unwrap(),
+        ),
+        ("internal-cert.pem", primary.0.as_bytes().to_vec()),
+        ("internal-key.pem", primary.1.as_bytes().to_vec()),
+        ("internal-ca.pem", certs.issuer.pem().into_bytes()),
+        ("internal-crl.pem", crl.as_bytes().to_vec()),
+    ];
+    let mut digests = std::collections::BTreeMap::new();
+    for (name, bytes) in &files {
+        let digest = sha2::Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        digests.insert(*name, digest);
+        let path = security_directory.path().join(name);
+        fs::write(&path, bytes).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let manifest = security_directory.path().join("security-manifest.json");
+    fs::write(
+        &manifest,
+        serde_json::to_vec(&json!({"version":1,"generation":1,"files":digests})).unwrap(),
+    )
+    .unwrap();
+    fs::set_permissions(&manifest, fs::Permissions::from_mode(0o600)).unwrap();
+    let key = security_directory.path().join("internal-key.pem");
+    fs::set_permissions(&key, fs::Permissions::from_mode(0o640)).unwrap();
+    assert!(sider::security::Generation::server(security_directory.path(), true, false).is_err());
+    fs::set_permissions(&key, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&key, b"invalid replacement").unwrap();
+    assert!(sider::security::Generation::server(security_directory.path(), true, false).is_err());
+    fs::write(&key, primary.1.as_bytes()).unwrap();
+
+    let directory = StartupDirectory::new();
+    let config = directory.config();
+    let profile = sider::security::StartupSecurity::from_lookup(|name| {
+        (name == "SIDER_SECURITY_DIR").then(|| security_directory.path().as_os_str().to_owned())
+    })
+    .unwrap();
+    let preflight = profile.preflight(&config).unwrap().unwrap();
+    drop(preflight);
+    assert!(!directory.0.join("aof").exists());
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_sider"));
+    for (name, _) in std::env::vars_os() {
+        if name.to_str().is_some_and(|name| name.starts_with("SIDER_")) {
+            command.env_remove(name);
+        }
+    }
+    command
+        .env("SIDER_SECURITY_PROFILE", "protected")
+        .env("SIDER_SECURITY_DIR", security_directory.path())
+        .env("SIDER_ADDR", "127.0.0.1:0")
+        .env("SIDER_REPLICATION_ADDR", "127.0.0.1:0")
+        .env("SIDER_AOF_DIR", directory.0.join("aof"))
+        .env("SIDER_READY_FILE", directory.0.join("client.ready"))
+        .env(
+            "SIDER_REPLICATION_READY_FILE",
+            directory.0.join("internal.ready"),
+        );
+    let mut child = startup_process::OwnedChild::spawn(&mut command).unwrap();
+    let client_address = startup_ready(config.ready_file.as_deref().unwrap()).await;
+    let internal_address = startup_ready(
+        config
+            .replication
+            .as_ref()
+            .unwrap()
+            .ready_file
+            .as_deref()
+            .unwrap(),
+    )
+    .await;
+    child.assert_alive().unwrap();
+    let mut client = raw_connect(&raw_connector(&certs, None), client_address).await;
+    client.write_all(b"*1\r\n$4\r\nPING\r\n").await.unwrap();
+    client.flush().await.unwrap();
+    let mut reply = [0; 33];
+    timeout(DEADLINE, client.read_exact(&mut reply))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&reply, b"-NOAUTH Authentication required\r\n");
+    let tool = certs.transport(&remote, &crl, tool_policy(SERVER), true);
+    let mut stream = tool.connect(internal_address).await.unwrap();
+    protocol::write(
+        &mut stream,
+        &Message::StatusRequest,
+        protocol::Limits::default(),
+        DEADLINE,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        protocol::read(&mut stream, protocol::Limits::default(), DEADLINE)
+            .await
+            .unwrap(),
+        Message::Status { .. }
+    ));
+    child.terminate(DEADLINE).unwrap();
 }
 
 #[tokio::test]
@@ -2456,7 +2617,7 @@ async fn security_startup_live_server_replica_reconnects_with_rotated_runtime_id
 }
 
 #[test]
-fn security_startup_executable_internal_gate_precedes_recovery_bind_and_readiness() {
+fn security_startup_executable_invalid_material_precedes_recovery_bind_and_readiness() {
     let directory = StartupDirectory::new();
     let occupied_client = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let occupied_internal = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -2491,9 +2652,12 @@ fn security_startup_executable_internal_gate_precedes_recovery_bind_and_readines
     let mut child = startup_process::OwnedChild::spawn(&mut command).unwrap();
     let output = child.wait(DEADLINE).unwrap();
     assert!(!output.status.success());
+    #[cfg(windows)]
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("protected internal profile unavailable")
+        String::from_utf8_lossy(&output.stderr).contains("protected Windows profile unavailable")
     );
+    #[cfg(unix)]
+    assert!(String::from_utf8_lossy(&output.stderr).contains("security configuration unavailable"));
     assert!(!directory.0.join("aof").exists());
     assert!(!directory.0.join("client.ready").exists());
     assert!(!directory.0.join("internal.ready").exists());
@@ -2543,7 +2707,7 @@ async fn security_startup_expired_preflight_rejects_before_recovery_or_binds() {
 async fn security_startup_posix_executable_validates_restricted_generation_and_serves_tls() {
     use sha2::{Digest, Sha256};
     use std::{fs, os::unix::fs::PermissionsExt};
-    let path = fs::canonicalize(std::env::current_dir().unwrap())
+    let path = fs::canonicalize(std::env::var_os("HOME").expect("service home"))
         .unwrap()
         .join(format!(
             ".sider-protected-startup-{}-{}",

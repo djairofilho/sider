@@ -503,10 +503,9 @@ mod tests {
                 let _ = fs::remove_dir_all(&self.0);
             }
         }
-        // /tmp is deliberately unsuitable: its writable ancestor violates the
-        // contract. The executing checkout must have service/root-owned ancestors
-        // without group/other write; failures are evidence, never skipped passes.
-        let root = fs::canonicalize(std::env::current_dir().unwrap())
+        // /tmp and a checkout on a shared mount can have writable ancestors.
+        // The service home must have safe ancestors; failure is not skipped.
+        let root = fs::canonicalize(std::env::var_os("HOME").expect("service home"))
             .unwrap()
             .join(format!(
                 ".sider-security-posix-{}-{}",
