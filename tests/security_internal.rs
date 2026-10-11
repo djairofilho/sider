@@ -1,5 +1,8 @@
 //! Real mTLS boundaries for internal request roles, directions, and expiry.
 
+#[path = "common/process.rs"]
+mod startup_process;
+
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use bytes::Bytes;
@@ -1784,4 +1787,587 @@ async fn security_live_consumer_replica_installs_streams_and_stops_on_role_revoc
     let finished = tokio::spawn(async { Ok(()) });
     replica.finish(finished).await;
     source.finish(server).await;
+}
+
+struct StartupDirectory(std::path::PathBuf);
+impl StartupDirectory {
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "sider-security-startup-{}-{}",
+            std::process::id(),
+            time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        Self(path)
+    }
+    fn config(&self) -> sider::ServerConfig {
+        let mut aof = sider::persistence::AofConfig::new(self.0.join("aof"));
+        aof.compact_after_bytes = 0;
+        sider::ServerConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            aof: Some(aof),
+            ready_file: Some(self.0.join("client.ready")),
+            replication: Some(sider::replication::config::Config {
+                ready_file: Some(self.0.join("internal.ready")),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+}
+impl Drop for StartupDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+async fn startup_ready(path: &std::path::Path) -> SocketAddr {
+    timeout(DEADLINE, async {
+        loop {
+            if let Ok(bytes) = std::fs::read(path) {
+                let value: Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(value["transport_mode"], "tls");
+                assert_eq!(value["authentication_required"], true);
+                return format!(
+                    "{}:{}",
+                    value["host"].as_str().unwrap(),
+                    value["port"].as_u64().unwrap()
+                )
+                .parse()
+                .unwrap();
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("server publishes complete TLS readiness")
+}
+
+#[tokio::test]
+async fn security_startup_live_server_uses_shared_runtime_for_client_and_internal() {
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let rotated = certs.leaf(SERVER, 3, None);
+    let remote = certs.leaf(PEER, 2, None);
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let directory = StartupDirectory::new();
+    let config = directory.config();
+    let preflight = sider::security::ServerPreflight::new(
+        &config,
+        runtime_generation(
+            1,
+            &certs,
+            &primary,
+            &crl,
+            runtime_policy(&["monitor"]),
+            false,
+        ),
+    )
+    .unwrap();
+    let runtime = preflight.runtime();
+    let (stop, shutdown) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(sider::server::serve_live(
+        config.clone(),
+        async {
+            let _ = shutdown.await;
+        },
+        preflight,
+    ));
+    let client_address = startup_ready(config.ready_file.as_deref().unwrap()).await;
+    let internal_address = startup_ready(
+        config
+            .replication
+            .as_ref()
+            .unwrap()
+            .ready_file
+            .as_deref()
+            .unwrap(),
+    )
+    .await;
+    let mut client = raw_connect(&raw_connector(&certs, None), client_address).await;
+    client.write_all(b"*1\r\n$4\r\nPING\r\n").await.unwrap();
+    client.flush().await.unwrap();
+    let mut reply = [0; 33];
+    let expected = b"-NOAUTH Authentication required\r\n";
+    assert_eq!(expected.len(), reply.len());
+    timeout(DEADLINE, client.read_exact(&mut reply))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&reply, expected);
+    let tool = certs.transport(&remote, &crl, tool_policy(SERVER), true);
+    let mut status = tool.connect(internal_address).await.unwrap();
+    protocol::write(
+        &mut status,
+        &Message::StatusRequest,
+        protocol::Limits::default(),
+        DEADLINE,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        protocol::read(&mut status, protocol::Limits::default(), DEADLINE)
+            .await
+            .unwrap(),
+        Message::Status {
+            readonly: false,
+            ..
+        }
+    ));
+    let mut idle = tool.connect(internal_address).await.unwrap();
+    runtime
+        .activate(runtime_generation(
+            2,
+            &certs,
+            &rotated,
+            &crl,
+            runtime_policy(&["monitor"]),
+            false,
+        ))
+        .await
+        .unwrap();
+    physically_closed(&mut client).await;
+    physically_closed(&mut idle).await;
+    let mut fresh = tool.connect(internal_address).await.unwrap();
+    protocol::write(
+        &mut fresh,
+        &Message::StatusRequest,
+        protocol::Limits::default(),
+        DEADLINE,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        protocol::read(&mut fresh, protocol::Limits::default(), DEADLINE)
+            .await
+            .unwrap(),
+        Message::Status { .. }
+    ));
+    stop.send(()).unwrap();
+    timeout(DEADLINE, server).await.unwrap().unwrap().unwrap();
+    assert!(!config.ready_file.unwrap().exists());
+    assert!(!config.replication.unwrap().ready_file.unwrap().exists());
+}
+
+#[tokio::test]
+async fn security_startup_changed_configuration_rejects_before_aof_and_listener_binds() {
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let directory = StartupDirectory::new();
+    let mut config = directory.config();
+    let occupied_client = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let occupied_internal = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    config.bind_addr = occupied_client.local_addr().unwrap();
+    config.replication.as_mut().unwrap().listen = occupied_internal.local_addr().unwrap();
+    let preflight = sider::security::ServerPreflight::new(
+        &config,
+        runtime_generation(
+            1,
+            &certs,
+            &primary,
+            &crl,
+            runtime_policy(&["monitor"]),
+            false,
+        ),
+    )
+    .unwrap();
+    config.max_connections += 1;
+    let result = sider::server::serve_live(config, std::future::pending(), preflight).await;
+    assert!(
+        matches!(result, Err(sider::server::ServerError::Security(_))),
+        "security check must precede occupied bind errors"
+    );
+    assert!(!directory.0.join("aof").exists());
+    assert!(!directory.0.join("client.ready").exists());
+    assert!(!directory.0.join("internal.ready").exists());
+}
+
+#[test]
+fn security_startup_preflight_requires_exact_lanes_and_outgoing_policy() {
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let directory = StartupDirectory::new();
+    let config = directory.config();
+    let client_only = sider::security::Generation::client_files(
+        1,
+        br#"{"version":1,"users":[]}"#,
+        primary.0.as_bytes(),
+        primary.1.as_bytes(),
+    )
+    .unwrap();
+    assert!(sider::security::ServerPreflight::new(&config, client_only).is_err());
+    let no_internal = sider::ServerConfig::default();
+    assert!(
+        sider::security::ServerPreflight::new(
+            &no_internal,
+            runtime_generation(
+                1,
+                &certs,
+                &primary,
+                &crl,
+                runtime_policy(&["monitor"]),
+                false
+            )
+        )
+        .is_err()
+    );
+    let outgoing =
+        json!({"version":1,"instance_id":"primary-a","principals":[],"upstream_principal":PEER});
+    assert!(
+        sider::security::ServerPreflight::new(
+            &config,
+            runtime_generation(1, &certs, &primary, &crl, outgoing, true)
+        )
+        .is_err()
+    );
+    let mut replica = config;
+    replica.replication.as_mut().unwrap().upstream = Some("127.0.0.1:12345".parse().unwrap());
+    assert!(
+        sider::security::ServerPreflight::new(
+            &replica,
+            runtime_generation(
+                1,
+                &certs,
+                &primary,
+                &crl,
+                runtime_policy(&["monitor"]),
+                false
+            )
+        )
+        .is_err()
+    );
+    assert!(!directory.0.join("aof").exists());
+}
+
+#[test]
+fn security_startup_executable_gates_remain_closed() {
+    let directory = StartupDirectory::new();
+    let profile = sider::security::StartupSecurity::from_lookup(|name| {
+        (name == "SIDER_SECURITY_DIR").then(|| directory.0.clone().into_os_string())
+    })
+    .unwrap();
+    assert!(matches!(
+        profile.preflight(&directory.config()),
+        Err(sider::security::Error::InternalRuntimeUnavailable)
+    ));
+    #[cfg(windows)]
+    assert!(matches!(
+        profile.preflight(&sider::ServerConfig::default()),
+        Err(sider::security::Error::PlatformValidation)
+    ));
+    assert!(!directory.0.join("aof").exists());
+}
+
+#[tokio::test]
+async fn security_startup_live_server_replica_reconnects_with_rotated_runtime_identity() {
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let remote = certs.leaf(PEER, 2, None);
+    let rotated = certs.leaf(PEER, 4, None);
+    let until = time::OffsetDateTime::now_utc() + time::Duration::hours(1);
+    let crl = certs.crl(until, None);
+    let source_directory = StartupDirectory::new();
+    let source_config = source_directory.config();
+    let source_preflight = sider::security::ServerPreflight::new(
+        &source_config,
+        runtime_generation(
+            1,
+            &certs,
+            &primary,
+            &crl,
+            runtime_policy(&["replica", "monitor"]),
+            false,
+        ),
+    )
+    .unwrap();
+    let source_runtime = source_preflight.runtime();
+    let (source_stop, source_shutdown) = tokio::sync::oneshot::channel();
+    let source = tokio::spawn(sider::server::serve_live(
+        source_config.clone(),
+        async {
+            let _ = source_shutdown.await;
+        },
+        source_preflight,
+    ));
+    let source_address = startup_ready(
+        source_config
+            .replication
+            .as_ref()
+            .unwrap()
+            .ready_file
+            .as_deref()
+            .unwrap(),
+    )
+    .await;
+    let replica_directory = StartupDirectory::new();
+    let mut replica_config = replica_directory.config();
+    let config = replica_config.replication.as_mut().unwrap();
+    config.upstream = Some(source_address);
+    config.reconnect_min = Duration::from_millis(20);
+    config.reconnect_max = Duration::from_millis(50);
+    let outgoing = json!({"version":1,"instance_id":"holder-b","principals":[{"uri_san":SERVER,"roles":["monitor"]}],"upstream_principal":SERVER});
+    let replica_preflight = sider::security::ServerPreflight::new(
+        &replica_config,
+        runtime_generation(1, &certs, &remote, &crl, outgoing.clone(), true),
+    )
+    .unwrap();
+    let replica_runtime = replica_preflight.runtime();
+    let (replica_stop, replica_shutdown) = tokio::sync::oneshot::channel();
+    let replica = tokio::spawn(sider::server::serve_live(
+        replica_config.clone(),
+        async {
+            let _ = replica_shutdown.await;
+        },
+        replica_preflight,
+    ));
+    let replica_address = startup_ready(
+        replica_config
+            .replication
+            .as_ref()
+            .unwrap()
+            .ready_file
+            .as_deref()
+            .unwrap(),
+    )
+    .await;
+    let monitor_policy = parse(
+        json!({"version":1,"instance_id":"primary-a","principals":[],"upstream_principal":PEER}),
+        true,
+    );
+    let monitor = certs.transport(&primary, &crl, monitor_policy, true);
+    async fn status(tool: &InternalTransport, address: SocketAddr) -> Message {
+        let mut stream = tool.connect(address).await.unwrap();
+        protocol::write(
+            &mut stream,
+            &Message::StatusRequest,
+            protocol::Limits::default(),
+            DEADLINE,
+        )
+        .await
+        .unwrap();
+        protocol::read(&mut stream, protocol::Limits::default(), DEADLINE)
+            .await
+            .unwrap()
+    }
+    timeout(DEADLINE, async {
+        loop {
+            if matches!(
+                status(&monitor, replica_address).await,
+                Message::Status {
+                    readonly: true,
+                    connected: true,
+                    full_syncs: 1,
+                    ..
+                }
+            ) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("server dispatches live full replication");
+    source_runtime
+        .activate(runtime_generation(
+            2,
+            &certs,
+            &primary,
+            &certs.crl(until, Some(2)),
+            runtime_policy(&["replica", "monitor"]),
+            false,
+        ))
+        .await
+        .unwrap();
+    replica_runtime
+        .activate(runtime_generation(
+            2, &certs, &rotated, &crl, outgoing, true,
+        ))
+        .await
+        .unwrap();
+    timeout(DEADLINE, async {
+        loop {
+            if matches!(
+                status(&monitor, replica_address).await,
+                Message::Status {
+                    connected: true,
+                    partial_syncs: 1..,
+                    ..
+                }
+            ) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("reconnect requires new certificate because primary revoked old serial");
+    replica_stop.send(()).unwrap();
+    timeout(DEADLINE, replica).await.unwrap().unwrap().unwrap();
+    source_stop.send(()).unwrap();
+    timeout(DEADLINE, source).await.unwrap().unwrap().unwrap();
+}
+
+#[test]
+fn security_startup_executable_internal_gate_precedes_recovery_bind_and_readiness() {
+    let directory = StartupDirectory::new();
+    let occupied_client = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let occupied_internal = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_sider"));
+    for (name, _) in std::env::vars_os() {
+        if name.to_str().is_some_and(|name| name.starts_with("SIDER_")) {
+            command.env_remove(name);
+        }
+    }
+    command
+        .env("SIDER_SECURITY_PROFILE", "protected")
+        .env("SIDER_SECURITY_DIR", &directory.0)
+        .env("SIDER_AOF_DIR", directory.0.join("aof"))
+        .env(
+            "SIDER_ADDR",
+            occupied_client.local_addr().unwrap().to_string(),
+        )
+        .env(
+            "SIDER_REPLICATION_ADDR",
+            occupied_internal.local_addr().unwrap().to_string(),
+        )
+        .env("SIDER_READY_FILE", directory.0.join("client.ready"))
+        .env(
+            "SIDER_REPLICATION_READY_FILE",
+            directory.0.join("internal.ready"),
+        );
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let mut child = startup_process::OwnedChild::spawn(&mut command).unwrap();
+    let output = child.wait(DEADLINE).unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("protected internal profile unavailable")
+    );
+    assert!(!directory.0.join("aof").exists());
+    assert!(!directory.0.join("client.ready").exists());
+    assert!(!directory.0.join("internal.ready").exists());
+}
+
+#[tokio::test]
+async fn security_startup_expired_preflight_rejects_before_recovery_or_binds() {
+    let certs = Certificates::new();
+    let expires = time::OffsetDateTime::now_utc() + time::Duration::seconds(2);
+    let primary = certs.leaf(SERVER, 1, Some(expires));
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let directory = StartupDirectory::new();
+    let config = directory.config();
+    let preflight = sider::security::ServerPreflight::new(
+        &config,
+        runtime_generation(
+            1,
+            &certs,
+            &primary,
+            &crl,
+            runtime_policy(&["monitor"]),
+            false,
+        ),
+    )
+    .unwrap();
+    timeout(DEADLINE, async {
+        while time::OffsetDateTime::now_utc().unix_timestamp() < expires.unix_timestamp() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        sider::server::serve_live(config, std::future::pending(), preflight).await,
+        Err(sider::server::ServerError::Security(_))
+    ));
+    assert!(!directory.0.join("aof").exists());
+    assert!(!directory.0.join("client.ready").exists());
+    assert!(!directory.0.join("internal.ready").exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn security_startup_posix_executable_validates_restricted_generation_and_serves_tls() {
+    use sha2::{Digest, Sha256};
+    use std::{fs, os::unix::fs::PermissionsExt};
+    let path = fs::canonicalize(std::env::current_dir().unwrap())
+        .unwrap()
+        .join(format!(
+            ".sider-protected-startup-{}-{}",
+            std::process::id(),
+            time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+        ));
+    fs::create_dir(&path).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    let directory = StartupDirectory(path);
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let mut hashes = serde_json::Map::new();
+    for (name, bytes) in [
+        (
+            "client-policy.json",
+            br#"{"version":1,"users":[]}"#.as_slice(),
+        ),
+        ("client-cert.pem", primary.0.as_bytes()),
+        ("client-key.pem", primary.1.as_bytes()),
+    ] {
+        let path = directory.0.join(name);
+        fs::write(&path, bytes).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        hashes.insert(
+            name.into(),
+            json!(
+                Sha256::digest(bytes)
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            ),
+        );
+    }
+    let manifest = directory.0.join("security-manifest.json");
+    fs::write(
+        &manifest,
+        serde_json::to_vec(&json!({"version":1,"generation":1,"files":hashes})).unwrap(),
+    )
+    .unwrap();
+    fs::set_permissions(manifest, fs::Permissions::from_mode(0o600)).unwrap();
+    let ready = directory.0.join("ready.json");
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_sider"));
+    for (name, _) in std::env::vars_os() {
+        if name.to_str().is_some_and(|name| name.starts_with("SIDER_")) {
+            command.env_remove(name);
+        }
+    }
+    command
+        .env("SIDER_SECURITY_DIR", &directory.0)
+        .env("SIDER_ADDR", "127.0.0.1:0")
+        .env("SIDER_READY_FILE", &ready);
+    let mut child = startup_process::OwnedChild::spawn(&mut command).unwrap();
+    let address = startup_ready(&ready).await;
+    child.assert_alive().unwrap();
+    let mut client = raw_connect(&raw_connector(&certs, None), address).await;
+    client.write_all(b"*1\r\n$4\r\nPING\r\n").await.unwrap();
+    client.flush().await.unwrap();
+    let mut reply = [0; 33];
+    timeout(DEADLINE, client.read_exact(&mut reply))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&reply, b"-NOAUTH Authentication required\r\n");
+    child.terminate(DEADLINE).unwrap();
 }

@@ -488,4 +488,71 @@ mod tests {
         let duplicate = br#"{"version":1,"generation":1,"files":{"client-policy.json":"a","client-policy.json":"b"}}"#;
         assert!(serde_json::from_slice::<Manifest>(duplicate).is_err());
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn security_posix_restricted_generation_accepts_exact_modes_and_rejects_symlinks_and_broad_access()
+     {
+        use std::{
+            fs,
+            os::unix::fs::{PermissionsExt, symlink},
+        };
+        struct Directory(std::path::PathBuf);
+        impl Drop for Directory {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        // /tmp is deliberately unsuitable: its writable ancestor violates the
+        // contract. The executing checkout must have service/root-owned ancestors
+        // without group/other write; failures are evidence, never skipped passes.
+        let root = fs::canonicalize(std::env::current_dir().unwrap())
+            .unwrap()
+            .join(format!(
+                ".sider-security-posix-{}-{}",
+                std::process::id(),
+                time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+            ));
+        fs::create_dir(&root).unwrap();
+        let directory = Directory(root);
+        fs::set_permissions(&directory.0, fs::Permissions::from_mode(0o700)).unwrap();
+        let (manifest, files) = fixture(1);
+        for (name, bytes) in &files {
+            let path = directory.0.join(name);
+            fs::write(&path, bytes).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let manifest_path = directory.0.join(MANIFEST);
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        fs::set_permissions(&manifest_path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(Generation::server(&directory.0, false, false).is_ok());
+        let policy = directory.0.join("client-policy.json");
+        fs::set_permissions(&policy, fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(Generation::server(&directory.0, false, false).is_err());
+        fs::set_permissions(&policy, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::rename(&policy, directory.0.join("policy-target")).unwrap();
+        symlink("policy-target", &policy).unwrap();
+        assert!(Generation::server(&directory.0, false, false).is_err());
+        fs::remove_file(&policy).unwrap();
+        fs::rename(directory.0.join("policy-target"), &policy).unwrap();
+        fs::set_permissions(&directory.0, fs::Permissions::from_mode(0o750)).unwrap();
+        assert!(Generation::server(&directory.0, false, false).is_err());
+        fs::set_permissions(&directory.0, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(Generation::server(&directory.0, false, false).is_ok());
+        let nested = directory.0.join("nested");
+        fs::create_dir(&nested).unwrap();
+        fs::set_permissions(&nested, fs::Permissions::from_mode(0o700)).unwrap();
+        for name in CLIENT.iter().copied().chain(std::iter::once(MANIFEST)) {
+            let path = nested.join(name);
+            fs::copy(directory.0.join(name), &path).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert!(Generation::server(&nested, false, false).is_ok());
+        fs::set_permissions(&directory.0, fs::Permissions::from_mode(0o770)).unwrap();
+        assert!(Generation::server(&nested, false, false).is_err());
+        fs::set_permissions(&directory.0, fs::Permissions::from_mode(0o700)).unwrap();
+        let alias = directory.0.join("alias");
+        symlink("nested", &alias).unwrap();
+        assert!(Generation::server(&alias, false, false).is_err());
+    }
 }

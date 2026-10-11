@@ -456,6 +456,9 @@ impl InternalPolicy {
     pub fn own_identity(&self, uri_san: &str) -> bool {
         uri(uri_san).is_some_and(|(id, _)| id == self.instance_id)
     }
+    pub(super) fn outgoing(&self) -> bool {
+        self.upstream_principal.is_some()
+    }
     pub fn upstream_identity(&self, uri_san: &str) -> bool {
         self.upstream_principal.as_deref() == Some(uri_san)
     }

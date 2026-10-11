@@ -39,6 +39,15 @@ impl StartupSecurity {
         }
         Ok(Self { profile, directory })
     }
+    /// Constructs the typed live-runtime preflight without bypassing deployment gates.
+    pub fn preflight(
+        &self,
+        config: &crate::ServerConfig,
+    ) -> Result<Option<super::ServerPreflight>, Error> {
+        self.server(config)?
+            .map(|generation| super::ServerPreflight::new(config, generation))
+            .transpose()
+    }
     pub fn server(&self, config: &crate::ServerConfig) -> Result<Option<Generation>, Error> {
         if self.profile == Profile::LegacyLoopback {
             self.target(config.bind_addr)?;
@@ -50,8 +59,8 @@ impl StartupSecurity {
             }
             Ok(None)
         } else {
-            // Static mTLS component APIs are a separate development stage. Do not
-            // expose a protected executable listener without internal revocation.
+            // Live embedding APIs do not establish executable deployment evidence.
+            // Keep this gate until material permissions and lifecycle are proven.
             if config.replication.is_some() {
                 return Err(Error::InternalRuntimeUnavailable);
             }
