@@ -133,7 +133,7 @@ pub struct Worker {
     admission: super::admission::Admission,
     snapshots: mpsc::Receiver<oneshot::Sender<Vec<super::Mutation>>>,
     controls: mpsc::Receiver<super::replication::Control>,
-    coordination: mpsc::Receiver<super::coordinator::Control>,
+    pub(super) coordination: mpsc::Receiver<super::coordinator::Control>,
     pub(super) coordinated: Option<super::transaction::OwnerTransaction>,
     pub(super) replication: Option<crate::replication::state::Runtime>,
 }
