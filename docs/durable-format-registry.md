@@ -224,7 +224,10 @@ An isolated transport-3 codec now frames record-1 snapshot and batch records and
 requires an exact header-7/mixed-bit Hello. Its bounded reader rejects transport
 1/2 frames before payload allocation. Its isolated Export codec carries the same
 exact profile before capacities; invalid profile fields reject even with valid
-checksums. No network session or backup path selects transport 3 yet.
+checksums. An explicit captured-snapshot exporter now checks the request against
+the source profile and capacities before sending a Hello or snapshot payload. It
+preflights record encoding, key order and transfer bytes before advertising a cut.
+No network listener or backup archive path selects transport 3 yet.
 No public AOF configuration selects that profile; default recovery still rejects
 version 7 before inspecting records, including every torn first-record prefix,
 and preserves the file bytes. Backup and a production transport-3 session remain
