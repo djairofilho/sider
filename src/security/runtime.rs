@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
+use sha2::{Digest, Sha256};
 use tokio::sync::{OwnedRwLockReadGuard, RwLock, mpsc, oneshot};
 
 use super::{ClientPolicy, ClientSecurity, ClientTransport, Error, Generation};
@@ -40,6 +41,43 @@ struct State {
 /// and retain operation leases through accepted effects before enabling deployment.
 #[derive(Clone)]
 pub struct ClientRuntime(Arc<State>);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ManifestIdentity {
+    Unreadable,
+    Oversized,
+    Digest([u8; 32]),
+}
+impl ManifestIdentity {
+    fn read(directory: &std::path::Path) -> Self {
+        use std::io::Read;
+        let path = directory.join("security-manifest.json");
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            return Self::Unreadable;
+        };
+        if !metadata.is_file() {
+            return Self::Unreadable;
+        }
+        if metadata.len() > 4 * 1024 * 1024 {
+            return Self::Oversized;
+        }
+        let Ok(file) = std::fs::File::open(path) else {
+            return Self::Unreadable;
+        };
+        let mut bytes = Vec::new();
+        if file
+            .take(4 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .is_err()
+        {
+            return Self::Unreadable;
+        }
+        if bytes.len() > 4 * 1024 * 1024 {
+            return Self::Oversized;
+        }
+        Self::Digest(Sha256::digest(bytes).into())
+    }
+}
 
 pub(crate) struct Update {
     pub policy: Arc<ClientPolicy>,
@@ -307,10 +345,11 @@ impl ClientRuntime {
                 let path = directory.clone();
                 async move {
                     tokio::task::spawn_blocking(move || {
-                        Generation::server(&path, internal, outgoing)
+                        let identity = ManifestIdentity::read(&path);
+                        (Generation::server(&path, internal, outgoing), identity)
                     })
                     .await
-                    .unwrap_or(Err(Error::Configuration))
+                    .unwrap_or((Err(Error::Configuration), ManifestIdentity::Unreadable))
                 }
             },
             shutdown,
@@ -323,27 +362,35 @@ impl ClientRuntime {
         mut shutdown: tokio::sync::watch::Receiver<bool>,
     ) where
         F: FnMut() -> Load,
-        Load: std::future::Future<Output = Result<Generation, Error>>,
+        Load: std::future::Future<Output = (Result<Generation, Error>, ManifestIdentity)>,
     {
         let mut ticks = tokio::time::interval(std::time::Duration::from_secs(1));
         ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut last_rejected = None;
         loop {
             tokio::select! {
                 biased;
                 _ = shutdown.wait_for(|stopping| *stopping) => return,
                 _ = ticks.tick() => {}
             }
-            let result = match load().await {
+            let (loaded, identity) = load().await;
+            let result = match loaded {
                 Ok(generation) => self.activate(generation).await,
                 Err(_) => Err(Error::Configuration),
             };
             match result {
                 Ok(true) => {
+                    last_rejected = None;
                     tracing::info!("security generation activated after revocation cleanup")
                 }
-                Ok(false) => {}
+                Ok(false) => last_rejected = None,
                 Err(_) => {
-                    tracing::warn!("security replacement rejected; retaining active generation")
+                    if last_rejected != Some(identity) {
+                        tracing::warn!(
+                            "security replacement rejected; retaining active generation"
+                        );
+                        last_rejected = Some(identity);
+                    }
                 }
             }
         }
@@ -399,8 +446,43 @@ mod tests {
     use super::*;
     use std::{
         collections::VecDeque,
+        io::Write,
         sync::atomic::{AtomicUsize, Ordering},
     };
+
+    struct CaptureWriter(Arc<Mutex<Vec<u8>>>);
+    impl Write for CaptureWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn security_manifest_identity_tracks_bytes_without_exposing_them() {
+        let directory = std::env::temp_dir().join(format!(
+            "sider-manifest-identity-{}-{}",
+            std::process::id(),
+            time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let manifest = directory.join("security-manifest.json");
+        assert!(matches!(
+            ManifestIdentity::read(&directory),
+            ManifestIdentity::Unreadable
+        ));
+        std::fs::write(&manifest, b"first").unwrap();
+        let first = ManifestIdentity::read(&directory);
+        std::fs::write(&manifest, b"second").unwrap();
+        assert!(first != ManifestIdentity::read(&directory));
+        std::fs::write(&manifest, b"first").unwrap();
+        assert!(first == ManifestIdentity::read(&directory));
+        std::fs::remove_file(manifest).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
 
     async fn observed(
         runtime: &ClientRuntime,
@@ -447,11 +529,12 @@ mod tests {
                 .poll_with(
                     move || {
                         invocations.fetch_add(1, Ordering::SeqCst);
-                        std::future::ready(
+                        std::future::ready((
                             replacements
                                 .pop_front()
                                 .unwrap_or(Err(Error::Configuration)),
-                        )
+                            ManifestIdentity::Unreadable,
+                        ))
                     },
                     shutdown,
                 )
@@ -466,5 +549,78 @@ mod tests {
         observed(&runtime, &calls, 4, 3).await;
         stop.send_replace(true);
         task.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn security_poll_logs_each_invalid_manifest_once_until_change_or_success() {
+        let certified = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+        let generation = Generation::client_files(
+            1,
+            br#"{"version":1,"users":[]}"#,
+            certified.cert.pem().as_bytes(),
+            certified.key_pair.serialize_pem().as_bytes(),
+        )
+        .unwrap();
+        let runtime = ClientRuntime::new(generation).unwrap();
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer({
+                let output = output.clone();
+                move || CaptureWriter(output.clone())
+            })
+            .finish();
+        let _subscriber = tracing::subscriber::set_default(subscriber);
+        let first = ManifestIdentity::Digest([1; 32]);
+        let second = ManifestIdentity::Digest([2; 32]);
+        let mut replacements = VecDeque::from([
+            (Err(Error::Configuration), first),
+            (Err(Error::Configuration), first),
+            (Err(Error::Configuration), second),
+            (Err(Error::Configuration), second),
+            (
+                Ok(Generation::client_files(
+                    2,
+                    br#"{"version":1,"users":[]}"#,
+                    certified.cert.pem().as_bytes(),
+                    certified.key_pair.serialize_pem().as_bytes(),
+                )
+                .unwrap()),
+                first,
+            ),
+            (Err(Error::Configuration), first),
+        ]);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let invocations = calls.clone();
+        let poller = runtime.clone();
+        let (stop, shutdown) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(async move {
+            poller
+                .poll_with(
+                    move || {
+                        invocations.fetch_add(1, Ordering::SeqCst);
+                        std::future::ready(replacements.pop_front().unwrap())
+                    },
+                    shutdown,
+                )
+                .await
+        });
+        for index in 1..=6 {
+            if index > 1 {
+                tokio::time::advance(std::time::Duration::from_secs(1)).await;
+            }
+            observed(&runtime, &calls, index, if index < 5 { 1 } else { 2 }).await;
+        }
+        stop.send_replace(true);
+        task.await.unwrap();
+        let captured = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+        assert_eq!(captured.matches("security replacement rejected").count(), 3);
+        assert_eq!(
+            captured
+                .matches("security generation activated after revocation cleanup")
+                .count(),
+            1
+        );
     }
 }
