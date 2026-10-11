@@ -346,7 +346,7 @@ async fn serve_prepared_inner(
                 aof_limits: aof_config.limits,
             };
             database
-                .promote_replica(context, crate::replication::new_epoch()?)
+                .promote_replica(context.clone(), crate::replication::new_epoch()?)
                 .await?;
             let source = crate::replication::memory_source::Source {
                 database: database.clone(),
@@ -356,6 +356,7 @@ async fn serve_prepared_inner(
                     max_dataset_bytes: config.max_dataset_bytes,
                 },
                 config: replication.clone(),
+                context,
             };
             let source_shutdown = receiver.clone();
             let source_internal = internal_security.clone();
