@@ -112,6 +112,7 @@ described in the [persistence guide](docs/persistence.md).
 | `SIDER_MAX_DATASET_BYTES` | `67108864` | Positive logical quota, distinct from RSS; no eviction |
 | `SIDER_SHARDS` | `1` | Between 1 and 256 workers, with divided quota and fixed configuration |
 | `SIDER_AOF_DIR` | Unset | Exclusive data directory; enables AOF |
+| `SIDER_AOF_RECORD_VERSION` | `1` | Set `2` with `SIDER_AOF_DIR` to enable standalone durable `MEM.*`; record-2 replication is unavailable |
 | `SIDER_AOF_SYNC` | `always` | `always` waits for sync per batch; `everysec` synchronizes periodically |
 | `SIDER_REPLICATION_ADDR` | Unset | Internal replication, backup, and administration listener; requires AOF |
 | `SIDER_REPLICA_OF` | Unset | Upstream IP and port; configures the instance as a replica |

@@ -29,6 +29,7 @@ requires [offline migration](aof-migration.md).
 | Variable | Default | Contract |
 | --- | --- | --- |
 | `SIDER_AOF_DIR` | Unset | Native directory path; enables persistence |
+| `SIDER_AOF_RECORD_VERSION` | `1` | `1` for the legacy format; explicit `2` enables standalone durable memory records |
 | `SIDER_AOF_SYNC` | `always` | `always` or `everysec` |
 | `SIDER_AOF_QUEUE_CAPACITY` | `32` | Maximum number of requests waiting for the writer |
 | `SIDER_AOF_MAX_RECORD_BYTES` | `67108864` | Record payload; between 64 bytes and 64 MiB |
@@ -42,6 +43,23 @@ receives `ERR AOF record limit exceeded`, without append or application, while t
 connection remains available. The 64 MiB ceiling still applies to configurations
 with larger datasets.
 The default limit of 100,000 mutations per batch is also checked before allocation.
+
+### Standalone memory AOF
+
+The development server accepts `SIDER_AOF_RECORD_VERSION=2` only with
+`SIDER_AOF_DIR`. It creates header 4/record 2 files and persists `MEM.*` writes
+with the configured sync policy. Restart with the same record version and directory.
+`sider --diagnose` and `INFO config` report `aof_record_version` without reading
+the directory. Record 1 remains the default and refuses memory writes.
+
+Record 2 refuses a legacy AOF directory before repair; migrate a stopped legacy
+directory with `sider-aof-migrate --record-version 2` into a new directory first.
+A record-1 reader refuses a record-2 directory. The standalone record-2 server
+refuses replication configuration because its server-side transport and install
+path are still being integrated. Use the explicit memory-profile offline backup
+API described in [the memory backup guide](agent-memory-backup.md); the default
+`sider-backup` CLI remains on schema 1. These restrictions remain part of
+[issue #110](https://github.com/djairofilho/sider/issues/110).
 
 ## Acknowledgment and failure
 

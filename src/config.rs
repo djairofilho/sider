@@ -160,8 +160,27 @@ impl ServerConfig {
             }
         }
         config.ready_file = lookup("SIDER_READY_FILE").map(PathBuf::from);
-        if let Some(directory) = lookup("SIDER_AOF_DIR") {
+        let record_version = match lookup("SIDER_AOF_RECORD_VERSION") {
+            None => 1,
+            Some(value) if value == "1" => 1,
+            Some(value) if value == "2" => 2,
+            Some(_) => {
+                return Err(ConfigError::InvalidServerLimits {
+                    reason: "SIDER_AOF_RECORD_VERSION accepts 1 or 2",
+                });
+            }
+        };
+        let aof_directory = lookup("SIDER_AOF_DIR");
+        if record_version == 2 && aof_directory.is_none() {
+            return Err(ConfigError::InvalidServerLimits {
+                reason: "SIDER_AOF_RECORD_VERSION=2 requires SIDER_AOF_DIR",
+            });
+        }
+        if let Some(directory) = aof_directory {
             let mut aof = crate::persistence::AofConfig::new(PathBuf::from(directory));
+            if record_version == 2 {
+                aof = aof.with_memory_profile();
+            }
             crate::storage::routing::ShardRouter::new(config.shards)?;
             aof.layout.shard_count = config.shards as u32;
             if let Some(value) = lookup("SIDER_AOF_SYNC") {
@@ -198,6 +217,11 @@ impl ServerConfig {
             let aof = self.aof.as_ref().ok_or(ConfigError::InvalidServerLimits {
                 reason: "replication requires SIDER_AOF_DIR",
             })?;
+            if aof.is_memory_profile() {
+                return Err(ConfigError::InvalidServerLimits {
+                    reason: "record-2 replication requires the memory transport integration",
+                });
+            }
             replication.validate(aof)?;
         }
         if let Some(aof) = &self.aof {
@@ -413,6 +437,44 @@ mod tests {
         assert_eq!(config.shutdown_timeout, Duration::from_secs(5));
         assert_eq!(config.ready_file, None);
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn record_two_requires_explicit_aof_and_refuses_unimplemented_replication() {
+        let configured = config_with(&[
+            ("SIDER_AOF_DIR", "memory-aof"),
+            ("SIDER_AOF_RECORD_VERSION", "2"),
+        ])
+        .unwrap();
+        assert!(configured.aof.as_ref().unwrap().is_memory_profile());
+        assert!(
+            !config_with(&[("SIDER_AOF_DIR", "legacy-aof")])
+                .unwrap()
+                .aof
+                .unwrap()
+                .is_memory_profile()
+        );
+        for value in ["", "0", "02", "3", " 2", "2 "] {
+            assert!(
+                config_with(&[
+                    ("SIDER_AOF_DIR", "aof"),
+                    ("SIDER_AOF_RECORD_VERSION", value)
+                ])
+                .is_err()
+            );
+        }
+        assert!(config_with(&[("SIDER_AOF_RECORD_VERSION", "2")]).is_err());
+        assert!(
+            config_with(&[
+                ("SIDER_AOF_DIR", "aof"),
+                ("SIDER_AOF_RECORD_VERSION", "2"),
+                ("SIDER_REPLICATION_ADDR", "127.0.0.1:0"),
+            ])
+            .is_err()
+        );
+        let mut direct = configured;
+        direct.replication = Some(crate::replication::config::Config::default());
+        assert!(direct.validate().is_err());
     }
 
     #[test]

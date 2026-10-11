@@ -32,7 +32,8 @@ pub enum SyncPolicy {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AofConfig {
-    /// Isolated development profile; no environment or server CLI enables it.
+    /// Explicit record-2 profile; server configuration may select it for a
+    /// standalone instance, while replication remains unavailable.
     memory_profile: bool,
     pub directory: PathBuf,
     pub layout: DurableLayout,
@@ -56,8 +57,8 @@ impl AofConfig {
             max_delta_bytes: 16 * 1024 * 1024,
         }
     }
-    /// Selects the record-2/header-4-or-5 development profile explicitly.
-    /// Live backup/replication transport remains gated.
+    /// Selects the record-2/header-4-or-5 profile explicitly.
+    /// Server-side replication remains gated.
     /// Explicit offline memory backup and migration APIs handle this profile.
     pub fn with_memory_profile(mut self) -> Self {
         self.memory_profile = true;
