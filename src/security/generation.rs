@@ -332,8 +332,8 @@ fn restricted_files(directory: &Path, names: &[&str]) -> Result<BTreeMap<String,
         process::{Command, Stdio},
         time::{Duration, Instant},
     };
-    // .NET inspects each opened FileStream's owner and DACL, then reads that same
-    // handle. Trusted ancestors are checked before descending; no path is supplied
+    // The helper checks type, owner, and DACL through opened handles and holds
+    // ancestor handles while it reads fixed file names. No path is supplied
     // through script syntax. PowerShell runs hidden without user profiles.
     use std::os::windows::process::CommandExt;
     const SCRIPT: &str = include_str!("restricted-files.ps1");
@@ -697,6 +697,31 @@ mod tests {
         icacls(&policy, &["/grant", "*S-1-1-0:R"]);
         assert!(restricted_files(&directory.0, CLIENT).is_err());
         icacls(&policy, &["/remove:g", "*S-1-1-0"]);
+        assert!(restricted_files(&directory.0, CLIENT).is_ok());
+
+        let policy_target = directory.0.join("policy-target");
+        fs::rename(&policy, &policy_target).unwrap();
+        let file_symlink = std::os::windows::fs::symlink_file(&policy_target, &policy);
+        match file_symlink {
+            Ok(()) => {
+                use std::os::windows::fs::MetadataExt;
+                assert_ne!(
+                    fs::symlink_metadata(&policy).unwrap().file_attributes() & 0x400,
+                    0
+                );
+                assert!(restricted_files(&directory.0, CLIENT).is_err());
+                fs::remove_file(&policy).unwrap();
+            }
+            Err(error) => {
+                assert_eq!(
+                    error.raw_os_error(),
+                    Some(1314),
+                    "unexpected file symlink failure"
+                );
+                eprintln!("file symlink case unavailable on this host: {error}");
+            }
+        }
+        fs::rename(policy_target, &policy).unwrap();
         assert!(restricted_files(&directory.0, CLIENT).is_ok());
 
         let nested = directory.0.join("nested");
