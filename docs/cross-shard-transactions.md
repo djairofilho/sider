@@ -26,9 +26,10 @@ replica cursor. A real process test now exercises mixed-owner EXEC through the
 transport-3 primary and follower, full sync, resumed follower, source restart,
 manual promotion, and recovery. A controlled TCP source also tests truncated
 FULL and batch frames, a bad FULL digest, gaps, duplicates, and killing the
-follower immediately after ACK. Eight additional child-process kills cover the
-replica append, sync, and owner-apply hooks. Network disconnect combinations,
-power-loss behavior, and a release gate remain outstanding. The issue remains open.
+follower immediately after ACK. Eight child-process kills and eight controlled
+TCP disconnects cover the replica append, sync, and owner-apply hooks. Other
+network/ACK combinations, power-loss behavior, and a release gate remain
+outstanding. The issue remains open.
 
 ## Contents
 
@@ -317,7 +318,7 @@ proof is concentrated at failure boundaries and release integration:
 | [Connection transaction state](../src/connection/transaction.rs) and [router](../src/storage/routing.rs) discover several owners in the composed profile | Broader command and WATCH fault cases |
 | [Coordinator](../src/storage/coordinator.rs) prepares owners and appends one durable batch under exclusive admission | Boundary fault injection through publication and ACK |
 | [AOF recovery](../src/persistence/writer.rs) stages mixed records before applying any owner | Exact candidate and migration compatibility evidence |
-| [Replica storage](../src/storage/replication.rs) installs snapshots and applies one mixed batch before cursor advancement; eight injected errors and eight child-process kills at append/apply/sync hooks recover an empty or complete batch | Network disconnect combinations and power-loss evidence |
+| [Replica storage](../src/storage/replication.rs) installs snapshots and applies one mixed batch before cursor advancement; eight injected errors, eight child-process kills, and eight controlled TCP disconnects cover append/apply/sync hooks | Remaining ACK/retransmission combinations and power-loss evidence |
 | [Transport-3 session](../src/replication/session.rs) performs FULL, CONTINUE, ACK, loopback process recovery, and a protected in-process live session | Protected process deployment and complete failure matrix |
 
 The staged implementation plan is:
@@ -355,8 +356,10 @@ both owners despite a failed ACK path. Each injected fault closes admission
 without advancing the live follower cursor. A separate child-process test
 pauses and kills at those same eight hooks. Recovery observes sequence 0 or 1
 with both owners absent or both present; after sync and at all owner-apply hooks,
-sequence 1 and both values survive the process kill. These tests do not
-simulate power loss or prove every transport disconnect boundary.
+sequence 1 and both values survive the process kill. A controlled TCP source
+also disconnects at each hook before releasing the paused apply. The follower
+finishes the batch, reconnects with cursor 1, and recovers both values. These
+tests do not simulate power loss or prove every ACK/retransmission boundary.
 
 ## Required deterministic tests
 
