@@ -1,85 +1,85 @@
 # Reference agent memory client
 
-This credential-free example demonstrates the frozen `sider-memory/1` TCP
-commands with a deterministic two-dimensional embedding fixture. The fixture
-stands in for an external embedding provider; it does not call a model or make
-a relevance claim. In an application, generate vectors before sending commands
-to Sider and record the provider, model revision, transformation, and source
-provenance with the record.
+This credential-free example demonstrates `sider-memory/1` with deterministic
+two-dimensional embedding fixtures. The vectors are generated outside Sider;
+the example does not call a model or make a relevance claim. Each record carries
+the provider, model revision, input transformation, and source provenance.
 
-## Prerequisites and run
+## Verify an extracted development binary
 
-Use a development `sider` binary that includes the `MEM.*` TCP parser. The
-published 1.0.1 binary does not implement these commands. The memory search
-stage leaves the default server AOF profile on record 1, so the commands below
-run this example in memory. A standalone development server can explicitly
-select `SIDER_AOF_RECORD_VERSION=2` with `SIDER_AOF_DIR`; the reference example
-has not yet been validated against an extracted distribution bundle or the
-full durable recovery gate.
-
-From this development branch, build the executable. In the first terminal,
-set its path and start it. An extracted development bundle with these changes
-can be used by setting `$SiderBin` to its executable instead:
+Use a development `sider` binary with `MEM.*` and record-2 AOF. The published
+1.0.1 binary does not implement these commands. From a clean checkout, run on
+Windows with Python 3.10 or newer:
 
 ```powershell
 cargo build --locked --bin sider
+python -B .\examples\agent-memory\verify_extracted.py --binary .\target\debug\sider.exe --output "$env:TEMP\sider-memory-reference.json"
+python -B -m unittest discover -s .\examples\agent-memory -p 'test_*.py' -v
+```
+
+On Linux:
+
+```sh
+cargo build --locked --bin sider
+python3 -B examples/agent-memory/verify_extracted.py --binary target/debug/sider --output /tmp/sider-memory-reference.json
+python3 -B -m unittest discover -s examples/agent-memory -p 'test_*.py' -v
+```
+
+The verifier creates a temporary development ZIP from the built binary,
+extracts it, checks byte equality by SHA-256, then starts the **extracted
+executable** on loopback with a fresh record-2 AOF directory. The JSON records
+the source SHA, source/archive/extracted binary hashes, configuration,
+platform, and exact RESP bulk arguments and replies as hex. It tests provider
+failure before any write, filtered retrieval, source attribution, replacement,
+deletion, TTL expiry, and recovered state after process restart. It publishes
+JSON only after all assertions pass. The temporary ZIP and AOF directory are
+removed. This is a development-binary integration check, not a release receipt.
+
+The expected filtered result is `policy-1` in `team-a`. The `team-b` policy is
+excluded by namespace, and the `team-a` note by the typed
+`category BYTES policy` predicate. After replacement, `policy-1` has source
+`handbook://security` and revision `rev-8`. `note-2` and the short-lived
+`temporary` record remain absent after restart.
+
+## Manual in-memory run
+
+Start a development binary in one PowerShell terminal:
+
+```powershell
 $env:SIDER_SECURITY_PROFILE = 'legacy-loopback'
 $env:SIDER_ADDR = '127.0.0.1:6380'
 Remove-Item Env:SIDER_SECURITY_DIR -ErrorAction SilentlyContinue
 Remove-Item Env:SIDER_AOF_DIR -ErrorAction SilentlyContinue
-$SiderBin = (Resolve-Path .\target\debug\sider.exe).Path
-& $SiderBin --version
-& $SiderBin
+& .\target\debug\sider.exe
 ```
 
-The explicit `legacy-loopback` profile binds plaintext access to loopback and
-has no authentication or ACL. Keep this example on a trusted local machine.
-The `namespace` argument is an application eligibility filter only; every
-client that reaches the listener can request any collection or namespace. It
-does not authenticate a user or authorize access. Protected network use waits
-for the separate security implementation and verification.
-
-In a second terminal at the repository root, use Python 3.10 or newer:
+In another terminal:
 
 ```powershell
-python .\examples\agent-memory\reference.py --host 127.0.0.1 --port 6380
-python .\examples\agent-memory\reference.py --fail-provider
-python -m unittest discover -s .\examples\agent-memory -p 'test_*.py' -v
+python -B .\examples\agent-memory\reference.py --host 127.0.0.1 --port 6380
+python -B .\examples\agent-memory\reference.py --fail-provider
 ```
 
-The first command prints the filtered hit, source attribution, replacement,
-expiry, deletion, and the in-memory restart limitation. Each record carries the
-fixture provider, model, revision, and transform as provenance as well as the
-collection's immutable model identity. A filtered search should
-return only `policy-1` in `team-a`; the `team-b` policy is excluded by namespace
-and the `team-a` note is excluded by the typed `category BYTES policy` predicate.
-`--fail-provider` prints `preflight failed: fixture provider failure requested;
-Sider commands sent: 0` and exits without opening a connection. The unit tests
-check this preflight boundary, reject non-finite output, and verify binary-safe
-RESP request framing.
-
-## Failure and write boundary
-
-The example computes and validates every vector before `MEM.CREATE`, so a
-missing credential or failed external provider can follow the same application
-boundary: fail preflight and send zero Sider commands. The deterministic fixture
-needs no credentials. This guarantee does not make a sequence of network writes
-transactional. A disconnect or server failure after `MEM.CREATE` or some
-`MEM.PUT` commands can leave a partial batch; callers needing batch atomicity
-must define retry/reconciliation behavior or wait for a separately specified
-server transaction contract.
-
-## Restart check
-
-After the example finishes, stop Sider with Ctrl+C and start it again using the
-same commands. Then run:
+After stopping and restarting this in-memory process, verify absence:
 
 ```powershell
-python .\examples\agent-memory\reference.py --host 127.0.0.1 --port 6380 --check-empty
+python -B .\examples\agent-memory\reference.py --host 127.0.0.1 --port 6380 --check-empty
 ```
 
-It expects `MEM.INFO after restart: None` because this process has no AOF. Keep
-`SIDER_AOF_DIR` unset for this run. The default AOF profile writes record 1 and
-rejects memory writes. The standalone record-2 server path is documented in
-[the persistence guide](../../docs/persistence.md), but this example's restart
-check remains an in-memory check.
+A manually started record-2 AOF process can instead be checked after restart
+with `--check-recovered`. The automated verifier supplies the exact durable
+configuration and cleanup.
+
+## Security and write boundary
+
+`legacy-loopback` has plaintext access without authentication or ACL. The
+`namespace` field is a search eligibility filter, not an authorization
+boundary: every reachable client can request every namespace. Protected
+deployment requires the separate controls under issue #93.
+
+The example computes and validates all vectors before `MEM.CREATE`. Missing
+credentials or a provider failure can therefore send zero Sider commands, as
+the unit tests and extracted-binary verifier check. The fixture needs no
+credentials or paid service. Once writes begin, a network disconnect can leave
+a partial batch. A caller requiring batch atomicity must provide retry and
+reconciliation logic or use a future transaction contract.
