@@ -345,9 +345,28 @@ async fn serve_prepared_inner(
                 },
                 aof_limits: aof_config.limits,
             };
-            database
-                .promote_replica(context.clone(), crate::replication::new_epoch()?)
-                .await?;
+            if !runtime.readonly() {
+                database
+                    .promote_replica(context.clone(), crate::replication::new_epoch()?)
+                    .await?;
+            } else if metadata.is_none() {
+                let image = database
+                    .snapshot(Some(aof))
+                    .await
+                    .map_err(crate::replication::Error::from)?;
+                database
+                    .install_memory_replica(
+                        context.clone(),
+                        0,
+                        runtime.status().applied,
+                        image
+                            .mutations
+                            .into_iter()
+                            .map(crate::persistence::memory_format::Mutation::from_storage)
+                            .collect(),
+                    )
+                    .await?;
+            }
             let source = crate::replication::memory_source::Source {
                 database: database.clone(),
                 aof: aof.clone(),
@@ -356,7 +375,7 @@ async fn serve_prepared_inner(
                     max_dataset_bytes: config.max_dataset_bytes,
                 },
                 config: replication.clone(),
-                context,
+                context: context.clone(),
             };
             let source_shutdown = receiver.clone();
             let source_internal = internal_security.clone();
@@ -393,6 +412,52 @@ async fn serve_prepared_inner(
                     tracing::error!(%error, "memory export listener terminated with failure");
                 }
             });
+            if runtime.readonly() {
+                let replica_db = database.clone();
+                let replica_config = replication.clone();
+                let replica_aof = aof_config.clone();
+                let replica_shutdown = receiver.clone();
+                let replica_internal = internal_security.clone();
+                workers.spawn(async move {
+                    let result = match replica_internal {
+                        Some(InternalAdmission::Live(security)) => {
+                            crate::replication::memory_follow::follow_live(
+                                replica_db,
+                                context,
+                                replica_aof,
+                                replica_config,
+                                replica_shutdown,
+                                security,
+                            )
+                            .await
+                        }
+                        Some(InternalAdmission::Static(security)) => {
+                            crate::replication::memory_follow::follow_secure(
+                                replica_db,
+                                context,
+                                replica_aof,
+                                replica_config,
+                                replica_shutdown,
+                                security,
+                            )
+                            .await
+                        }
+                        None => {
+                            crate::replication::memory_follow::follow_plain(
+                                replica_db,
+                                context,
+                                replica_aof,
+                                replica_config,
+                                replica_shutdown,
+                            )
+                            .await
+                        }
+                    };
+                    if let Err(error) = result {
+                        tracing::error!(%error, "memory replica follower terminated with failure");
+                    }
+                });
+            }
         }
     } else if let (Some(listener), Some(replication), Some(runtime), Some((aof, _))) = (
         replication_listener,

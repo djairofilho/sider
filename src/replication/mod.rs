@@ -57,4 +57,5 @@ pub enum Error {
 }
 
 pub mod memory;
+pub(crate) mod memory_follow;
 pub(crate) mod memory_source;

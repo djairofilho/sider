@@ -187,8 +187,8 @@ pub(super) async fn read_memory_phase(
     deadline: Duration,
     phase: InternalPhase,
     authority: Option<&Authority>,
-) -> Result<Message, Error> {
-    Ok(
+) -> Result<(bytes::Bytes, Message), Error> {
+    let (frame, message, _lease) =
         protocol::read_memory_admitted(socket, limits, deadline, |kind| async move {
             if !phase.permits(kind) {
                 return Err(protocol::Error::Invalid("permission denied"));
@@ -201,9 +201,8 @@ pub(super) async fn read_memory_phase(
                 .await
                 .map_err(|_| protocol::Error::Invalid("permission denied"))
         })
-        .await?
-        .1,
-    )
+        .await?;
+    Ok((frame, message))
 }
 
 pub(super) async fn write(
