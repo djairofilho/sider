@@ -1,6 +1,7 @@
 # Sider agent memory contract version 1
 
-Contract ID: `sider-memory/1`. Status: **architecturally accepted; awaiting versioning; not released**.
+Contract ID: `sider-memory/1`.
+Status: **versioned in source; not released**.
 This is the deliverable for [#109](https://github.com/djairofilho/sider/issues/109).
 It defines observables for the lifecycle in
 [#110](https://github.com/djairofilho/sider/issues/110) and exact retrieval in
@@ -807,10 +808,10 @@ the existing manifest policy. Admission maxima still need #108/#112 workload
 evidence before any production capacity or latency claim.
 
 This contract does not certify implementation, publication, or a release gate.
-The staged native lifecycle has Store/worker, format, and explicit record-2 AOF
-tests. A library-only `AofConfig::with_memory_profile()` now exercises header 4/5
-recovery, guarded append, and compaction. The default server, CLI, and environment
-remain on record 1 and reject headers 4/5; backup, replication transport, and
-offline migration refuse the new profile. The TCP parser exposes no MEM commands.
-#109 closes after this contract is versioned; #110 and #111 remain separate
+The development source includes bounded `MEM.*` commands, exact search, and
+explicit record-2 AOF, backup, migration, and transport stages. The default
+record-1 server profile still refuses memory writes. Public record-2 activation,
+memory replica installation, cross-platform evidence, and release gates remain
+tracked by #110 and #111. The published 1.0.1 binary has no `MEM.*` support.
+#109 covers this versioned contract; #110 and #111 remain separate
 implementation and evidence tasks.

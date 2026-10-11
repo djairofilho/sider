@@ -1,12 +1,13 @@
 # Network security boundary
 
-This is the target contract for [issue #115](https://github.com/djairofilho/sider/issues/115)
-and implementation follow-up [#93](https://github.com/djairofilho/sider/issues/93).
-It describes required behavior; it does not claim that the published 1.0.1 binary or
-current source implements it. The 1.0.1 listeners have no peer authentication or
-transport encryption.
+This is the versioned target contract for
+[issue #115](https://github.com/djairofilho/sider/issues/115) and implementation
+follow-up [#93](https://github.com/djairofilho/sider/issues/93). It describes
+required behavior; #93 tracks remaining implementation and release evidence.
+The published 1.0.1 listeners have no peer authentication or transport
+encryption.
 
-Contract version: 1, architecturally accepted for versioning in #115. Changes to
+Contract version: 1, versioned in source. Changes to
 wire replies, profile defaults, role authority, or policy interpretation require
 a new contract version and migration note.
 
