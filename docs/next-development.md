@@ -117,6 +117,10 @@ The native record-2 lifecycle and process-restart cases passed on Windows/NTFS
 and Linux WSL2/ext4 at commit `c0acc07`; see
 [issue #110 validation](evidence/issue-110-memory-lifecycle-c0acc07.md).
 Publication gates and package evidence remain separate work under #104.
+Exact search was compared with an independent generated oracle and checked at
+the retained-member limit on Windows/NTFS and Linux WSL2/ext4 at commit
+`df38b94`; see
+[issue #111 validation](evidence/issue-111-exact-search-df38b94.md).
 
 For small datasets, exact search supplies a correctness oracle. Approximate
 indexes trade recall for speed and add memory and rebuild costs. Filtered search

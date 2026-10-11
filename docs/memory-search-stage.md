@@ -43,10 +43,13 @@ Windows results on this stage:
 Results from predecessor PRs are not attributed to this stage. The existing
 release-context tests ignored by the default suite remain separate gates.
 
-## Remaining issue gates
+## Follow-up validation
 
-The release search gate and manifest registration, complete work and allocation
-counters, Windows and Linux exact-score evidence, recovery/backup/replication
-matrices, and measured capacity and relevance corpus remain pending. These
-require the rest of #110 and #112. Neither this stage nor its local tests
-approve a release or close #111.
+After the durable lifecycle in #110, PR #140 added generated oracle cases,
+work and reply-bound checks at the 1,024-member limit, and exact-result parity
+after backup/restore and replication. Windows/NTFS and Linux WSL2/ext4 results
+are recorded in
+[issue #111 validation](evidence/issue-111-exact-search-df38b94.md).
+The relevance and load corpus belongs to #112. The release search gate and
+manifest registration remain future publication work under #104; this local
+evidence does not approve a release.
