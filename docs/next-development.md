@@ -105,7 +105,9 @@ configured internal listener exports live record-2 backups. Memory replication
 and release evidence remain pending. The internal record-2 replica installation
 path can publish a header-5 snapshot generation and replace owner-worker images
 after durable publication; the server still refuses replica following because
-incremental transport, journal publication, and promotion are not integrated.
+network subscription, journal publication, and promotion are not integrated.
+The internal replica path also validates guarded record-2 deltas and commits them
+at the exact upstream sequence before acknowledging worker application.
 
 For small datasets, exact search supplies a correctness oracle. Approximate
 indexes trade recall for speed and add memory and rebuild costs. Filtered search
