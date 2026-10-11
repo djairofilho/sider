@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 
 use super::{
-    Clock, Mutation, ResolvedBatch, Store, StoreConfig,
+    Clock, Mutation, MutationOrigin, Prepared, ResolvedBatch, Store, StoreConfig,
     worker::{DbError, DbHandle},
 };
 use crate::persistence::{AofHandle, DurableLayout, ReplicationMetadata, Role, memory_format};
@@ -14,6 +14,12 @@ use crate::replication::{
     journal::{Journal, Limits, Subscriber},
     state::Runtime,
 };
+
+#[path = "replication_composed.rs"]
+mod composed;
+#[cfg(test)]
+#[path = "replication_composed_tests.rs"]
+mod composed_tests;
 
 #[derive(Clone)]
 pub struct Context {
@@ -42,6 +48,19 @@ pub(super) enum Control {
         origin: super::MutationOrigin,
         mutations: Vec<memory_format::Mutation>,
         sequence: u64,
+        reply: oneshot::Sender<Result<(), Error>>,
+        _security: Option<crate::security::InternalLease>,
+    },
+    PrepareComposed {
+        expected: AofHandle,
+        mutations: Vec<Mutation>,
+        origin: MutationOrigin,
+        reply: oneshot::Sender<Result<Prepared, Error>>,
+        _security: Option<crate::security::InternalLease>,
+    },
+    ApplyComposed {
+        expected: AofHandle,
+        prepared: Prepared,
         reply: oneshot::Sender<Result<(), Error>>,
         _security: Option<crate::security::InternalLease>,
     },
@@ -308,6 +327,11 @@ impl DbHandle {
     ) -> Result<(), Error> {
         if context.aof.is_memory_profile() {
             return Err(Error::Sequence);
+        }
+        if context.aof.is_composed_legacy_mixed() {
+            return self
+                .apply_composed_replica(context, generation, cursor, batch)
+                .await;
         }
         self.apply_replica_profile(context, generation, cursor, ReplicaBatch::Legacy(batch))
             .await

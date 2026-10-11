@@ -1,5 +1,5 @@
 //! Explicit development profile selection; never inferred from current values.
-use super::{DurableLayout, ReplicationMetadata, composed_format, format, memory_format};
+use super::{DurableLayout, ReplicationMetadata, Role, composed_format, format, memory_format};
 use crate::storage::{Mutation, ResolvedBatch, Value};
 use std::io::{Read, Write};
 
@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 pub(super) enum Profile {
     Legacy,
     Memory,
-    /// Internal recovery proof only; public configuration never selects this profile.
+    /// Internal record-1 coordination and replica proof; public configuration cannot select it.
     ComposedLegacyMixed,
 }
 
@@ -24,7 +24,7 @@ impl Profile {
         replication: Option<ReplicationMetadata>,
     ) -> Result<(), format::FormatError> {
         if self == Self::ComposedLegacyMixed {
-            if replication.is_some() {
+            if replication.is_some_and(|metadata| metadata.role != Role::Replica) {
                 return Err(format::FormatError::Corrupt("unsupported composed role"));
             }
             output.write_all(&composed_format::encode_header(composed_format::Header {
@@ -32,7 +32,7 @@ impl Profile {
                 layout,
                 record_version: composed_format::RecordVersion::Legacy,
                 mixed_owner_batch: true,
-                replication: None,
+                replication,
             })?)?;
             Ok(())
         } else if self == Self::Memory {
@@ -52,14 +52,16 @@ impl Profile {
             let header = composed_format::read_header(input)?;
             if header.record_version != composed_format::RecordVersion::Legacy
                 || !header.mixed_owner_batch
-                || header.replication.is_some()
+                || header
+                    .replication
+                    .is_some_and(|metadata| metadata.role != Role::Replica)
             {
                 return Err(format::FormatError::Corrupt("unsupported composed profile"));
             }
             return Ok(format::Header {
                 sequence: header.sequence,
                 layout: header.layout,
-                replication: None,
+                replication: header.replication,
                 format_version: composed_format::HEADER_VERSION,
                 bytes: composed_format::HEADER_BYTES,
             });

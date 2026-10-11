@@ -1,6 +1,6 @@
 # Proposed cross-shard transaction contract
 
-**Status: protocol proposed; native owner coordination and an internal durable decision integrated.**
+**Status: protocol proposed; native owner coordination, an internal durable decision, and local replica application integrated.**
 This design addresses
 [issue #92](https://github.com/djairofilho/sider/issues/92) against source baseline
 `0f0f232`. It supplies a written contract and an implementation plan; it does not
@@ -10,7 +10,7 @@ The current [transactions](transactions.md), [routing](sharding.md), and
 Participant discovery includes watched-only keys and keeps owner IDs bounded and
 sorted. Owner-local candidate preparation and a shared execution time are in the
 development checkout; single-shard EXEC uses the latter for WATCH and TTL.
-Mixed-owner RESP EXEC and replica application are not enabled.
+Mixed-owner RESP EXEC and network replica application are not enabled.
 The recovery helper now stages postimages and validates each touched shard's
 projected quota before applying a record. An internal test exercises a mixed-owner
 record and a quota failure on its last owner; all production recovery calls still
@@ -46,10 +46,15 @@ admission after an uncertain writer result or loss of the second owner. Recovery
 restores both owners after either failure.
 Process-kill tests now exercise nine points from pre-append through post-apply;
 each restart sees the previous state or the complete new batch. These tests do
-not simulate power loss or cover network and replica boundaries. Replica
-application and release gates are still unproven.
+not simulate power loss or cover network and replica boundaries. An internal
+composed replica path now installs a mixed-owner snapshot, prepares every owner
+before one expected-sequence append, applies under global exclusion, flushes, and
+then advances the applied cursor. Focused tests cover the two-owner restart,
+quota rejection on the last owner, uncertain writer outcome, fail-closed partial
+live application, and caller cancellation after the append. Network transport
+and release gates are still unproven.
 The public server and tools still cannot select header 7; transport 3, backup 3,
-replica application, and RESP coordinated EXEC remain unimplemented.
+network replica application, and RESP coordinated EXEC remain unimplemented.
 
 ## Contents
 

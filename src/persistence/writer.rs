@@ -184,6 +184,7 @@ enum Request {
 pub struct AofHandle {
     memory_profile: bool,
     composed_profile: bool,
+    layout: DurableLayout,
     limits: Limits,
     faults: Arc<dyn FaultInjector>,
     requests: mpsc::Sender<Request>,
@@ -210,6 +211,10 @@ impl AofDiagnosticsHandle {
 }
 
 impl AofHandle {
+    pub(crate) fn layout(&self) -> DurableLayout {
+        self.layout
+    }
+
     pub(crate) fn is_composed_legacy_mixed(&self) -> bool {
         self.composed_profile
     }
@@ -266,7 +271,7 @@ impl AofHandle {
         sequence: u64,
         batch: ResolvedBatch,
     ) -> Result<u64, AofError> {
-        if self.memory_profile || self.composed_profile {
+        if self.memory_profile {
             return Err(AofError::Migration(
                 "selected replication transport is not activated",
             ));
@@ -285,7 +290,7 @@ impl AofHandle {
         sequence: u64,
         metadata: ReplicationMetadata,
     ) -> Result<(), AofError> {
-        if self.memory_profile || self.composed_profile {
+        if self.memory_profile {
             return Err(AofError::Migration(
                 "selected replication installation is not activated",
             ));
@@ -448,6 +453,7 @@ impl Recovered {
         let completed = diagnostics.clone();
         let memory_profile = self.writer.config.memory_profile;
         let composed_profile = self.writer.profile == Profile::ComposedLegacyMixed;
+        let layout = self.writer.config.layout;
         let limits = self.writer.config.limits;
         let faults = self.writer.faults.clone();
         let runtime = tokio::runtime::Handle::current();
@@ -465,6 +471,7 @@ impl Recovered {
             AofHandle {
                 memory_profile,
                 composed_profile,
+                layout,
                 limits,
                 faults,
                 requests,
@@ -1215,7 +1222,7 @@ impl Writer {
         sequence: u64,
         metadata: ReplicationMetadata,
     ) -> Result<(), AofError> {
-        if self.config.memory_profile || self.profile == Profile::ComposedLegacyMixed {
+        if self.config.memory_profile {
             return Err(FormatError::Version(2).into());
         }
         self.install_profile_snapshot(
@@ -1270,7 +1277,7 @@ impl Writer {
                 self.config.layout,
                 self.store_config.max_dataset_bytes,
                 &mut usage,
-                false,
+                self.profile == Profile::ComposedLegacyMixed,
             )?;
         }
         drop(checked);
@@ -1701,20 +1708,7 @@ mod composed_local_tests {
         assert_eq!(handle.flush().await.unwrap(), 1);
         assert!(matches!(
             handle.append_expected(2, batch.clone()).await,
-            Err(AofError::Migration(_))
-        ));
-        assert!(matches!(
-            handle
-                .install_snapshot(
-                    store.snapshot(),
-                    1,
-                    ReplicationMetadata {
-                        role: Role::Replica,
-                        epoch: [1; 16]
-                    },
-                )
-                .await,
-            Err(AofError::Migration(_))
+            Err(AofError::Sequence)
         ));
         drop(handle);
         task.await.unwrap().unwrap();
@@ -1869,7 +1863,7 @@ mod composed_local_tests {
             },
             Header {
                 replication: Some(ReplicationMetadata {
-                    role: Role::Replica,
+                    role: Role::Primary,
                     epoch: [1; 16],
                 }),
                 ..header
