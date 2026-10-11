@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import ctypes
 import hashlib
 import json
@@ -236,10 +237,12 @@ def percentile(samples: list[int], percent: int) -> int:
     return ranked[max(0, (len(ranked) * percent + 99) // 100 - 1)]
 
 
-def run(binary: Path, output: Path, load_count: int, repetitions: int) -> dict:
+def run(binary: Path, output: Path, load_count: int, repetitions: int,
+        concurrent_clients: int, concurrent_repetitions: int) -> dict:
     corpus = json.loads(CORPUS.read_text(encoding="utf-8"))
     assert corpus["version"] == "sider-memory-corpus/1"
     assert 1 <= load_count <= 1024 and repetitions >= 1
+    assert 2 <= concurrent_clients <= 32 and concurrent_repetitions >= 1
     assert git("status", "--porcelain") == "", "run from a clean checkout"
     sha = git("rev-parse", "HEAD")
     identity = [value.encode() for value in corpus["identity"]]
@@ -316,6 +319,31 @@ def run(binary: Path, output: Path, load_count: int, repetitions: int) -> dict:
                     latencies.append(time.perf_counter_ns() - begun)
                     assert actual == wanted
             elapsed = time.perf_counter_ns() - start
+            barrier = threading.Barrier(concurrent_clients + 1)
+
+            def concurrent_worker() -> list[int]:
+                port = client.socket.getpeername()[1]
+                worker = Sider("127.0.0.1", port)
+                samples = []
+                try:
+                    barrier.wait(timeout=5)
+                    for _ in range(concurrent_repetitions):
+                        for query, wanted in zip(load_queries, expected_load):
+                            begun = time.perf_counter_ns()
+                            actual = search(worker, LOAD_KEY, identity, query)
+                            samples.append(time.perf_counter_ns() - begun)
+                            assert actual == wanted
+                finally:
+                    worker.close()
+                return samples
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=concurrent_clients) as pool:
+                futures = [pool.submit(concurrent_worker) for _ in range(concurrent_clients)]
+                concurrent_start = time.perf_counter_ns()
+                barrier.wait(timeout=5)
+                concurrent_samples = [sample for future in futures
+                                      for sample in future.result(timeout=30)]
+                concurrent_elapsed = time.perf_counter_ns() - concurrent_start
             stop.set()
             monitor.join(timeout=5)
             assert not monitor.is_alive(), "monitor did not stop"
@@ -329,6 +357,15 @@ def run(binary: Path, output: Path, load_count: int, repetitions: int) -> dict:
                 "rss_max_observed_bytes": max(rss_samples) if rss_samples else None,
                 "worker_queue_max_observed": max((s["worker_queue_used"] or 0 for s in queue_samples), default=None),
                 "aof_queue_max_observed": max((s["aof_queue_used"] or 0 for s in queue_samples), default=None),
+            }
+            observations["concurrent_load"] = {
+                "clients": concurrent_clients, "repetitions": concurrent_repetitions,
+                "latency_ns_samples": concurrent_samples,
+                "elapsed_ns": concurrent_elapsed,
+                "throughput_queries_per_second": len(concurrent_samples) * 1e9 / concurrent_elapsed,
+                "p50_ns": percentile(concurrent_samples, 50),
+                "p95_ns": percentile(concurrent_samples, 95),
+                "p99_ns": percentile(concurrent_samples, 99),
             }
             client.close()
             server.stop()
@@ -348,7 +385,9 @@ def run(binary: Path, output: Path, load_count: int, repetitions: int) -> dict:
         "seed": corpus["seed"], "platform": platform.platform(),
         "uname": platform.uname()._asdict(), "hardware": hardware(),
         "python": platform.python_version(), "load_records": load_count,
-        "repetitions": repetitions, "searches_per_repetition": len(corpus["queries"]),
+        "repetitions": repetitions, "concurrent_clients": concurrent_clients,
+        "concurrent_repetitions": concurrent_repetitions,
+        "searches_per_repetition": len(corpus["queries"]),
         "configuration": {"security_profile": "legacy-loopback", "address": "127.0.0.1:0",
                           "aof_record_version": 2, "aof_sync": "always", "shards": 1,
                           "aof_compaction_after_bytes": 0, "serial_clients": 1,
@@ -359,6 +398,7 @@ def run(binary: Path, output: Path, load_count: int, repetitions: int) -> dict:
 
 def report(raw: dict, raw_name: str) -> str:
     load = raw["observations"]["load"]
+    concurrent_load = raw["observations"]["concurrent_load"]
     info_after = raw["observations"]["after_load_info"]
     judged = raw["observations"]["cold_after_ingest"]
     precision = [row["judged_relevance_precision_at_k"] for row in judged
@@ -375,6 +415,8 @@ Python: `{raw['python']}`. Raw inputs and observations: [{raw_name}]({raw_name})
 The run used {raw['load_records']} generated load records, one serial loopback
 client, {raw['repetitions']} repetitions of {raw['searches_per_repetition']} query shapes,
 one queue observer, one shard, and AOF record 2 with `always` sync.
+The concurrent phase used {raw['concurrent_clients']} clients for
+{raw['concurrent_repetitions']} repetitions each.
 The first query after ingestion and the first after recovery are recorded separately
 from the repeated warm load. Updates, deletion, TTL expiry, and recovery were checked.
 
@@ -384,6 +426,8 @@ from the repeated warm load. Updates, deletion, TTL expiry, and recovery were ch
 | Mean judged relevance precision@k on nonempty fixture queries | {statistics.mean(precision):.3f} |
 | Serial query throughput | {load['throughput_queries_per_second']:.1f} queries/s |
 | p50 / p95 / p99 round-trip latency | {load['p50_ns']/1e6:.3f} / {load['p95_ns']/1e6:.3f} / {load['p99_ns']/1e6:.3f} ms |
+| Concurrent query throughput | {concurrent_load['throughput_queries_per_second']:.1f} queries/s |
+| Concurrent p50 / p95 / p99 round-trip latency | {concurrent_load['p50_ns']/1e6:.3f} / {concurrent_load['p95_ns']/1e6:.3f} / {concurrent_load['p99_ns']/1e6:.3f} ms |
 | Maximum sampled server RSS | {load['rss_max_observed_bytes'] if load['rss_max_observed_bytes'] is not None else 'pending'} bytes |
 | Dataset logical charge after load | {info_after.get('dataset_logical_bytes')} bytes |
 | Maximum sampled worker / AOF queue depth | {load['worker_queue_max_observed'] if load['worker_queue_max_observed'] is not None else 'pending'} / {load['aof_queue_max_observed'] if load['aof_queue_max_observed'] is not None else 'pending'} |
@@ -403,10 +447,13 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--load-records", type=int, default=256)
     parser.add_argument("--repetitions", type=int, default=100)
+    parser.add_argument("--concurrent-clients", type=int, default=8)
+    parser.add_argument("--concurrent-repetitions", type=int, default=20)
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    raw = run(binary, args.output_dir, args.load_records, args.repetitions)
+    raw = run(binary, args.output_dir, args.load_records, args.repetitions,
+              args.concurrent_clients, args.concurrent_repetitions)
     raw_path = args.output_dir / "raw.json"
     raw_path.write_text(json.dumps(raw, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     report_path = args.output_dir / "report.md"

@@ -33,7 +33,8 @@ creates a fresh temporary AOF directory and loopback server, then removes it.
 The first quality queries run after ingestion and TTL expiry. The runner
 updates one vector, deletes another record, checks exact results, inserts
 generated load records, then repeats five query shapes through one serial
-client. It restarts the server and checks both collections after AOF recovery.
+client and a concurrent eight-client phase. It restarts the server and checks
+both collections after AOF recovery.
 The exact oracle independently filters records, computes squared Euclidean
 distance from F32LE values in Python binary64, and sorts by distance and
 unsigned binary ID. Each measured reply must match the oracle, including the
@@ -43,7 +44,7 @@ p50/p95/p99 use nearest rank on per-command loopback round-trip times;
 throughput divides completed serial queries by the measured interval. A
 second connection samples `INFO` worker and AOF queue depth, and the process
 RSS is sampled from `/proc/PID/status` or Windows process counters. Sampling
-may miss peaks. The load oracle is prepared before timing; serial throughput
-includes client framing and response comparison. This toy corpus and one
+may miss peaks. The load oracle is prepared before timing; throughput includes
+client framing and response comparison. This toy corpus and one
 machine cannot justify a production performance or relevance claim. These are
 source-checkout observations, not candidate-package release receipts.
