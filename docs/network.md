@@ -39,10 +39,10 @@ the program with an error exit code.
 
 The published 1.0.1 package and the development `legacy-loopback` profile have
 no authentication, ACL, or TLS. The current checkout defaults to `protected`,
-which requires a validated security generation; protected Windows startup and
-protected internal replication remain unavailable in this stage.
-Configuring an IP outside loopback emits a warning but neither blocks the bind nor
-adds protection. Use only a controlled environment, without public exposure.
+which requires a validated security generation. Protected client and internal
+TLS startup is available on POSIX in the development checkout; Windows protected
+startup remains gated. `legacy-loopback` rejects non-loopback addresses. Use
+plaintext only in a controlled environment, without public exposure.
 Startup, failure, and shutdown logs go to `stderr`, without logging request keys
 or values.
 

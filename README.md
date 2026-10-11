@@ -76,10 +76,10 @@ cargo run --locked -- --version
 The repository is public and can be cloned without authentication.
 
 The current checkout defaults to a protected security profile that requires a
-validated `SIDER_SECURITY_DIR`. Protected startup on Windows and protected
-internal replication are still gated in this development stage. For a controlled
-loopback development instance, select `SIDER_SECURITY_PROFILE=legacy-loopback`
-explicitly. In a POSIX shell:
+validated `SIDER_SECURITY_DIR`. Protected client and internal TLS startup is
+available on POSIX in this development stage; protected Windows startup remains
+gated. For a controlled loopback development instance, select
+`SIDER_SECURITY_PROFILE=legacy-loopback` explicitly. In a POSIX shell:
 
 ```sh
 SIDER_SECURITY_PROFILE=legacy-loopback cargo run --locked
