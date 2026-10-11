@@ -1,6 +1,8 @@
 //! Explicit record-2 offline export, archive verification and atomic restoration.
 #![forbid(unsafe_code)]
 
+#[path = "common/process.rs"]
+mod process;
 #[path = "common/wire.rs"]
 mod wire;
 
@@ -1240,6 +1242,116 @@ async fn live_record2_server_exports_worker_snapshot_and_refuses_legacy_or_small
     assert_eq!(images.len(), 1);
     assert_eq!(images[0].key().as_ref(), b"c");
     drop(recovered);
+    fn run_cli(args: Vec<std::ffi::OsString>) -> std::process::Output {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_sider-backup"));
+        command
+            .env("SIDER_SECURITY_PROFILE", "legacy-loopback")
+            .env_remove("SIDER_SECURITY_DIR")
+            .args(args);
+        process::OwnedChild::spawn(&mut command)
+            .unwrap()
+            .wait(Duration::from_secs(10))
+            .unwrap()
+    }
+    let cli_archive = directory.child("cli-live-archive");
+    let cli_source = source.to_string();
+    let cli_destination = cli_archive.clone();
+    let exported = tokio::task::spawn_blocking(move || {
+        run_cli(vec![
+            "export".into(),
+            "--record-version".into(),
+            "2".into(),
+            "--source".into(),
+            cli_source.into(),
+            "--destination".into(),
+            cli_destination.into_os_string(),
+            "--source-sha".into(),
+            "a".repeat(40).into(),
+        ])
+    })
+    .await
+    .unwrap();
+    assert!(
+        exported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&exported.stdout).unwrap();
+    assert_eq!(report["record_version"], 2);
+    let verify_args = |memory: bool| {
+        let mut args = vec![
+            "verify".into(),
+            "--source".into(),
+            cli_archive.clone().into_os_string(),
+            "--shards".into(),
+            "1".into(),
+            "--routing".into(),
+            "1".into(),
+        ];
+        if memory {
+            args.extend(["--record-version".into(), "2".into()]);
+        }
+        args
+    };
+    assert!(!run_cli(verify_args(false)).status.success());
+    let mut unsupported = verify_args(false);
+    unsupported.extend(["--record-version".into(), "3".into()]);
+    let rejected = run_cli(unsupported);
+    assert!(!rejected.status.success());
+    assert!(rejected.stdout.is_empty());
+    let verified = run_cli(verify_args(true));
+    assert!(
+        verified.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
+    let cli_restored = directory.child("cli-restored");
+    let legacy_restored = directory.child("legacy-cli-restored");
+    let legacy_result = run_cli(vec![
+        "restore".into(),
+        "--source".into(),
+        cli_archive.clone().into_os_string(),
+        "--destination".into(),
+        legacy_restored.clone().into_os_string(),
+        "--shards".into(),
+        "1".into(),
+        "--routing".into(),
+        "1".into(),
+    ]);
+    assert!(!legacy_result.status.success());
+    assert!(!legacy_restored.exists());
+    let destination = cli_restored.clone();
+    let archive = cli_archive.clone();
+    let restored_result = tokio::task::spawn_blocking(move || {
+        run_cli(vec![
+            "restore".into(),
+            "--record-version".into(),
+            "2".into(),
+            "--source".into(),
+            archive.into_os_string(),
+            "--destination".into(),
+            destination.into_os_string(),
+            "--shards".into(),
+            "1".into(),
+            "--routing".into(),
+            "1".into(),
+        ])
+    })
+    .await
+    .unwrap();
+    assert!(
+        restored_result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restored_result.stderr)
+    );
+    let cli_image = persistence::recover(
+        AofConfig::new(cli_restored).with_memory_profile(),
+        StoreConfig::default(),
+        Arc::new(sider::storage::SystemClock),
+    )
+    .unwrap();
+    assert_eq!(cli_image.store.snapshot_memory(), images);
+    drop(cli_image);
     stop.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(5), server)
         .await
