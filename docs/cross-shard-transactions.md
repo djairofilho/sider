@@ -19,8 +19,8 @@ partial live application, cancellation, and nine process-kill boundaries. The
 TCP test covers mixed-owner EXEC, ordered binary `MGET`, multi-owner WATCH conflict, unsupported
 command rejection, restart, and wrong-profile startup refusal. These tests do not
 simulate power loss or cover network replication boundaries. The transport-3
-codec, schema-3 backup library, live source export library, and local replica
-application path exist, but no composed network listener, follower, backup CLI, or
+codec, schema-3 backup library, live source export, loopback-only backup CLI,
+and local replica application path exist, but no composed replica follower or
 release gate selects them. The issue remains open.
 
 ## Contents

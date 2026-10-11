@@ -232,7 +232,8 @@ The schema-3 archive library exports, verifies, restores, and recovers record-1
 mixed snapshots. A live library source negotiates transport 3 before capture.
 The server selects local header-7 storage and EXEC, while the default reader
 still rejects version 7 before inspecting records and preserves source bytes.
-No composed network listener, follower, or backup CLI is available. Coordinate
+An explicit loopback-only composed export listener and backup CLI select schema 3;
+no composed replica follower or protected network source is available. Coordinate
 acceptance of allocations 7, transport 3, and backup schema 3 with the memory
 contract owner before a production release.
 
