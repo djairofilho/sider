@@ -54,7 +54,15 @@ pub async fn export(options: ExportOptions, clock: Arc<dyn Clock>) -> Result<Man
     let mut stream = timeout(remaining(deadline)?, TcpStream::connect(options.source))
         .await
         .map_err(|_| Error::Timeout)??;
-    receive(&mut stream, options, clock, deadline, None).await
+    receive(
+        &mut stream,
+        options,
+        clock,
+        deadline,
+        None,
+        super::Profile::Legacy,
+    )
+    .await
 }
 
 /// Exports through authenticated mutual TLS, checking both IP SAN and expected URI.
@@ -69,7 +77,15 @@ pub async fn export_secure(
         .connect_with_peer(options.source)
         .await
         .map_err(|_| Error::Invalid("internal TLS authentication failed"))?;
-    receive(&mut stream, options, clock, deadline, Some(&peer)).await
+    receive(
+        &mut stream,
+        options,
+        clock,
+        deadline,
+        Some(&peer),
+        super::Profile::Legacy,
+    )
+    .await
 }
 
 /// Injectable transport for tests; applies the same limits and contract as the TCP client.
@@ -80,7 +96,70 @@ pub async fn export_stream(
 ) -> Result<Manifest, Error> {
     options.validate()?;
     let deadline = Instant::now() + options.limits.timeout;
-    receive(stream, options, clock, deadline, None).await
+    receive(
+        stream,
+        options,
+        clock,
+        deadline,
+        None,
+        super::Profile::Legacy,
+    )
+    .await
+}
+
+/// Explicit live record-2 backup consumer. No public server profile is activated.
+pub async fn export_memory_stream(
+    stream: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    options: ExportOptions,
+    clock: Arc<dyn Clock>,
+) -> Result<Manifest, Error> {
+    options.validate()?;
+    let deadline = Instant::now() + options.limits.timeout;
+    receive(
+        stream,
+        options,
+        clock,
+        deadline,
+        None,
+        super::Profile::Memory,
+    )
+    .await
+}
+
+/// Connects to an explicitly configured native transport-2 source.
+pub async fn export_memory(
+    options: ExportOptions,
+    clock: Arc<dyn Clock>,
+) -> Result<Manifest, Error> {
+    options.validate()?;
+    let deadline = Instant::now() + options.limits.timeout;
+    let mut stream = timeout(remaining(deadline)?, TcpStream::connect(options.source))
+        .await
+        .map_err(|_| Error::Timeout)??;
+    receive(
+        &mut stream,
+        options,
+        clock,
+        deadline,
+        None,
+        super::Profile::Memory,
+    )
+    .await
+}
+
+async fn read_profile(
+    stream: &mut (impl AsyncRead + Unpin),
+    limits: protocol::Limits,
+    deadline: Duration,
+    phase: InternalPhase,
+    profile: super::Profile,
+) -> Result<(Bytes, Message), protocol::Error> {
+    match profile {
+        super::Profile::Legacy => protocol::read_in_phase(stream, limits, deadline, phase).await,
+        super::Profile::Memory => {
+            protocol::read_memory_in_phase(stream, limits, deadline, phase).await
+        }
+    }
 }
 
 async fn receive(
@@ -89,25 +168,40 @@ async fn receive(
     clock: Arc<dyn Clock>,
     deadline: Instant,
     peer: Option<&InternalPeer>,
+    profile: super::Profile,
 ) -> Result<Manifest, Error> {
     let limits = options.limits;
     let transport = limits.transport();
-    protocol::write(
-        stream,
-        &Message::Export {
+    let request = match profile {
+        super::Profile::Legacy => Message::Export {
             sider_version: Bytes::from_static(env!("CARGO_PKG_VERSION").as_bytes()),
             max_record_bytes: limits.max_record_bytes as u32,
             max_snapshot_bytes: limits.max_snapshot_bytes,
         },
-        transport,
-        remaining(deadline)?,
-    )
-    .await?;
-    let Message::Hello(hello) = protocol::read_in_phase(
+        super::Profile::Memory => Message::MemoryExport {
+            sider_version: Bytes::from_static(env!("CARGO_PKG_VERSION").as_bytes()),
+            record_version: crate::persistence::memory_format::RECORD_VERSION,
+            max_record_bytes: limits.max_record_bytes as u32,
+            max_snapshot_bytes: limits.max_snapshot_bytes,
+        },
+    };
+    let frame = match profile {
+        super::Profile::Legacy => protocol::encode(&request, transport)?,
+        super::Profile::Memory => protocol::encode_memory(&request, transport)?,
+    };
+    use tokio::io::AsyncWriteExt;
+    timeout(remaining(deadline)?, stream.write_all(&frame))
+        .await
+        .map_err(|_| Error::Timeout)??;
+    timeout(remaining(deadline)?, stream.flush())
+        .await
+        .map_err(|_| Error::Timeout)??;
+    let Message::Hello(hello) = read_profile(
         stream,
         transport,
         remaining(deadline)?,
         InternalPhase::Hello,
+        profile,
     )
     .await?
     .1
@@ -117,7 +211,7 @@ async fn receive(
         ));
     };
     if hello.sider_version.as_ref() != env!("CARGO_PKG_VERSION").as_bytes()
-        || hello.record_version != format::VERSION
+        || hello.record_version != profile.versions().2
         || hello.max_record_bytes as usize > limits.max_record_bytes
         || hello.max_mutations as usize > limits.max_mutations
         || hello.max_snapshot_bytes > limits.max_snapshot_bytes
@@ -131,11 +225,12 @@ async fn receive(
         routing_version: hello.routing_version,
     };
     layout.validate()?;
-    let Message::FullStart { cursor, entries } = protocol::read_in_phase(
+    let Message::FullStart { cursor, entries } = read_profile(
         stream,
         transport,
         remaining(deadline)?,
         InternalPhase::BackupStart,
+        profile,
     )
     .await?
     .1
@@ -154,22 +249,32 @@ async fn receive(
         .write(true)
         .create_new(true)
         .open(&path)?;
-    format::write_header_with_layout(&mut file, cursor.sequence, layout)?;
+    let codec = crate::persistence::profile::Profile(profile == super::Profile::Memory);
+    codec.write_header(&mut file, cursor.sequence, layout, None)?;
     let mut previous = None;
     let mut digest = 0;
     let mut aof_digest = 0;
     let mut transport_bytes = 0u64;
     let mut quotas = Quotas::new(layout, limits.max_dataset_bytes, freeze(clock.clone()))?;
     for _ in 0..entries {
-        let (raw, message) = protocol::read_in_phase(
+        let (raw, message) = read_profile(
             stream,
             transport,
             remaining(deadline)?,
             InternalPhase::SnapshotEntry,
+            profile,
         )
         .await?;
-        let Message::SnapshotEntry(mutation @ Mutation::Put { .. }) = message else {
-            return Err(Error::Invalid("incomplete snapshot or unexpected message"));
+        let mutation = match message {
+            Message::SnapshotEntry(mutation @ Mutation::Put { .. })
+                if profile == super::Profile::Legacy =>
+            {
+                mutation
+            }
+            Message::MemorySnapshotEntry(mutation) if profile == super::Profile::Memory => {
+                super::memory::storage_image(&mutation)?
+            }
+            _ => return Err(Error::Invalid("incomplete snapshot or unexpected message")),
         };
         if previous.as_ref().is_some_and(|key| key >= mutation.key()) {
             return Err(Error::Invalid(
@@ -188,11 +293,12 @@ async fn receive(
         aof_digest = format::snapshot_digest(aof_digest, record);
         file.write_all(record)?;
     }
-    if protocol::read_in_phase(
+    if read_profile(
         stream,
         transport,
         remaining(deadline)?,
         InternalPhase::SnapshotEnd,
+        profile,
     )
     .await?
     .1 != (Message::FullEnd {
@@ -210,8 +316,8 @@ async fn receive(
     {
         return Err(Error::Invalid("data after FullEnd"));
     }
-    file.write_all(&format::encode(
-        &Record::Seal {
+    file.write_all(&codec.encode_legacy(
+        Record::Seal {
             sequence: cursor.sequence,
             entries,
             digest: aof_digest,
@@ -221,7 +327,7 @@ async fn receive(
     file.sync_all()?;
     let (snapshot_sha256, snapshot_bytes) = hash_file(&mut file)?;
     let manifest = Manifest {
-        profile: super::Profile::Legacy,
+        profile,
         sider_version: env!("CARGO_PKG_VERSION").into(),
         source_sha: options.source_sha,
         cursor,

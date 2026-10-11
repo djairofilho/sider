@@ -1,4 +1,4 @@
-//! Explicit offline schema-2 export. Live transport-2 export remains a separate gate.
+//! Explicit offline schema-2 export and shared image validation.
 
 use std::fs::OpenOptions;
 use std::path::PathBuf;
@@ -188,8 +188,7 @@ pub(super) fn storage_image(
     })
 }
 
-/// Frozen transport-2 tag-4 envelope used only to verify the archive digest.
-/// This does not advertise a live transport-2 listener or replication reader.
+/// Frozen transport-2 tag-4 envelope used to verify the archive digest.
 pub(super) fn snapshot_frame(record: &[u8], limits: Limits) -> Result<Vec<u8>, Error> {
     use crate::replication::protocol::{HEADER_BYTES, MAGIC};
     if record.len() > limits.max_record_bytes + 12 {
