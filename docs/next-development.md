@@ -112,9 +112,11 @@ sessions with cursor acknowledgements and bounded journal replay. The record-2
 follower starts read-only, installs durable snapshots, applies exact-sequence
 deltas, and reconnects after source or follower restarts. Transport-2 status
 and promotion persist a new primary epoch and stop the follower before local
-writes resume. Linux filesystem crash evidence is still pending.
-The internal replica path also validates guarded record-2 deltas and commits them
-at the exact upstream sequence before acknowledging worker application.
+writes resume.
+The native record-2 lifecycle and process-restart cases passed on Windows/NTFS
+and Linux WSL2/ext4 at commit `c0acc07`; see
+[issue #110 validation](evidence/issue-110-memory-lifecycle-c0acc07.md).
+Publication gates and package evidence remain separate work under #104.
 
 For small datasets, exact search supplies a correctness oracle. Approximate
 indexes trade recall for speed and add memory and rebuild costs. Filtered search
