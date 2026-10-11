@@ -9,8 +9,9 @@ The library-only `DbHandle::with_unpersisted_multi_owner()` opt-in can execute a
 mixed-owner `execute_batch` with in-memory workers. It refuses AOF and replication
 and is not available through RESP `MULTI`/`EXEC`. Its staged contract and remaining
 proof work are in [cross-shard transactions](cross-shard-transactions.md).
-The composed server profile has no replication session or internal export
-listener yet and rejects a replication configuration at startup.
+The development composed profile can replicate whole mixed-owner batches with
+transport 3 when both instances explicitly select `SIDER_AOF_COMPOSED=1`.
+The separate loopback export listener supports schema-3 backups.
 
 ## Queueing and execution
 

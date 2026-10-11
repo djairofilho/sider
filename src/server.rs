@@ -558,13 +558,16 @@ async fn serve_prepared_inner(
                 .snapshot(Some(aof))
                 .await
                 .map_err(crate::replication::Error::from)?;
+            let initial_cursor = if config.composed_aof {
+                crate::replication::Cursor {
+                    epoch: crate::replication::new_epoch()?,
+                    sequence: recovered_sequence,
+                }
+            } else {
+                runtime.status().applied
+            };
             database
-                .install_replica(
-                    context.clone(),
-                    0,
-                    runtime.status().applied,
-                    image.mutations,
-                )
+                .install_replica(context.clone(), 0, initial_cursor, image.mutations)
                 .await?;
         }
         let source_db = database.clone();

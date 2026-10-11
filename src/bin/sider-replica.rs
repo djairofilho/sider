@@ -23,15 +23,23 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if arguments == ["--help"] || arguments.is_empty() {
         println!(
-            "Usage: sider-replica --addr IP:PORT --status|--promote\n--promote persists the primary role and stops upstream. Fence the former primary first.\nProtected mode requires SIDER_SECURITY_DIR. Explicit legacy-loopback permits only loopback targets."
+            "Usage: sider-replica --addr IP:PORT [--profile composed] --status|--promote\n--promote persists the primary role and stops upstream. Fence the former primary first.\nProtected mode requires SIDER_SECURITY_DIR. Explicit legacy-loopback permits only loopback targets."
         );
         return Ok(());
     }
-    if arguments.len() != 3 || arguments[0] != "--addr" {
+    if !matches!(arguments.len(), 3 | 5) || arguments[0] != "--addr" {
         return Err("invalid arguments; see --help".into());
     }
     let address: SocketAddr = arguments[1].parse()?;
-    let promote = match arguments[2].as_str() {
+    let composed = if arguments.len() == 5 {
+        if arguments[2] != "--profile" || arguments[3] != "composed" {
+            return Err("invalid profile; see --help".into());
+        }
+        true
+    } else {
+        false
+    };
+    let promote = match arguments[if composed { 4 } else { 2 }].as_str() {
         "--status" => false,
         "--promote" => true,
         _ => return Err("invalid operation; see --help".into()),
@@ -54,25 +62,30 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 None,
             )
         };
-    protocol::write(
-        &mut socket,
-        &if promote {
-            Message::Promote
-        } else {
-            Message::StatusRequest
-        },
-        Limits::default(),
-        deadline,
-    )
-    .await?;
+    let request = if promote {
+        Message::Promote
+    } else {
+        Message::StatusRequest
+    };
+    if composed {
+        protocol::write_composed(&mut socket, &request, Limits::default(), deadline).await?;
+    } else {
+        protocol::write(&mut socket, &request, Limits::default(), deadline).await?;
+    }
     let phase = if promote {
         sider::security::InternalPhase::Promoted
     } else {
         sider::security::InternalPhase::Status
     };
-    let response = protocol::read_in_phase(&mut socket, Limits::default(), deadline, phase)
-        .await?
-        .1;
+    let response = if composed {
+        protocol::read_composed_in_phase(&mut socket, Limits::default(), deadline, phase)
+            .await?
+            .1
+    } else {
+        protocol::read_in_phase(&mut socket, Limits::default(), deadline, phase)
+            .await?
+            .1
+    };
     if peer.as_ref().is_some_and(|peer| !peer.current()) {
         return Err(sider::security::Error::Transport.into());
     }
