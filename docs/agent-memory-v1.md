@@ -812,11 +812,13 @@ The development source includes bounded `MEM.*` commands, exact search, and
 explicit record-2 AOF, backup, migration, and transport stages. The default
 record-1 server profile still refuses memory writes. The development server can
 explicitly select record 2 for a standalone AOF directory; server-side memory
-backup export is available through an explicit internal listener. Memory
-replica snapshot installation is available as an internal AOF/worker stage, but
-the server still refuses replica following. Guarded deltas can be applied and
-persisted locally at an exact replica sequence; network subscription and promotion,
-cross-platform evidence, and release gates remain
-tracked by #110 and #111. The published 1.0.1 binary has no `MEM.*` support.
-#109 covers this versioned contract; #110 and #111 remain separate
-implementation and evidence tasks.
+backup export is available through an explicit internal listener. Record-2
+replicas can install snapshots, apply guarded deltas, reconnect, and promote
+with a durable new epoch. Native lifecycle evidence on Windows/NTFS and Linux
+WSL2/ext4 is recorded in
+[issue #110 validation](evidence/issue-110-memory-lifecycle-c0acc07.md).
+The future memory publication gate remains pending under #104; exact retrieval
+evidence remains tracked by #111. The published 1.0.1 binary has no `MEM.*`
+support.
+#109 owns this versioned contract. #110 records the validated lifecycle;
+#111 owns the remaining exact-retrieval evidence.
