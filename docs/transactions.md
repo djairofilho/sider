@@ -3,6 +3,10 @@
 `MULTI`, `EXEC`, `DISCARD`, `WATCH`, and `UNWATCH` belong to the TCP connection.
 A transaction may access one shard. Keys and arguments retain arbitrary bytes;
 hash tags can place related keys in the same shard.
+The library-only `DbHandle::with_unpersisted_multi_owner()` opt-in can execute a
+mixed-owner `execute_batch` with in-memory workers. It refuses AOF and replication
+and is not available through RESP `MULTI`/`EXEC`. Its staged contract and remaining
+proof work are in [cross-shard transactions](cross-shard-transactions.md).
 
 ## Queueing and execution
 
