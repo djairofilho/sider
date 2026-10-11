@@ -1,9 +1,10 @@
 # Consistent backup and restoration
 
-The development branch additionally has explicit library-only
-[schema-2 memory backup APIs](agent-memory-backup.md). Its offline export and
-memory verification/restoration do not change the schema-1 CLI procedure below.
-Live transport-2 export remains pending.
+The development branch additionally has explicit
+[schema-2 memory backup support](agent-memory-backup.md), including a live
+transport-2 source and `sider-backup --record-version 2`. Without this flag,
+the CLI retains the schema-1 procedure below. These development capabilities
+are absent from the published 1.0.1 package.
 
 This procedure describes the published 1.0.1 package. The current checkout's
 protected executable with an internal listener is unavailable until the
@@ -53,6 +54,13 @@ The client requires the same Sider version, checks the layout and limits announc
 during the handshake, and receives `Hello`, `FullStart`, ordered entries, `FullEnd`,
 and EOF. Cursor, count, order, lengths, and digest must match. There is no ACK
 or incremental stream on this connection.
+
+For a development server configured with `SIDER_AOF_RECORD_VERSION=2`, add
+`--record-version 2` to `export`, `verify`, and `restore`. This selects
+transport 2 and a schema-2 archive explicitly; a schema-1 command refuses that
+archive. The source listener requires `SIDER_REPLICATION_ADDR` and does not
+enable replica following. See the [memory backup guide](agent-memory-backup.md)
+for the commands and remaining validation limits.
 
 The snapshot combines all shards at the same durable cut, including every type
 and complete transaction effects. The worker barrier covers capture and the sequence

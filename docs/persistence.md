@@ -61,8 +61,9 @@ source validates receiver version and capacity before capturing a worker-owned
 snapshot. Use `backup::export_memory` on a controlled loopback listener or
 `backup::export_memory_secure` with internal mutual TLS. The explicit offline
 memory backup API remains available as described in
-[the memory backup guide](agent-memory-backup.md). The default `sider-backup` CLI
-remains on schema 1. These restrictions remain part of
+[the memory backup guide](agent-memory-backup.md). `sider-backup` defaults to
+schema 1 and selects schema 2 only with `--record-version 2` on each command.
+These restrictions remain part of
 [issue #110](https://github.com/djairofilho/sider/issues/110).
 
 ## Acknowledgment and failure
