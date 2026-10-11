@@ -38,4 +38,10 @@ The intermediate-chain test passed on Windows and Ubuntu 22.04 under WSL2. The f
 
 After enabling POSIX protected internal startup, `cargo xtask check` passed on Windows and Ubuntu 22.04 under WSL2. The focused executable suite passed 36 internal and 13 CLI tests on Windows, and 38 internal and 13 CLI tests under WSL2. Windows `cargo doc --locked --no-deps` and `cargo build --locked --release` also passed. These checks do not replace native Linux or exact candidate-package receipts.
 
-Issue #93 still requires broader executable deployment evidence for generation activation, close barriers, reconnects, and operation leases; full real TLS replica/backup/admin allow and deny matrices across certificate chains; POSIX filesystem race tests; and the remaining Windows permission cases including owner, file reparse points, and replacement races. The Windows protected startup gate stays closed. Ignored package, external, soak, and release tests have not been promoted into evidence for this feature.
+The POSIX restricted loader now pins the opened security directory and reads its
+fixed file names relative to that descriptor. A deterministic test renames the
+directory and places a symlink at the old path after opening it; the loader reads
+the original files and rejects the new symlink path. This is one replacement
+boundary, not complete filesystem race evidence.
+
+Issue #93 still requires broader executable deployment evidence for generation activation, close barriers, reconnects, and operation leases; full real TLS replica/backup/admin allow and deny matrices across certificate chains; further POSIX ancestor and replacement race tests; and the remaining Windows permission cases including owner, file reparse points, and replacement races. The Windows protected startup gate stays closed. Ignored package, external, soak, and release tests have not been promoted into evidence for this feature.
