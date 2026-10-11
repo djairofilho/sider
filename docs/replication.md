@@ -224,7 +224,9 @@ truncated byte prefix and a corrupt checksum of an incremental mixed-owner frame
 without advancing the follower cursor or changing either owner.
 `replication_persistence` includes six controlled kills during installation, at the
 three publication points for each role. Storage tests verify the barrier,
-cancellation, quota, and absence of mixed state across shards.
+cancellation, quota, and absence of mixed state across shards. The composed
+replica storage test injects failures at eight append, owner-apply, and sync
+points and verifies that recovery contains either no batch or both owners.
 An additional test stops a connected primary and replica with a partial internal
 frame in progress and checks removal of the readiness files.
 

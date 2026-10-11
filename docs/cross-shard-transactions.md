@@ -316,7 +316,7 @@ proof is concentrated at failure boundaries and release integration:
 | [Connection transaction state](../src/connection/transaction.rs) and [router](../src/storage/routing.rs) discover several owners in the composed profile | Broader command and WATCH fault cases |
 | [Coordinator](../src/storage/coordinator.rs) prepares owners and appends one durable batch under exclusive admission | Boundary fault injection through publication and ACK |
 | [AOF recovery](../src/persistence/writer.rs) stages mixed records before applying any owner | Exact candidate and migration compatibility evidence |
-| [Replica storage](../src/storage/replication.rs) installs snapshots and applies one mixed batch before cursor advancement | Network disconnect and crash cases at each append/apply/flush boundary |
+| [Replica storage](../src/storage/replication.rs) installs snapshots and applies one mixed batch before cursor advancement; eight injected append/apply/sync faults recover an empty or complete batch | Network disconnect and process crash cases at each append/apply/flush boundary |
 | [Transport-3 session](../src/replication/session.rs) performs FULL, CONTINUE, ACK, loopback process recovery, and a protected in-process live session | Protected process deployment and complete failure matrix |
 
 The staged implementation plan is:
@@ -347,6 +347,11 @@ commit boundary, power loss, protected process deployment, or a native release
 candidate. An in-process live session additionally verifies mutual TLS and
 replica-role authorization for composed full sync and mixed-owner batches,
 followed by role revocation.
+
+The replica storage fault matrix checks eight append, apply, and sync points.
+Before append, recovery retains the empty dataset; after append, it replays
+both owners despite a failed ACK path. Each injected fault closes admission
+without advancing the live follower cursor.
 
 ## Required deterministic tests
 
