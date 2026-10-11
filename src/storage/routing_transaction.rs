@@ -18,6 +18,30 @@ pub struct Fragment {
     pub command: Command,
 }
 
+/// Complete read-only preflight of a queued transaction and its watched keys.
+/// Constructing this plan does not reserve owners or admit an EXEC.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransactionPlan {
+    participants: Vec<usize>,
+    commands: Vec<CommandPlan>,
+}
+
+impl TransactionPlan {
+    /// Sorted and unique owners, including owners touched only by WATCH.
+    pub fn participants(&self) -> &[usize] {
+        &self.participants
+    }
+
+    /// Command plans in their original queue order.
+    pub fn commands(&self) -> &[CommandPlan] {
+        &self.commands
+    }
+
+    pub fn into_parts(self) -> (Vec<usize>, Vec<CommandPlan>) {
+        (self.participants, self.commands)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandPlan {
     fragments: Vec<Fragment>,
@@ -132,6 +156,25 @@ impl ReplyPlan {
 }
 
 impl ShardRouter {
+    /// Validates every command before any coordinator sends owner controls.
+    /// Watched keys may belong to owners with no queued command fragment.
+    pub fn plan_transaction(
+        &self,
+        commands: Vec<Command>,
+        watched: &[Bytes],
+    ) -> Result<TransactionPlan, ExecutionError> {
+        let participants =
+            self.transaction_participants(&commands, watched.iter().map(Bytes::as_ref));
+        let commands = commands
+            .into_iter()
+            .map(|command| self.plan_transaction_command(command))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(TransactionPlan {
+            participants,
+            commands,
+        })
+    }
+
     /// Splits only the four multi-key commands whose per-owner replies can be
     /// recombined exactly. Unknown mixed-owner commands remain rejected.
     pub fn plan_transaction_command(
@@ -232,6 +275,67 @@ mod tests {
             .iter()
             .map(|key| Bytes::copy_from_slice(key))
             .collect()
+    }
+
+    #[test]
+    fn whole_queue_preflight_includes_watched_only_owners_and_keeps_command_order() {
+        let router = ShardRouter::new(4).unwrap();
+        let mut owners = BTreeMap::new();
+        for byte in 0u8..=255 {
+            let key = Bytes::from(vec![byte]);
+            owners.entry(router.shard_for(&key)).or_insert(key);
+        }
+        let keys: Vec<_> = owners.into_values().take(3).collect();
+        assert_eq!(keys.len(), 3);
+        let commands = vec![
+            Command::Get {
+                key: keys[0].clone(),
+            },
+            Command::MGet {
+                keys: vec![keys[1].clone(), keys[0].clone(), keys[1].clone()],
+            },
+            Command::Set {
+                key: keys[1].clone(),
+                value: Bytes::from_static(b"value"),
+            },
+        ];
+        let original = commands.clone();
+        let plan = router
+            .plan_transaction(commands, &[keys[2].clone()])
+            .unwrap();
+        assert_eq!(plan.participants(), &[0, 1, 2]);
+        assert_eq!(plan.commands().len(), original.len());
+        let (_, planned) = plan.into_parts();
+        assert_eq!(planned[0].clone().into_parts().0[0].command, original[0]);
+        assert_eq!(planned[1].clone().into_parts().0.len(), 2);
+        assert_eq!(planned[2].clone().into_parts().0[0].command, original[2]);
+        let empty = router.plan_transaction(vec![], &[keys[2].clone()]).unwrap();
+        assert_eq!(empty.participants(), &[2]);
+        assert!(empty.commands().is_empty());
+    }
+
+    #[test]
+    fn late_unsupported_mixed_command_rejects_the_complete_plan() {
+        let router = ShardRouter::new(2).unwrap();
+        let queued = vec![
+            Command::Set {
+                key: Bytes::from_static(b"a"),
+                value: Bytes::from_static(b"v"),
+            },
+            Command::MSet {
+                entries: vec![
+                    (Bytes::from_static(b"a"), Bytes::from_static(b"x")),
+                    (Bytes::from_static(b"b"), Bytes::from_static(b"y")),
+                ],
+            },
+            Command::Watch {
+                keys: keys(&[b"a", b"b"]),
+            },
+        ];
+        assert_eq!(
+            router.plan_transaction(queued, &[]),
+            Err(ExecutionError::CrossShard)
+        );
     }
 
     #[test]

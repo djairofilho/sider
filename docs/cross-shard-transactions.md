@@ -24,6 +24,10 @@ fragments and reconstruct their replies. MGET keeps binary key order and duplica
 occurrences; MSET keeps each owner's original pair order and marks the command
 for joint candidate acceptance. This planner does not enqueue fragments, prepare
 owners, append a record, or enable mixed-owner EXEC.
+Whole-queue preflight now gathers sorted unique owners including watched-only keys,
+keeps the original command order, and fails before returning any plan if a late
+mixed-owner command has no fragment rule. No owner control or admission uses this
+plan yet.
 The public server and tools still cannot select header 7; transport 3, backup 3,
 replica application, and coordinated EXEC remain unimplemented.
 
