@@ -359,7 +359,12 @@ with both owners absent or both present; after sync and at all owner-apply hooks
 sequence 1 and both values survive the process kill. A controlled TCP source
 also disconnects at each hook before releasing the paused apply. The follower
 finishes the batch, reconnects with cursor 1, and recovers both values. These
-tests do not simulate power loss or prove every ACK/retransmission boundary.
+tests do not simulate power loss. A separate controlled TCP session replays the
+same batch after its ACK and receives the same cursor without a second AOF
+record; a changed replay at that sequence closes the session. The reconnect
+advertises cursor 1, accepts sequence 2, and recovers the complete replacement
+for both owners. This covers those ACK/retransmission cases, not every ACK-loss
+or network boundary.
 
 ## Required deterministic tests
 
