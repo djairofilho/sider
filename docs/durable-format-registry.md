@@ -220,9 +220,14 @@ batch, whole-owner preparation and application, and a flush before advancing its
 cursor. Tests cover quota rejection, restart, uncertain writer outcome, partial
 apply failure, and caller cancellation. It still refuses record 2, the missing
 mixed bit, and primary role before record scan.
+An isolated transport-3 codec now frames record-1 snapshot and batch records and
+requires an exact header-7/mixed-bit Hello. Its bounded reader rejects transport
+1/2 frames before payload allocation. No network session selects transport 3 yet;
+the composed export request remains unavailable.
 No public AOF configuration selects that profile; default recovery still rejects
 version 7 before inspecting records, including every torn first-record prefix,
-and preserves the file bytes. Backup and transport 3 are still unavailable.
+and preserves the file bytes. Backup and a production transport-3 session remain
+unavailable.
 Coordinate acceptance of allocations 7, transport 3 and backup schema 3 with
 the memory contract owner before enabling any of them in production.
 
