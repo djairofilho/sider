@@ -121,6 +121,9 @@ Exact search was compared with an independent generated oracle and checked at
 the retained-member limit on Windows/NTFS and Linux WSL2/ext4 at commit
 `df38b94`; see
 [issue #111 validation](evidence/issue-111-exact-search-df38b94.md).
+The versioned search corpus and Windows/NTFS plus Linux WSL2/ext4 raw load
+results at commit `e2475bd` are in
+[issue #112 evidence](evidence/issue-112-corpus-e2475bd/README.md).
 
 For small datasets, exact search supplies a correctness oracle. Approximate
 indexes trade recall for speed and add memory and rebuild costs. Filtered search
