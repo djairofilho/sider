@@ -25,6 +25,115 @@ fn metric(metrics: &Metrics, name: &str) -> u64 {
         .parse()
         .unwrap()
 }
+
+#[test]
+fn memory_metrics_schema_limits_and_saturation_are_stable() {
+    let metrics = Metrics::default();
+    let all = fields(&metrics.render(InfoSections::ALL));
+    assert_eq!(all["metrics_schema_version"], "2");
+    for name in [
+        "memory_searches_total",
+        "memory_search_record_visits_total",
+        "memory_search_components_total",
+        "memory_rejections_total",
+        "memory_expired_members_total",
+    ] {
+        assert_eq!(all[name], "0");
+    }
+    metrics.add(Counter::MemorySearchComponents, u64::MAX);
+    metrics.add(Counter::MemorySearchComponents, 1);
+    assert_eq!(metric(&metrics, "memory_search_components_total"), u64::MAX);
+    let config = fields(configuration(&ServerConfig::default()).as_bytes());
+    for (name, value) in [
+        ("memory_contract_version", "1"),
+        ("memory_max_dimension", "4096"),
+        ("memory_max_members", "1024"),
+        ("memory_max_collection_bytes", "8388608"),
+        ("memory_max_k", "128"),
+        ("memory_max_search_components", "1048576"),
+        ("memory_max_request_bytes", "262144"),
+        ("memory_max_reply_bytes", "131072"),
+        ("memory_max_search_scratch_bytes", "262144"),
+        ("memory_max_lifecycle_scratch_bytes", "16777216"),
+    ] {
+        assert_eq!(config[name], value);
+    }
+    assert_eq!(
+        fields(ServerConfig::default().diagnostic().as_bytes())["memory_contract_version"],
+        "1"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn memory_expiration_counter_records_only_applied_member_removals() {
+    use crate::storage::memory::{Descriptor, Member, Operation, Ttl};
+    let (stop, shutdown) = watch::channel(false);
+    let (database, owner) = worker::channel(4, Duration::from_secs(5), shutdown).unwrap();
+    let owner = tokio::spawn(owner.run());
+    let key = Bytes::from_static(b"memory");
+    let descriptor = Descriptor {
+        dimension: 1,
+        provider: Bytes::from_static(b"p"),
+        model: Bytes::from_static(b"m"),
+        revision: Bytes::from_static(b"r"),
+        transform: Bytes::from_static(b"t"),
+    };
+    let member = Member {
+        id: Bytes::from_static(b"id"),
+        namespace: Bytes::new(),
+        content: Bytes::new(),
+        vector: Bytes::copy_from_slice(&0.0_f32.to_le_bytes()),
+        deadline: None,
+        metadata: BTreeMap::new(),
+        provenance: BTreeMap::new(),
+    };
+    assert_eq!(
+        database
+            .execute_memory(key.clone(), Operation::Create(descriptor.clone()))
+            .await
+            .unwrap(),
+        Reply::Ok
+    );
+    assert_eq!(
+        database
+            .execute_memory(
+                key.clone(),
+                Operation::Put {
+                    descriptor,
+                    member: Box::new(member),
+                    ttl: Ttl::After(10),
+                    condition: crate::command::SetCondition::Always,
+                },
+            )
+            .await
+            .unwrap(),
+        Reply::Integer(1)
+    );
+    assert_eq!(metric(&database.metrics, "memory_expired_members_total"), 0);
+    tokio::time::advance(Duration::from_millis(100)).await;
+    for _ in 0..10 {
+        if metric(&database.metrics, "memory_expired_members_total") == 1 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(metric(&database.metrics, "memory_expired_members_total"), 1);
+    assert_eq!(
+        database
+            .execute_memory(
+                key,
+                Operation::Get {
+                    id: Bytes::from_static(b"id")
+                }
+            )
+            .await
+            .unwrap(),
+        Reply::Bulk(None)
+    );
+    assert_eq!(metric(&database.metrics, "memory_expired_members_total"), 1);
+    stop.send_replace(true);
+    owner.await.unwrap();
+}
 fn request(args: &[&[u8]]) -> BytesMut {
     let mut out = BytesMut::new();
     encode(

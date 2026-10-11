@@ -42,8 +42,13 @@ pub(crate) enum Counter {
     ExpirationKeys,
     AuthenticationFailures,
     AuthorizationDenials,
+    MemorySearches,
+    MemorySearchRecordVisits,
+    MemorySearchComponents,
+    MemoryRejections,
+    MemoryExpiredMembers,
 }
-const COUNTERS: usize = 17;
+const COUNTERS: usize = 22;
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct DatasetStats {
@@ -174,7 +179,7 @@ impl Metrics {
         if sections.contains(InfoSections::SERVER) {
             text.push_str("# Server\r\n");
             number!("sider_version", env!("CARGO_PKG_VERSION"));
-            number!("metrics_schema_version", 1);
+            number!("metrics_schema_version", 2);
             number!(
                 "transport_mode",
                 if self.0.protected.load(Ordering::Relaxed) {
@@ -251,6 +256,23 @@ impl Metrics {
             );
             number!("worker_timeouts_total", self.count(Counter::WorkerTimeouts));
             number!("worker_failures_total", self.count(Counter::WorkerFailures));
+            number!("memory_searches_total", self.count(Counter::MemorySearches));
+            number!(
+                "memory_search_record_visits_total",
+                self.count(Counter::MemorySearchRecordVisits)
+            );
+            number!(
+                "memory_search_components_total",
+                self.count(Counter::MemorySearchComponents)
+            );
+            number!(
+                "memory_rejections_total",
+                self.count(Counter::MemoryRejections)
+            );
+            number!(
+                "memory_expired_members_total",
+                self.count(Counter::MemoryExpiredMembers)
+            );
             number!(
                 "pubsub_evictions_total",
                 self.count(Counter::PubSubEvictions)
@@ -441,6 +463,18 @@ fn errors(frame: &Frame) -> u64 {
 
 pub(crate) fn configuration(config: &ServerConfig) -> String {
     let mut text = String::from("# Config\r\n");
+    text.push_str(
+        "memory_contract_version:1\r\n\
+memory_max_dimension:4096\r\n\
+memory_max_members:1024\r\n\
+memory_max_collection_bytes:8388608\r\n\
+memory_max_k:128\r\n\
+memory_max_search_components:1048576\r\n\
+memory_max_request_bytes:262144\r\n\
+memory_max_reply_bytes:131072\r\n\
+memory_max_search_scratch_bytes:262144\r\n\
+memory_max_lifecycle_scratch_bytes:16777216\r\n",
+    );
     macro_rules! field {
         ($name:ident) => {
             writeln!(text, concat!(stringify!($name), ":{}\r"), config.$name).unwrap();

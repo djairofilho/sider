@@ -490,6 +490,9 @@ where
                                         .is_ok()
                             });
                             if !allowed {
+                                if memory_command {
+                                    database.metrics.add(Counter::MemoryRejections, 1);
+                                }
                                 let expired = identity.as_ref().is_some_and(|proof| {
                                     !proof.valid(policy, time::OffsetDateTime::now_utc())
                                 });
@@ -653,6 +656,9 @@ where
                             }
                             transaction::Action::Execute(command) => command,
                             transaction::Action::Reply(frame) => {
+                                if memory_command && matches!(&frame, Frame::Error(_)) {
+                                    database.metrics.add(Counter::MemoryRejections, 1);
+                                }
                                 write_subscriber_response(
                                     &mut stream,
                                     &mut output,
@@ -775,6 +781,9 @@ where
                     Err(error) => {
                         transaction.poison();
                         let fatal = error.is_fatal();
+                        if memory_command && !fatal {
+                            database.metrics.add(Counter::MemoryRejections, 1);
+                        }
                         write_subscriber_response(
                             &mut stream,
                             &mut output,
@@ -797,9 +806,13 @@ where
                     } else {
                         response
                     };
+                    if matches!(&response, Frame::Error(_)) {
+                        database.metrics.add(Counter::MemoryRejections, 1);
+                    }
                     output.clear();
                     if encode(&response, &mut output, memory_response_limits(&config)).is_err() {
                         database.metrics.add(Counter::ResponseLimitFailures, 1);
+                        database.metrics.add(Counter::MemoryRejections, 1);
                         write_subscriber_response(
                             &mut stream,
                             &mut output,

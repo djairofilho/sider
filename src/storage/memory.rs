@@ -287,6 +287,12 @@ pub struct Collection {
     encoded_bytes: usize,
 }
 
+#[derive(Clone, Copy, Default)]
+pub(crate) struct SearchStats {
+    pub visits: u64,
+    pub components: u64,
+}
+
 impl Collection {
     /// Bounded exact top-k over one immutable owning-worker image.
     pub fn search(
@@ -309,6 +315,19 @@ impl Collection {
         unix_ms: i64,
         visible: impl Fn(&Member) -> bool,
     ) -> Result<Vec<(Bytes, f64)>, MemoryError> {
+        self.search_with_visibility_stats(vector, k, namespace, metadata, unix_ms, visible)
+            .map(|(hits, _)| hits)
+    }
+
+    pub(crate) fn search_with_visibility_stats(
+        &self,
+        vector: &[u8],
+        k: usize,
+        namespace: &[u8],
+        metadata: &BTreeMap<Bytes, Scalar>,
+        unix_ms: i64,
+        visible: impl Fn(&Member) -> bool,
+    ) -> Result<(Vec<(Bytes, f64)>, SearchStats), MemoryError> {
         if !(1..=MAX_SEARCH_K).contains(&k) {
             return Err(MemoryError::Argument);
         }
@@ -333,7 +352,9 @@ impl Collection {
             return Err(MemoryError::Quota);
         }
         let mut top = BinaryHeap::with_capacity(k);
+        let mut stats = SearchStats::default();
         for member in self.members.values() {
+            stats.visits += 1;
             if member.deadline.is_some_and(|deadline| deadline <= unix_ms)
                 || !visible(member)
                 || member.namespace.as_ref() != namespace
@@ -345,6 +366,7 @@ impl Collection {
             }
             let mut distance = 0.0_f64;
             for (query, stored) in vector.chunks_exact(4).zip(member.vector.chunks_exact(4)) {
+                stats.components += 1;
                 let query = f32::from_le_bytes(query.try_into().expect("four-byte coordinate"));
                 let stored = f32::from_le_bytes(stored.try_into().expect("four-byte coordinate"));
                 let delta = f64::from(query) - f64::from(stored);
@@ -364,11 +386,13 @@ impl Collection {
                 top.push(candidate);
             }
         }
-        Ok(top
-            .into_sorted_vec()
-            .into_iter()
-            .map(|hit| (hit.id, hit.distance))
-            .collect())
+        Ok((
+            top.into_sorted_vec()
+                .into_iter()
+                .map(|hit| (hit.id, hit.distance))
+                .collect(),
+            stats,
+        ))
     }
 
     fn validate_search_vector(&self, vector: &[u8]) -> Result<(), MemoryError> {
