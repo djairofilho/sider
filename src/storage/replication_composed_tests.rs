@@ -176,6 +176,180 @@ fn cleanup(directory: &Path) {
     std::fs::remove_dir_all(target).unwrap();
 }
 
+async fn wait_for_cursor(runtime: &Runtime, expected: Cursor) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if runtime.status().applied == expected {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+async fn wait_for_syncs(runtime: &Runtime, full: u64, partial: u64) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let status = runtime.status();
+            if status.full_syncs == full && status.partial_syncs == partial {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn composed_transport3_full_and_continue_apply_whole_mixed_batches() {
+    let source = Harness::new(4096, Arc::new(NoFaults)).await;
+    let primary = source
+        .db
+        .promote_replica(source.context.clone(), [9; 16])
+        .await
+        .unwrap();
+    let follower = Harness::new(4096, Arc::new(NoFaults)).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let source_config = crate::replication::config::Config::default();
+    let (source_stop, source_shutdown) = watch::channel(false);
+    let source_task = tokio::spawn(crate::replication::session::serve(
+        listener,
+        source.db.clone(),
+        source.context.clone(),
+        source_config,
+        source_shutdown,
+    ));
+    let mut legacy = tokio::net::TcpStream::connect(address).await.unwrap();
+    crate::replication::protocol::write(
+        &mut legacy,
+        &crate::replication::protocol::Message::Hello(crate::replication::protocol::Hello {
+            sider_version: Bytes::from_static(env!("CARGO_PKG_VERSION").as_bytes()),
+            record_version: 1,
+            shard_count: 2,
+            routing_version: 1,
+            max_record_bytes: source.config.limits.max_record_bytes as u32,
+            max_mutations: source.config.limits.max_mutations as u32,
+            max_snapshot_bytes: 4096,
+            cursor: None,
+        }),
+        crate::replication::protocol::Limits::default(),
+        Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
+    assert!(
+        crate::replication::protocol::read_composed_authorized(
+            &mut legacy,
+            crate::replication::protocol::Limits::default(),
+            Duration::from_secs(5),
+            |_| true,
+        )
+        .await
+        .is_err()
+    );
+    let follow_config = crate::replication::config::Config {
+        upstream: Some(address),
+        ..Default::default()
+    };
+    let (follow_stop, follow_shutdown) = watch::channel(false);
+    let follow_task = tokio::spawn(crate::replication::session::follow(
+        follower.db.clone(),
+        follower.context.clone(),
+        follow_config.clone(),
+        follow_shutdown,
+    ));
+    wait_for_cursor(&follower.context.runtime, primary).await;
+    wait_for_syncs(&follower.context.runtime, 1, 0).await;
+    assert_eq!(follower.context.runtime.status().full_syncs, 1);
+
+    let first = Cursor {
+        sequence: 1,
+        ..primary
+    };
+    assert_eq!(
+        source
+            .context
+            .aof
+            .append(batch(b"first-left", b"first-right"))
+            .await
+            .unwrap(),
+        first.sequence
+    );
+    source.context.runtime.applied(first);
+    wait_for_cursor(&follower.context.runtime, first).await;
+    assert_eq!(follower.context.aof.status().await.unwrap().0, 1);
+
+    follow_stop.send_replace(true);
+    follow_task.await.unwrap().unwrap();
+    let second = Cursor {
+        sequence: 2,
+        ..primary
+    };
+    assert_eq!(
+        source
+            .context
+            .aof
+            .append(batch(b"second-left", b"second-right"))
+            .await
+            .unwrap(),
+        second.sequence
+    );
+    source.context.runtime.applied(second);
+    let (_resume_stop, resume_shutdown) = watch::channel(false);
+    let resume_task = tokio::spawn(crate::replication::session::follow(
+        follower.db.clone(),
+        follower.context.clone(),
+        follow_config,
+        resume_shutdown,
+    ));
+    wait_for_cursor(&follower.context.runtime, second).await;
+    wait_for_syncs(&follower.context.runtime, 1, 1).await;
+    let status = follower.context.runtime.status();
+    assert_eq!(status.full_syncs, 1);
+    assert_eq!(status.partial_syncs, 1);
+    let snapshot = follower
+        .db
+        .snapshot(Some(&follower.context.aof))
+        .await
+        .unwrap();
+    assert_eq!(snapshot.sequence, Some(2));
+    assert_eq!(
+        snapshot.mutations,
+        batch(b"second-left", b"second-right").mutations
+    );
+
+    resume_task.abort();
+    resume_task.await.unwrap_err();
+    source_stop.send_replace(true);
+    source_task.await.unwrap().unwrap();
+    let (source_dir, _, _, source_writer) = source.stop().await;
+    source_writer.unwrap();
+    cleanup(&source_dir);
+    let (follower_dir, follower_config, quota, follower_writer) = follower.stop().await;
+    follower_writer.unwrap();
+    let recovered = persistence::recover_composed_legacy_mixed(
+        follower_config,
+        quota,
+        Arc::new(SystemClock),
+        Arc::new(NoFaults),
+    )
+    .unwrap();
+    assert_eq!(recovered.metadata.sequence, 2);
+    assert_eq!(
+        recovered.metadata.replication,
+        Some(ReplicationMetadata {
+            role: Role::Replica,
+            epoch: primary.epoch,
+        })
+    );
+    drop(recovered);
+    cleanup(&follower_dir);
+}
+
 #[tokio::test]
 async fn promoted_composed_writer_publishes_one_transport3_frame_for_mixed_batch() {
     let harness = Harness::new(4096, Arc::new(NoFaults)).await;

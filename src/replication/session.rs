@@ -15,9 +15,9 @@ use super::{
     Cursor, Error,
     config::Config,
     journal::Subscriber,
-    protocol::{self, Hello, Message, Reject},
+    protocol::{self, ComposedHello, Hello, Message, Reject},
 };
-use crate::persistence::format;
+use crate::persistence::{composed_format, format};
 use crate::security::InternalPhase;
 use crate::storage::{
     Mutation,
@@ -43,6 +43,89 @@ fn hello(context: &Context, cursor: Option<Cursor>) -> Hello {
         max_mutations: context.aof_limits.max_mutations as u32,
         max_snapshot_bytes: context.store_config.max_dataset_bytes as u64,
         cursor,
+    }
+}
+
+fn composed(context: &Context) -> bool {
+    context.aof.is_composed_legacy_mixed()
+}
+
+fn hello_message(context: &Context, cursor: Option<Cursor>) -> Message {
+    let base = hello(context, cursor);
+    if composed(context) {
+        Message::ComposedHello(ComposedHello {
+            base,
+            aof_header_version: composed_format::HEADER_VERSION,
+            required_capabilities: composed_format::MIXED_OWNER_BATCH,
+        })
+    } else {
+        Message::Hello(base)
+    }
+}
+
+fn accept_hello(context: &Context, request: Message) -> Result<Hello, Reject> {
+    match (composed(context), request) {
+        (false, Message::Hello(peer)) => {
+            peer.accepts(&hello(context, None))?;
+            Ok(peer)
+        }
+        (true, Message::ComposedHello(peer)) => {
+            let Message::ComposedHello(source) = hello_message(context, None) else {
+                unreachable!()
+            };
+            peer.accepts(&source)?;
+            Ok(peer.base)
+        }
+        _ => Err(Reject::IncompatibleVersion),
+    }
+}
+
+async fn write_profile(
+    socket: &mut (impl AsyncWrite + Unpin),
+    message: &Message,
+    context: &Context,
+    deadline: Duration,
+    authority: Option<&Authority>,
+) -> Result<(), Error> {
+    if composed(context) {
+        security::write_composed(socket, message, limits(context), deadline, authority).await
+    } else {
+        security::write(socket, message, limits(context), deadline, authority).await
+    }
+}
+
+async fn read_profile(
+    socket: &mut (impl AsyncRead + Unpin),
+    context: &Context,
+    deadline: Duration,
+    authority: Option<&Authority>,
+) -> Result<(Bytes, Message, Option<crate::security::InternalLease>), Error> {
+    if composed(context) {
+        security::read_composed(socket, limits(context), deadline, authority).await
+    } else {
+        security::read(socket, limits(context), deadline, authority, None).await
+    }
+}
+
+async fn read_phase_profile(
+    socket: &mut (impl AsyncRead + Unpin),
+    context: &Context,
+    deadline: Duration,
+    phase: InternalPhase,
+    authority: Option<&Authority>,
+) -> Result<(Bytes, Message), Error> {
+    if composed(context) {
+        security::read_composed_phase(socket, limits(context), deadline, phase, authority).await
+    } else {
+        security::read_phase(socket, limits(context), deadline, phase, authority).await
+    }
+}
+
+fn encode_profile(message: &Message, context: &Context) -> Result<Bytes, protocol::Error> {
+    if composed(context) {
+        protocol::encode_composed(message, limits(context))
+    } else {
+        protocol::encode(message, limits(context))
     }
 }
 
@@ -122,6 +205,9 @@ async fn serve_inner(
     mut shutdown: watch::Receiver<bool>,
     security: Option<Access>,
 ) -> Result<(), Error> {
+    if composed(&context) && security.is_none() && !listener.local_addr()?.ip().is_loopback() {
+        return Err(Error::Sequence);
+    }
     let slots = Arc::new(Semaphore::new(config.max_connections));
     let mut sessions = JoinSet::new();
     loop {
@@ -166,10 +252,10 @@ async fn reject(
     config: &Config,
     authority: Option<&Authority>,
 ) -> Result<(), Error> {
-    security::write(
+    write_profile(
         socket,
         &Message::Reject(reason),
-        limits(context),
+        context,
         config.frame_timeout,
         authority,
     )
@@ -185,12 +271,11 @@ async fn serve_connection(
     config: Config,
     mut authority: Option<Authority>,
 ) -> Result<(), Error> {
-    let (_, request, mut request_lease) = security::read(
+    let (_, request, mut request_lease) = read_profile(
         &mut socket,
-        limits(&context),
+        &context,
         config.frame_timeout,
         authority.as_ref(),
-        None,
     )
     .await?;
     if let Some(authority) = &mut authority {
@@ -219,7 +304,7 @@ async fn serve_connection(
                 .journal()
                 .and_then(|journal| journal.status().ok())
                 .map_or(0, |status| status.bytes as u64);
-            security::write(
+            write_profile(
                 &mut socket,
                 &Message::Status {
                     readonly: status.role == crate::persistence::Role::Replica,
@@ -230,7 +315,7 @@ async fn serve_connection(
                     full_syncs: status.full_syncs,
                     partial_syncs: status.partial_syncs,
                 },
-                limits(&context),
+                &context,
                 config.frame_timeout,
                 authority,
             )
@@ -253,10 +338,10 @@ async fn serve_connection(
                 sequence = cursor.sequence,
                 "manual promotion persisted; previous upstream stopped"
             );
-            security::write(
+            write_profile(
                 &mut socket,
                 &Message::Promoted(cursor),
-                limits(&context),
+                &context,
                 config.frame_timeout,
                 authority,
             )
@@ -322,10 +407,10 @@ async fn serve_connection(
             )
             .await
             .map_err(|_| protocol::Error::Timeout)??;
-            security::write(
+            write_profile(
                 &mut socket,
-                &Message::Hello(hello(&context, Some(snapshot.cursor))),
-                limits(&context),
+                &hello_message(&context, Some(snapshot.cursor)),
+                &context,
                 config.frame_timeout,
                 authority,
             )
@@ -339,10 +424,13 @@ async fn serve_connection(
             socket.shutdown().await?;
             Ok(())
         }
-        Message::Hello(peer) => {
-            if let Err(reason) = peer.accepts(&source) {
-                return reject(&mut socket, reason, &context, &config, authority).await;
-            }
+        request @ (Message::Hello(_) | Message::ComposedHello(_)) => {
+            let peer = match accept_hello(&context, request) {
+                Ok(peer) => peer,
+                Err(reason) => {
+                    return reject(&mut socket, reason, &context, &config, authority).await;
+                }
+            };
             let journal = context.runtime.journal().ok_or(Error::Stale)?;
             let journal_lease = operation_lease(authority, config.frame_timeout).await?;
             let resume = peer.cursor.and_then(|cursor| {
@@ -357,18 +445,18 @@ async fn serve_connection(
                     .authorized_internal(operation_lease(authority, config.frame_timeout).await?)
                     .replication_position(&context.runtime)
                     .await?;
-                security::write(
+                write_profile(
                     &mut socket,
-                    &Message::Hello(hello(&context, Some(head))),
-                    limits(&context),
+                    &hello_message(&context, Some(head)),
+                    &context,
                     config.frame_timeout,
                     authority,
                 )
                 .await?;
-                security::write(
+                write_profile(
                     &mut socket,
                     &Message::Continue(cursor),
-                    limits(&context),
+                    &context,
                     config.frame_timeout,
                     authority,
                 )
@@ -386,10 +474,10 @@ async fn serve_connection(
                 )
                 .await
                 .map_err(|_| protocol::Error::Timeout)??;
-                security::write(
+                write_profile(
                     &mut socket,
-                    &Message::Hello(hello(&context, Some(snapshot.cursor))),
-                    limits(&context),
+                    &hello_message(&context, Some(snapshot.cursor)),
+                    &context,
                     config.frame_timeout,
                     authority,
                 )
@@ -437,13 +525,13 @@ async fn send_snapshot(
     config: &Config,
     authority: Option<&Authority>,
 ) -> Result<(), Error> {
-    security::write(
+    write_profile(
         socket,
         &Message::FullStart {
             cursor: snapshot.cursor,
             entries: snapshot.mutations.len() as u64,
         },
-        limits(context),
+        context,
         config.frame_timeout,
         authority,
     )
@@ -451,7 +539,7 @@ async fn send_snapshot(
     let mut digest = 0;
     let mut bytes = 0usize;
     for mutation in &snapshot.mutations {
-        let frame = protocol::encode(&Message::SnapshotEntry(mutation.clone()), limits(context))?;
+        let frame = encode_profile(&Message::SnapshotEntry(mutation.clone()), context)?;
         bytes = bytes
             .checked_add(frame.len())
             .filter(|bytes| *bytes <= context.store_config.max_dataset_bytes)
@@ -459,14 +547,14 @@ async fn send_snapshot(
         digest = format::snapshot_digest(digest, &frame);
         security::write_frame(socket, &frame, config.frame_timeout, authority).await?;
     }
-    security::write(
+    write_profile(
         socket,
         &Message::FullEnd {
             cursor: snapshot.cursor,
             entries: snapshot.mutations.len() as u64,
             digest,
         },
-        limits(context),
+        context,
         config.frame_timeout,
         authority,
     )
@@ -481,9 +569,9 @@ async fn expect_ack(
     config: &Config,
     authority: Option<&Authority>,
 ) -> Result<(), Error> {
-    if security::read_phase(
+    if read_phase_profile(
         socket,
-        limits(context),
+        context,
         config.frame_timeout,
         InternalPhase::ReplicaAck,
         authority,
@@ -514,10 +602,10 @@ async fn stream(
                     .ok_or(Error::Stale)?
                     .status()?
                     .head;
-                security::write(
+                write_profile(
                     socket,
                     &Message::Heartbeat(head),
-                    limits(context),
+                    context,
                     config.frame_timeout,
                     authority,
                 )
@@ -539,10 +627,10 @@ async fn stream(
                     .ok_or(Error::Stale)?
                     .status()?
                     .head;
-                security::write(
+                write_profile(
                     socket,
                     &Message::Heartbeat(head),
-                    limits(context),
+                    context,
                     config.frame_timeout,
                     authority,
                 )
@@ -604,6 +692,14 @@ async fn follow_inner(
     mut shutdown: watch::Receiver<bool>,
     security: Option<Access>,
 ) -> Result<(), Error> {
+    if composed(&context)
+        && security.is_none()
+        && !config
+            .upstream
+            .is_some_and(|address| address.ip().is_loopback())
+    {
+        return Err(Error::Sequence);
+    }
     let mut backoff = config.reconnect_min;
     loop {
         if !context.runtime.readonly() {
@@ -660,33 +756,43 @@ async fn receive_session(
         };
     let authority = authority.as_ref();
     let cursor = (position.epoch != [0; 16]).then_some(position);
-    security::write(
+    write_profile(
         &mut socket,
-        &Message::Hello(hello(context, cursor)),
-        limits(context),
+        &hello_message(context, cursor),
+        context,
         config.frame_timeout,
         authority,
     )
     .await?;
-    let Message::Hello(source) = security::read_phase(
+    let source_message = read_phase_profile(
         &mut socket,
-        limits(context),
+        context,
         config.frame_timeout,
         InternalPhase::Hello,
         authority,
     )
     .await?
-    .1
-    else {
-        return Err(Error::Sequence);
+    .1;
+    let source = match (composed(context), source_message) {
+        (false, Message::Hello(source)) => {
+            hello(context, None)
+                .accepts(&source)
+                .map_err(|_| Error::Limit)?;
+            source
+        }
+        (true, Message::ComposedHello(source)) => {
+            let Message::ComposedHello(local) = hello_message(context, None) else {
+                unreachable!()
+            };
+            local.accepts(&source).map_err(|_| Error::Limit)?;
+            source.base
+        }
+        _ => return Err(Error::Sequence),
     };
-    hello(context, None)
-        .accepts(&source)
-        .map_err(|_| Error::Limit)?;
     let head = source.cursor.ok_or(Error::Sequence)?;
-    match security::read_phase(
+    match read_phase_profile(
         &mut socket,
-        limits(context),
+        context,
         config.frame_timeout,
         InternalPhase::ReplicaStart,
         authority,
@@ -717,19 +823,19 @@ async fn receive_session(
         }
         _ => return Err(Error::Sequence),
     }
-    security::write(
+    write_profile(
         &mut socket,
         &Message::Ack(position),
-        limits(context),
+        context,
         config.frame_timeout,
         authority,
     )
     .await?;
     let mut previous: Option<Bytes> = None;
     loop {
-        let (frame, message) = security::read_phase(
+        let (frame, message) = read_phase_profile(
             &mut socket,
-            limits(context),
+            context,
             config.frame_timeout,
             InternalPhase::ReplicaStream,
             authority,
@@ -764,10 +870,10 @@ async fn receive_session(
             }
             _ => return Err(Error::Sequence),
         }
-        security::write(
+        write_profile(
             &mut socket,
             &Message::Ack(position),
-            limits(context),
+            context,
             config.frame_timeout,
             authority,
         )
@@ -796,14 +902,8 @@ async fn receive_snapshot(
         } else {
             InternalPhase::SnapshotEnd
         };
-        let (frame, message) = security::read_phase(
-            socket,
-            limits(context),
-            config.frame_timeout,
-            phase,
-            authority,
-        )
-        .await?;
+        let (frame, message) =
+            read_phase_profile(socket, context, config.frame_timeout, phase, authority).await?;
         match message {
             Message::SnapshotEntry(mutation) if mutations.len() < entries as usize => {
                 if previous.as_ref().is_some_and(|key| key >= mutation.key()) {

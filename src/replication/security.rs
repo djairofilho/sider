@@ -207,6 +207,53 @@ pub(super) async fn read_memory_phase(
     Ok((frame, message))
 }
 
+pub(super) async fn read_composed(
+    socket: &mut (impl AsyncRead + Unpin),
+    limits: protocol::Limits,
+    deadline: Duration,
+    authority: Option<&Authority>,
+) -> Result<(bytes::Bytes, Message, Option<InternalLease>), Error> {
+    Ok(
+        protocol::read_composed_admitted(socket, limits, deadline, |kind| async move {
+            if !matches!(kind, 1 | 11 | 12) {
+                return Err(protocol::Error::Invalid("permission denied"));
+            }
+            let Some(authority) = authority else {
+                return Ok(None);
+            };
+            authority
+                .admit(Some(kind))
+                .await
+                .map_err(|_| protocol::Error::Invalid("permission denied"))
+        })
+        .await?,
+    )
+}
+
+pub(super) async fn read_composed_phase(
+    socket: &mut (impl AsyncRead + Unpin),
+    limits: protocol::Limits,
+    deadline: Duration,
+    phase: InternalPhase,
+    authority: Option<&Authority>,
+) -> Result<(bytes::Bytes, Message), Error> {
+    let (frame, message, _lease) =
+        protocol::read_composed_admitted(socket, limits, deadline, |kind| async move {
+            if !phase.permits(kind) {
+                return Err(protocol::Error::Invalid("permission denied"));
+            }
+            let Some(authority) = authority else {
+                return Ok(None);
+            };
+            authority
+                .admit(authority.request)
+                .await
+                .map_err(|_| protocol::Error::Invalid("permission denied"))
+        })
+        .await?;
+    Ok((frame, message))
+}
+
 pub(super) async fn write(
     socket: &mut (impl AsyncWrite + Unpin),
     message: &Message,
@@ -239,6 +286,25 @@ pub(super) async fn write_memory(
             None => None,
         };
         protocol::write_memory(socket, message, limits, deadline).await?;
+        Ok(())
+    })
+    .await
+    .map_err(|_| protocol::Error::Timeout)?
+}
+
+pub(super) async fn write_composed(
+    socket: &mut (impl AsyncWrite + Unpin),
+    message: &Message,
+    limits: protocol::Limits,
+    deadline: Duration,
+    authority: Option<&Authority>,
+) -> Result<(), Error> {
+    tokio::time::timeout(deadline, async {
+        let _lease = match authority {
+            Some(authority) => authority.operation(deadline).await?,
+            None => None,
+        };
+        protocol::write_composed(socket, message, limits, deadline).await?;
         Ok(())
     })
     .await

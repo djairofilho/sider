@@ -20,8 +20,10 @@ TCP test covers mixed-owner EXEC, ordered binary `MGET`, multi-owner WATCH confl
 command rejection, restart, and wrong-profile startup refusal. These tests do not
 simulate power loss or cover network replication boundaries. The transport-3
 codec, schema-3 backup library, live source export, loopback-only backup CLI,
-one-frame journal publication, and local replica application path exist, but no
-composed replica follower or release gate selects them. The issue remains open.
+one-frame journal publication, and library TCP follower path exist. A focused
+library test covers FULL, a mixed batch, disconnect, CONTINUE, and persisted
+replica cursor. No executable replication configuration or release gate selects
+that follower. The issue remains open.
 
 ## Contents
 
