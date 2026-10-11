@@ -1,6 +1,6 @@
 # Proposed cross-shard transaction contract
 
-**Status: protocol proposed; command planning, preparation, and isolated replay foundations integrated.**
+**Status: protocol proposed; native in-memory owner coordination and isolated replay foundations integrated.**
 This design addresses
 [issue #92](https://github.com/djairofilho/sider/issues/92) against source baseline
 `0f0f232`. It supplies a written contract and an implementation plan; it does not
@@ -10,7 +10,7 @@ The current [transactions](transactions.md), [routing](sharding.md), and
 Participant discovery includes watched-only keys and keeps owner IDs bounded and
 sorted. Owner-local candidate preparation and a shared execution time are in the
 development checkout; single-shard EXEC uses the latter for WATCH and TTL.
-Mixed-owner EXEC, durable append, replay, and replica application are not enabled.
+Mixed-owner RESP EXEC, durable append, and replica application are not enabled.
 The recovery helper now stages postimages and validates each touched shard's
 projected quota before applying a record. An internal test exercises a mixed-owner
 record and a quota failure on its last owner; all production recovery calls still
@@ -22,14 +22,23 @@ prefix. It rejects an over-quota owner and unsupported profiles without repair.
 The router can now split mixed-owner MGET, EXISTS, DEL, and MSET into sorted owner
 fragments and reconstruct their replies. MGET keeps binary key order and duplicate
 occurrences; MSET keeps each owner's original pair order and marks the command
-for joint candidate acceptance. This planner does not enqueue fragments, prepare
-owners, append a record, or enable mixed-owner EXEC.
+for joint candidate acceptance. The router itself does not admit an EXEC.
 Whole-queue preflight now gathers sorted unique owners including watched-only keys,
 keeps the original command order, and fails before returning any plan if a late
-mixed-owner command has no fragment rule. No owner control or admission uses this
-plan yet.
+mixed-owner command has no fragment rule. The native `DbHandle` can use this plan
+through `with_unpersisted_multi_owner().execute_batch(...)`: a supervised task
+holds exclusive admission, drives separate bounded owner controls, and publishes
+the in-memory result only after every owner acknowledges application. A rejected
+MSET discards all its candidates while other commands retain their queue order.
+This explicit library opt-in refuses AOF-backed workers and either replication
+role before preparation; connection-context commands are also refused before
+effects. Normal handles and RESP MULTI/EXEC continue to reject mixed owners.
+The stage has focused worker tests for WATCH conflict, quota rejection, frozen
+TTL, concurrent opposite owner orders, and AOF/replication refusal. It does not
+prove the durable decision, replica path, cancellation boundaries, or release
+gates.
 The public server and tools still cannot select header 7; transport 3, backup 3,
-replica application, and coordinated EXEC remain unimplemented.
+replica application, and RESP coordinated EXEC remain unimplemented.
 
 ## Contents
 

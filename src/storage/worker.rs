@@ -104,25 +104,27 @@ fn encode_reply(
 pub struct DbHandle {
     pub(crate) metrics: Metrics,
     requests: Vec<mpsc::Sender<Request>>,
-    security_lease: Option<crate::security::ClientLease>,
+    pub(super) coordination: Vec<mpsc::Sender<super::coordinator::Control>>,
+    mixed_unpersisted: bool,
+    pub(super) security_lease: Option<crate::security::ClientLease>,
     pub(super) internal_lease: Option<crate::security::InternalLease>,
-    router: ShardRouter,
+    pub(super) router: ShardRouter,
     pub(super) request_timeout: Duration,
     pub(super) shutdown: watch::Receiver<bool>,
     pub(super) barrier: Arc<RwLock<()>>,
     pub(super) admission: super::admission::Admission,
     pub(super) snapshots: Vec<mpsc::Sender<oneshot::Sender<Vec<super::Mutation>>>>,
     pub(super) controls: Vec<mpsc::Sender<super::replication::Control>>,
-    replication: Option<crate::replication::state::Runtime>,
+    pub(super) replication: Option<crate::replication::state::Runtime>,
 }
 
 /// Sole owner of the map and the queue's receiving side.
 pub struct Worker {
     metrics: Metrics,
     shard: usize,
-    store: Store,
+    pub(super) store: Store,
     shard_count: usize,
-    aof: Option<crate::persistence::AofHandle>,
+    pub(super) aof: Option<crate::persistence::AofHandle>,
     compact_after_bytes: u64,
     compaction: Option<oneshot::Receiver<Result<(), crate::persistence::AofError>>>,
     requests: mpsc::Receiver<Request>,
@@ -131,7 +133,9 @@ pub struct Worker {
     admission: super::admission::Admission,
     snapshots: mpsc::Receiver<oneshot::Sender<Vec<super::Mutation>>>,
     controls: mpsc::Receiver<super::replication::Control>,
-    replication: Option<crate::replication::state::Runtime>,
+    coordination: mpsc::Receiver<super::coordinator::Control>,
+    pub(super) coordinated: Option<super::transaction::OwnerTransaction>,
+    pub(super) replication: Option<crate::replication::state::Runtime>,
 }
 
 /// Creates an empty map and its bounded channel without starting a task.
@@ -191,6 +195,7 @@ pub fn channel_with_stores(
     let mut workers = Vec::with_capacity(stores.len());
     let mut snapshots = Vec::with_capacity(stores.len());
     let mut controls = Vec::with_capacity(stores.len());
+    let mut coordination = Vec::with_capacity(stores.len());
     let barrier = Arc::new(RwLock::new(()));
     let admission = super::admission::Admission::default();
     let shard_count = stores.len();
@@ -200,7 +205,9 @@ pub fn channel_with_stores(
         let (sender, receiver) = mpsc::channel(capacity);
         let (snapshot_sender, snapshot_receiver) = mpsc::channel(1);
         let (control_sender, control_receiver) = mpsc::channel(1);
+        let (coordination_sender, coordination_receiver) = mpsc::channel(1);
         controls.push(control_sender);
+        coordination.push(coordination_sender);
         snapshots.push(snapshot_sender);
         senders.push(sender);
         workers.push(Worker {
@@ -217,6 +224,8 @@ pub fn channel_with_stores(
             admission: admission.clone(),
             snapshots: snapshot_receiver,
             controls: control_receiver,
+            coordination: coordination_receiver,
+            coordinated: None,
             replication: None,
         });
     }
@@ -224,6 +233,8 @@ pub fn channel_with_stores(
         DbHandle {
             metrics,
             requests: senders,
+            coordination,
+            mixed_unpersisted: false,
             security_lease: None,
             internal_lease: None,
             router,
@@ -240,6 +251,14 @@ pub fn channel_with_stores(
 }
 
 impl DbHandle {
+    /// Opts this library handle into mixed-owner in-memory batches. AOF-backed
+    /// workers and any replication role refuse the operation before preparation.
+    /// RESP MULTI/EXEC and regular handles retain the single-owner restriction.
+    pub fn with_unpersisted_multi_owner(mut self) -> Self {
+        self.mixed_unpersisted = true;
+        self
+    }
+
     pub(crate) fn authorized_internal(
         &self,
         lease: Option<crate::security::InternalLease>,
@@ -376,6 +395,11 @@ impl DbHandle {
     ) -> Result<Reply, DbError> {
         let shard = match self.batch_shard(&commands, &watched) {
             Ok(shard) => shard,
+            Err(ExecutionError::CrossShard) if self.mixed_unpersisted => {
+                return self
+                    .execute_coordinated_unpersisted(commands, watched)
+                    .await;
+            }
             Err(error) => return Ok(Reply::Error(error)),
         };
         self.request(shard, |reply, _admission| Request::Batch {
@@ -583,6 +607,9 @@ impl Worker {
                 }
                 Some(control) = self.controls.recv() => {
                     if !self.replication_control(control).await { return; }
+                }
+                Some(control) = self.coordination.recv() => {
+                    self.coordination_control(control);
                 }
                 request = self.requests.recv() => {
                     match request {
@@ -843,7 +870,7 @@ impl Worker {
         Ok(result)
     }
 
-    fn apply_prepared(&mut self, prepared: super::Prepared) -> Reply {
+    pub(super) fn apply_prepared(&mut self, prepared: super::Prepared) -> Reply {
         let changed = !prepared.batch.mutations.is_empty();
         let expired = if prepared.batch.origin == super::MutationOrigin::Expiration {
             prepared.batch.mutations.len()
@@ -1029,7 +1056,7 @@ impl Worker {
     }
 }
 
-async fn stopping(shutdown: &mut watch::Receiver<bool>) {
+pub(super) async fn stopping(shutdown: &mut watch::Receiver<bool>) {
     loop {
         if *shutdown.borrow_and_update() {
             return;

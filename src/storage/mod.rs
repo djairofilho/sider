@@ -3,6 +3,7 @@
 mod admission;
 mod clock;
 mod collections;
+mod coordinator;
 pub mod memory;
 mod memory_lifecycle;
 pub use memory_lifecycle::PreparedMemory;
