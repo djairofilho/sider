@@ -41,6 +41,20 @@ def make_records(count: int, seed: int) -> list[dict]:
     return records
 
 
+def make_queries(corpus: dict) -> list[dict]:
+    queries = [dict(query, k=10) for query in corpus["queries"]]
+    generator = random.Random(corpus["seed"] ^ 0x114)
+    for index in range(32):
+        category = (None, "policy", "note", "policy")[index % 4]
+        queries.append({"name": f"generated-{index:02d}",
+                        "namespace": "team-a" if index % 3 else "team-b",
+                        "vector": [generator.uniform(-1, 1), generator.uniform(-1, 1)],
+                        "k": 10,
+                        "filters": {} if category is None else
+                        {"category": ["BYTES", category]}})
+    return queries
+
+
 class Grid:
     """Non-production, fixed-centroid two-axis screening prototype."""
 
@@ -137,11 +151,11 @@ def measure(records: list[dict], queries: list[dict], repetitions: int) -> dict:
         rss_samples = []
         began_all = time.perf_counter_ns()
         for _ in range(repetitions):
-            for query in queries:
+            for query, wanted in zip(queries, query_result):
                 begun = time.perf_counter_ns()
                 actual = oracle(records, query) if index is None else index.search(query)
                 latencies.append(time.perf_counter_ns() - begun)
-                assert actual == query_result[queries.index(query)]
+                assert actual == wanted
             resident = rss_bytes(os.getpid())
             if resident is not None:
                 rss_samples.append(resident)
@@ -153,6 +167,7 @@ def measure(records: list[dict], queries: list[dict], repetitions: int) -> dict:
             "query_ids_hex": [[row[0].hex() for row in rows] for rows in query_result],
             "per_query_recall_at_k": per_query_recall,
             "mean_nonempty_recall_at_k": statistics.mean(x for x in per_query_recall if x is not None),
+            "minimum_nonempty_recall_at_k": min(x for x in per_query_recall if x is not None),
             "latency_ns_samples": latencies, "elapsed_ns": elapsed,
             "p50_ns": percentile(latencies, 50), "p95_ns": percentile(latencies, 95),
             "p99_ns": percentile(latencies, 99),
@@ -212,7 +227,7 @@ def run(output: Path, repetitions: int) -> dict:
             "server_serial_p99_ns": source["observations"]["load"]["p99_ns"],
             "server_concurrent_p99_ns": source["observations"]["concurrent_load"]["p99_ns"],
         }
-    queries = [dict(query, k=10) for query in corpus["queries"]]
+    queries = make_queries(corpus)
     observations = {str(size): measure(make_records(size, corpus["seed"]), queries, repetitions)
                     for size in (256, 1024)}
     return {"schema": "sider-memory-index-experiment/1",
@@ -220,6 +235,7 @@ def run(output: Path, repetitions: int) -> dict:
             "seed": corpus["seed"], "platform": __import__("platform").platform(),
             "python": __import__("platform").python_version(),
             "cpu_count": os.cpu_count(), "repetitions": repetitions,
+            "queries": queries,
             "prototype": "fixed 4x4 centroid grid with one/four probes; sorted x-axis window of 64 candidates; derived state",
             "baseline": baseline, "observations": observations,
             "lifecycle_rebuild": lifecycle(corpus, queries),
@@ -235,14 +251,14 @@ def report(raw: dict) -> str:
     lines = ["# Derived-index screening", "",
              f"Source SHA: `{raw['source_sha']}`; corpus SHA-256: `{raw['corpus_sha256']}`.",
              f"Platform: `{raw['platform']}`; Python: `{raw['python']}`; logical CPUs: `{raw['cpu_count']}`.",
-             f"Seed: `{raw['seed']}`; {raw['repetitions']} repetitions of five query shapes per method and size.",
+             f"Seed: `{raw['seed']}`; {raw['repetitions']} repetitions of {len(raw['queries'])} query shapes per method and size.",
              "Raw results: [raw.json](raw.json).", "",
-             "| Records | Method | Mean recall@10 | p50/p95/p99, ms | Queries/s | Serialized index bytes | Median build, ms | Max sampled process RSS, bytes |",
+             "| Records | Method | Mean/min recall@10 | p50/p95/p99, ms | Queries/s | Serialized index bytes | Median build, ms | Max sampled process RSS, bytes |",
              "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
     for size, methods in raw["observations"].items():
         for name, values in methods.items():
             builds = sorted(values["build_ns_samples"])
-            lines.append(f"| {size} | {name} | {values['mean_nonempty_recall_at_k']:.3f} | "
+            lines.append(f"| {size} | {name} | {values['mean_nonempty_recall_at_k']:.3f}/{values['minimum_nonempty_recall_at_k']:.3f} | "
                          f"{values['p50_ns']/1e6:.3f}/{values['p95_ns']/1e6:.3f}/{values['p99_ns']/1e6:.3f} | "
                          f"{values['throughput_queries_per_second']:.0f} | {values['index_serialized_bytes']} | "
                          f"{builds[1]/1e6:.3f} | {values['max_sampled_process_rss_bytes']} |")

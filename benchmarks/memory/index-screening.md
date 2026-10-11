@@ -4,7 +4,10 @@ This issue #114 experiment uses [corpus v1](corpus-v1.json) and the exact
 server results under [issue #112](../../docs/evidence/issue-112-corpus-e2475bd/README.md).
 The frozen memory contract admits at most 1,024 members per collection, so the
 runner tests 256 members from the measured corpus and 1,024 from the same seed.
-It uses the same namespace and metadata filters, query vectors, and `k = 10`.
+It starts with the same five namespace/metadata query shapes and adds 32
+deterministic query vectors spread across the two-dimensional domain with the
+same broad/selective filters. All use `k = 10`. The expanded query definitions
+are retained in the raw output.
 Run the Python 3.10+ prototype from a clean checkout with an output directory
 outside the checkout:
 
