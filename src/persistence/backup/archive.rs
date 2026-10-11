@@ -201,7 +201,7 @@ pub(super) fn validate_file(
     clock: Arc<dyn Clock>,
 ) -> Result<(Vec<usize>, u64), Error> {
     file.seek(SeekFrom::Start(0))?;
-    let codec = crate::persistence::profile::Profile(manifest.profile == Profile::Memory);
+    let codec = crate::persistence::profile::Profile::selected(manifest.profile == Profile::Memory);
     let header = codec.read_header(&mut *file)?;
     if header.format_version != manifest.profile.versions().1
         || header.replication.is_some()
