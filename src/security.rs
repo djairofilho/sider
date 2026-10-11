@@ -10,6 +10,7 @@ mod internal_runtime;
 mod policy;
 mod profile;
 mod runtime;
+mod startup;
 mod transport;
 
 pub use auth::{Authentication, CredentialProof};
@@ -20,6 +21,7 @@ pub(crate) use policy::command_name;
 pub use policy::{ClientPolicy, InternalPolicy, Role};
 pub use profile::{Profile, StartupSecurity};
 pub use runtime::{ClientLease, ClientRuntime};
+pub use startup::ServerPreflight;
 /// One atomic server generation for client and internal admission.
 /// `ClientRuntime` remains the compatible name for existing client consumers.
 pub type GenerationRuntime = ClientRuntime;

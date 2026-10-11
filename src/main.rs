@@ -105,44 +105,33 @@ async fn run(config: ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
     let security = sider::security::StartupSecurity::from_env()?;
     // Complete permission, manifest, policy, and TLS validation precedes recovery,
     // listener binds, readiness, and any outgoing internal connection.
-    let generation = security.server(&config)?;
+    let preflight = security.preflight(&config)?;
     // Register signals before publishing readiness to avoid missing an immediate shutdown.
     let shutdown = shutdown_signal()?;
-    let prepared = server::prepare(&config).await?;
-    let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
-    let address = listener.local_addr()?;
-    if let Some(generation) = generation {
+    if let Some(preflight) = preflight {
+        let runtime = preflight.runtime();
         tracing::info!(
-            generation = generation.number,
+            generation = runtime.number().await,
             "protected profile: TLS and authentication required"
         );
-        let (client, internal, reload) = if generation.internal.is_none() {
-            let runtime = sider::security::ClientRuntime::new(generation)?;
-            let client = runtime.client().await;
-            let (stop, shutdown) = tokio::sync::watch::channel(false);
-            let directory = security
-                .directory()
-                .ok_or(sider::security::Error::Configuration)?;
-            let task = tokio::spawn(async move { runtime.poll(directory, shutdown).await });
-            (client, None, Some((stop, task)))
-        } else {
-            (
-                generation
-                    .client
-                    .ok_or(sider::security::Error::Configuration)?,
-                generation.internal,
-                None,
-            )
-        };
-        let result =
-            server::serve_secure_prepared(listener, config, shutdown, prepared, client, internal)
-                .await;
-        if let Some((stop, task)) = reload {
-            stop.send_replace(true);
-            task.await?;
-        }
+        let directory = security
+            .directory()
+            .ok_or(sider::security::Error::Configuration)?;
+        let outgoing = config
+            .replication
+            .as_ref()
+            .is_some_and(|r| r.upstream.is_some());
+        let (stop, receiver) = tokio::sync::watch::channel(false);
+        let task =
+            tokio::spawn(async move { runtime.poll_server(directory, outgoing, receiver).await });
+        let result = server::serve_live(config, shutdown, preflight).await;
+        stop.send_replace(true);
+        task.await?;
         result?;
     } else {
+        let prepared = server::prepare(&config).await?;
+        let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
+        let address = listener.local_addr()?;
         tracing::warn!(%address, internal=?config.replication.as_ref().map(|r| r.listen), "legacy-loopback profile: plaintext and unauthenticated");
         server::serve_prepared(listener, config, shutdown, prepared).await?;
     }

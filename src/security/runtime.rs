@@ -89,6 +89,24 @@ impl Drop for Session {
 }
 
 impl ClientRuntime {
+    pub(super) async fn validate_server(
+        &self,
+        internal: bool,
+        outgoing: bool,
+    ) -> Result<(), Error> {
+        let active = self.0.active.read().await;
+        let client = active.client.as_ref().ok_or(Error::Configuration)?;
+        if !client.transport.current() || active.internal.is_some() != internal {
+            return Err(Error::Configuration);
+        }
+        if let Some(security) = &active.internal
+            && (!security.transport.current() || security.policy.outgoing() != outgoing)
+        {
+            return Err(Error::Configuration);
+        }
+        Ok(())
+    }
+
     /// Active manifest number; no policy material is exposed by diagnostics.
     pub async fn number(&self) -> u64 {
         self.0.active.read().await.number

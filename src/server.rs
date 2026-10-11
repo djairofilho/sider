@@ -30,6 +30,8 @@ pub enum ServerError {
     ShutdownTimeout,
     #[error("persistence unavailable: {0}")]
     Persistence(#[from] crate::persistence::AofError),
+    #[error("security validation unavailable: {0}")]
+    Security(#[from] crate::security::Error),
     #[error("replication unavailable: {0}")]
     Replication(#[from] crate::replication::Error),
 }
@@ -43,6 +45,15 @@ pub struct PreparedServer {
 }
 
 pub async fn prepare(config: &ServerConfig) -> Result<PreparedServer, ServerError> {
+    prepare_inner(config, None).await
+}
+async fn prepare_inner(
+    config: &ServerConfig,
+    security: Option<&crate::security::ServerPreflight>,
+) -> Result<PreparedServer, ServerError> {
+    if let Some(security) = security {
+        security.validate(config).await?;
+    }
     config.validate()?;
     let store_config = StoreConfig {
         max_dataset_bytes: config.max_dataset_bytes,
@@ -90,6 +101,9 @@ pub async fn prepare(config: &ServerConfig) -> Result<PreparedServer, ServerErro
             .is_none()
     {
         return Err(ConfigError::InvalidServerLimits { reason: "persisted replica requires configured upstream; use local promotion to change the role" }.into());
+    }
+    if let Some(security) = security {
+        security.validate(config).await?;
     }
     let replication_listener = match &config.replication {
         Some(replication) => Some(TcpListener::bind(replication.listen).await?),
@@ -180,6 +194,50 @@ pub async fn serve_secure_prepared(
         }
         .into());
     }
+    serve_prepared_inner(
+        listener,
+        config,
+        shutdown,
+        prepared,
+        Some(client),
+        internal.map(InternalAdmission::Static),
+    )
+    .await
+}
+
+#[derive(Clone)]
+enum InternalAdmission {
+    Static(crate::security::InternalSecurity),
+    Live(crate::security::InternalRuntime),
+}
+
+/// Validates the live runtime before recovery and each listener bind.
+/// In-memory preflight remains an embedding API; executable permission gates apply
+/// through `StartupSecurity::preflight` before this function is called.
+pub async fn serve_live(
+    config: ServerConfig,
+    shutdown: impl Future<Output = ()> + Send,
+    preflight: crate::security::ServerPreflight,
+) -> Result<(), ServerError> {
+    let prepared = prepare_inner(&config, Some(&preflight)).await?;
+    preflight.validate(&config).await?;
+    let listener = TcpListener::bind(config.bind_addr).await?;
+    serve_live_prepared(listener, config, shutdown, prepared, preflight).await
+}
+
+/// Uses one validated runtime for both lanes of an already prepared server.
+/// Callers opening listeners themselves must validate preflight before those binds.
+pub async fn serve_live_prepared(
+    listener: TcpListener,
+    config: ServerConfig,
+    shutdown: impl Future<Output = ()> + Send,
+    prepared: PreparedServer,
+    preflight: crate::security::ServerPreflight,
+) -> Result<(), ServerError> {
+    preflight.validate(&config).await?;
+    let runtime = preflight.runtime();
+    let client = runtime.client().await;
+    let internal = runtime.internal().await.map(InternalAdmission::Live);
     serve_prepared_inner(listener, config, shutdown, prepared, Some(client), internal).await
 }
 
@@ -189,7 +247,7 @@ async fn serve_prepared_inner(
     shutdown: impl Future<Output = ()> + Send,
     prepared: PreparedServer,
     security: Option<crate::security::ClientSecurity>,
-    internal_security: Option<crate::security::InternalSecurity>,
+    internal_security: Option<InternalAdmission>,
 ) -> Result<(), ServerError> {
     config.validate()?;
     if prepared.config != config {
@@ -305,25 +363,39 @@ async fn serve_prepared_inner(
         let source_shutdown = receiver.clone();
         let source_internal = internal_security.clone();
         workers.spawn(async move {
-            let result = if let Some(security) = source_internal {
-                crate::replication::session::serve_secure(
-                    listener,
-                    source_db,
-                    source_context,
-                    source_config,
-                    source_shutdown,
-                    security,
-                )
-                .await
-            } else {
-                crate::replication::session::serve(
-                    listener,
-                    source_db,
-                    source_context,
-                    source_config,
-                    source_shutdown,
-                )
-                .await
+            let result = match source_internal {
+                Some(InternalAdmission::Live(security)) => {
+                    crate::replication::session::serve_live(
+                        listener,
+                        source_db,
+                        source_context,
+                        source_config,
+                        source_shutdown,
+                        security,
+                    )
+                    .await
+                }
+                Some(InternalAdmission::Static(security)) => {
+                    crate::replication::session::serve_secure(
+                        listener,
+                        source_db,
+                        source_context,
+                        source_config,
+                        source_shutdown,
+                        security,
+                    )
+                    .await
+                }
+                None => {
+                    crate::replication::session::serve(
+                        listener,
+                        source_db,
+                        source_context,
+                        source_config,
+                        source_shutdown,
+                    )
+                    .await
+                }
             };
             if let Err(error) = result {
                 tracing::error!(%error, "internal listener terminated with failure");
@@ -335,23 +407,36 @@ async fn serve_prepared_inner(
             let replica_shutdown = receiver.clone();
             let replica_internal = internal_security.clone();
             workers.spawn(async move {
-                let result = if let Some(security) = replica_internal {
-                    crate::replication::session::follow_secure(
-                        replica_db,
-                        context,
-                        replica_config,
-                        replica_shutdown,
-                        security,
-                    )
-                    .await
-                } else {
-                    crate::replication::session::follow(
-                        replica_db,
-                        context,
-                        replica_config,
-                        replica_shutdown,
-                    )
-                    .await
+                let result = match replica_internal {
+                    Some(InternalAdmission::Live(security)) => {
+                        crate::replication::session::follow_live(
+                            replica_db,
+                            context,
+                            replica_config,
+                            replica_shutdown,
+                            security,
+                        )
+                        .await
+                    }
+                    Some(InternalAdmission::Static(security)) => {
+                        crate::replication::session::follow_secure(
+                            replica_db,
+                            context,
+                            replica_config,
+                            replica_shutdown,
+                            security,
+                        )
+                        .await
+                    }
+                    None => {
+                        crate::replication::session::follow(
+                            replica_db,
+                            context,
+                            replica_config,
+                            replica_shutdown,
+                        )
+                        .await
+                    }
                 };
                 if let Err(error) = result {
                     tracing::error!(%error, "replica terminated with failure");
