@@ -104,8 +104,11 @@ standalone server profile permits durable memory writes and an explicitly
 configured internal listener exports live record-2 backups. Memory replication
 and release evidence remain pending. The internal record-2 replica installation
 path can publish a header-5 snapshot generation and replace owner-worker images
-after durable publication; the server still refuses replica following because
-network subscription, journal publication, and promotion are not integrated.
+after durable publication. A memory source now persists a primary epoch at
+startup and publishes committed record-2 batches into its bounded journal.
+The database snapshot barrier captures a durable cursor and subscribes at that
+exact position. The server still refuses replica following because transport-2
+subscription and reconnect are not integrated.
 The internal replica path also validates guarded record-2 deltas and commits them
 at the exact upstream sequence before acknowledging worker application.
 
