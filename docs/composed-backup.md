@@ -1,11 +1,45 @@
-# Isolated composed backup profile
+# Local composed backup profile
 
-The development library has an explicit schema-3 path for header-7, record-1
+The development checkout supports a schema-3 path for header-7, record-1
 mixed-owner snapshots. The server selects the local AOF profile only with
-`SIDER_AOF_COMPOSED=1`; the backup CLI still has no composed mode. The default
-AOF reader rejects header 7. A library caller can open a restored directory with
-`persistence::recover_composed`, or start the server with the same explicit
-profile and matching shard count.
+`SIDER_AOF_COMPOSED=1`. Set `SIDER_COMPOSED_EXPORT_ADDR` to a literal loopback
+address to start its separate transport-3 backup listener. The listener is
+plaintext and unauthenticated, so it requires the explicit
+`SIDER_SECURITY_PROFILE=legacy-loopback` profile; protected startup rejects it.
+It accepts one-shot backup exports, not replica sessions. The default AOF reader
+still rejects header 7. A restored directory requires the same explicit profile
+and matching shard count.
+
+Start a two-shard source with an AOF directory and export readiness file (set
+equivalent environment variables in PowerShell on Windows):
+
+```sh
+SIDER_SECURITY_PROFILE=legacy-loopback SIDER_AOF_DIR=/data/composed \
+SIDER_AOF_COMPOSED=1 SIDER_SHARDS=2 \
+SIDER_COMPOSED_EXPORT_ADDR=127.0.0.1:6381 \
+SIDER_COMPOSED_EXPORT_READY_FILE=/run/sider-composed-export.json ./sider
+```
+
+Use the exact source SHA from the build receipt. All three CLI operations require
+`--profile composed`; the older `--record-version 1` option selects the legacy
+schema-1 archive instead.
+
+```sh
+./sider-backup export --profile composed --source 127.0.0.1:6381 \
+  --destination /backups/composed-001 --source-sha SOURCE_SHA_40_HEX
+./sider-backup verify --profile composed --source /backups/composed-001 \
+  --shards 2 --routing 1
+./sider-backup restore --profile composed --source /backups/composed-001 \
+  --destination /data/restored-composed --shards 2 --routing 1
+SIDER_SECURITY_PROFILE=legacy-loopback SIDER_AOF_DIR=/data/restored-composed \
+  SIDER_AOF_COMPOSED=1 SIDER_SHARDS=2 ./sider
+```
+
+The export listener binds during preparation and writes its own readiness file
+after worker startup. Its address must stay on loopback. Export requests have
+bounded concurrent sessions; slow or disconnected consumers do not change source
+data. A source profile mismatch fails before capture. This development path does
+not establish a protected network or native release receipt.
 
 Transport 3 sends a standalone `ComposedExport` request with exact record version
 `1`, header version `7`, and the `MIXED_OWNER_BATCH` capability bit. A source can
@@ -21,12 +55,14 @@ handle and every owner worker to the same AOF writer, then passes that handle,
 writer, source profile, and nonzero epoch to the export function. It negotiates
 before `DbHandle::composed_snapshot` freezes the workers and flushes the writer.
 The captured sequence and sorted mutations form one cut. A handle bound to a
-different writer cannot supply that cut. No executable listener selects this path.
+different writer cannot supply that cut. The executable's explicit loopback
+listener invokes this path for each admitted backup request.
 
 `persistence::backup::export_composed_stream` receives that stream and publishes a
 new archive only after validating the Hello profile, cursor, frame order, per-shard
 quota, digest, seal, and EOF. `export_composed` and `export_composed_secure` use an
-explicit transport-3 source address; no production listener currently serves it.
+explicit transport-3 source address. The local executable serves plaintext
+loopback export; no protected mTLS composed source is active.
 The manifest uses schema `3` with a mandatory `required_capabilities: 1` field.
 The sealed `snapshot.aof` has a role-0 header 7, record-1 images, and zero epoch.
 The archive also contains `backup-manifest.json` and `SHA256SUMS`.
@@ -40,10 +76,12 @@ atomic mixed-owner batches. Server startup requires `SIDER_AOF_COMPOSED=1`. The
 schema-1 and schema-2 APIs reject a schema-3 archive and retain their existing
 wire and manifest formats.
 
-Focused tests run with `cargo test --locked --test replication_composed_backup`.
+Focused library tests run with `cargo test --locked --test replication_composed_backup`.
 They cover a complete export/verify/restore/recover cycle from both a captured
 fixture and a live mixed-owner transaction, refusal of an unbound source before
 archive creation, cleanup after a truncated stream, and semantic profile
-mismatches after recomputing checksums. Production use still needs a selectable
-header-7 server source and replica path, the backup CLI, and native release
+mismatches after recomputing checksums. `cargo test --locked --test composed_server
+composed_backup_cli_exports_verifies_restores_and_restarts` covers the executable
+source, CLI export/verify/restore, and restart from the restored directory.
+Production use still needs a protected source, replica path, and native release
 evidence.

@@ -16,6 +16,8 @@ fn main() -> ExitCode {
                  --diagnose: validate configuration without starting the server or accessing the AOF.\n\
                  SIDER_ADDR: IP address and port (default: 127.0.0.1:6379).\n\
                  SIDER_READY_FILE: optional readiness JSON file.\n\
+                 SIDER_COMPOSED_EXPORT_ADDR: optional loopback-only transport-3 backup listener with SIDER_AOF_COMPOSED=1.\n\
+                 SIDER_COMPOSED_EXPORT_READY_FILE: optional export readiness JSON file.\n\
                  SIDER_SECURITY_PROFILE: protected (default) or explicit legacy-loopback.\n\
                  SIDER_SECURITY_DIR: absolute restricted directory with a complete protected generation.\n\
                  Limits: SIDER_MAX_CONNECTIONS, SIDER_WORKER_QUEUE_CAPACITY,\n\

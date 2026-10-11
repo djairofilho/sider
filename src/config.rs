@@ -56,6 +56,10 @@ pub struct ServerConfig {
     pub aof: Option<crate::persistence::AofConfig>,
     /// Explicit local header-7/record-1 mixed-owner profile.
     pub composed_aof: bool,
+    /// Optional loopback-only transport-3 backup export for the composed profile.
+    pub composed_export_addr: Option<SocketAddr>,
+    /// Readiness record for the composed export listener.
+    pub composed_export_ready_file: Option<PathBuf>,
     /// Internal Sider listener; configuration requires AOF on both sides.
     pub replication: Option<crate::replication::config::Config>,
 }
@@ -83,6 +87,8 @@ impl Default for ServerConfig {
             ready_file: None,
             aof: None,
             composed_aof: false,
+            composed_export_addr: None,
+            composed_export_ready_file: None,
             replication: None,
         }
     }
@@ -215,6 +221,20 @@ impl ServerConfig {
                 });
             }
         };
+        if let Some(value) = lookup("SIDER_COMPOSED_EXPORT_ADDR") {
+            let value = value
+                .into_string()
+                .map_err(|_| ConfigError::InvalidServerLimits {
+                    reason: "SIDER_COMPOSED_EXPORT_ADDR must be Unicode",
+                })?;
+            config.composed_export_addr = Some(value.parse().map_err(|_| {
+                ConfigError::InvalidServerLimits {
+                    reason: "SIDER_COMPOSED_EXPORT_ADDR requires a literal IP address and port",
+                }
+            })?);
+        }
+        config.composed_export_ready_file =
+            lookup("SIDER_COMPOSED_EXPORT_READY_FILE").map(PathBuf::from);
         config.replication = crate::replication::config::Config::from_lookup(&mut lookup)?;
         config.validate()?;
         Ok(config)
@@ -233,6 +253,18 @@ impl ServerConfig {
         {
             return Err(ConfigError::InvalidServerLimits {
                 reason: "composed AOF requires record version 1 and SIDER_AOF_DIR without replication",
+            });
+        }
+        if let Some(address) = self.composed_export_addr
+            && (!self.composed_aof || !address.ip().is_loopback())
+        {
+            return Err(ConfigError::InvalidServerLimits {
+                reason: "composed export requires a loopback address and composed AOF",
+            });
+        }
+        if self.composed_export_ready_file.is_some() && self.composed_export_addr.is_none() {
+            return Err(ConfigError::InvalidServerLimits {
+                reason: "composed export readiness requires an export address",
             });
         }
         if let Some(replication) = &self.replication {
@@ -524,6 +556,28 @@ mod tests {
                 ("SIDER_REPLICATION_ADDR", "127.0.0.1:0"),
             ],
             vec![("SIDER_AOF_DIR", "aof"), ("SIDER_AOF_COMPOSED", "yes")],
+        ] {
+            assert!(config_with(&values).is_err());
+        }
+        let export = config_with(&[
+            ("SIDER_AOF_DIR", "aof"),
+            ("SIDER_AOF_COMPOSED", "1"),
+            ("SIDER_COMPOSED_EXPORT_ADDR", "127.0.0.1:0"),
+            ("SIDER_COMPOSED_EXPORT_READY_FILE", "export-ready.json"),
+        ])
+        .unwrap();
+        assert_eq!(
+            export.composed_export_addr,
+            Some("127.0.0.1:0".parse().unwrap())
+        );
+        for values in [
+            vec![("SIDER_COMPOSED_EXPORT_ADDR", "127.0.0.1:0")],
+            vec![
+                ("SIDER_AOF_DIR", "aof"),
+                ("SIDER_AOF_COMPOSED", "1"),
+                ("SIDER_COMPOSED_EXPORT_ADDR", "0.0.0.0:6381"),
+            ],
+            vec![("SIDER_COMPOSED_EXPORT_READY_FILE", "export-ready.json")],
         ] {
             assert!(config_with(&values).is_err());
         }

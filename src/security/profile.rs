@@ -49,6 +49,10 @@ impl StartupSecurity {
             .transpose()
     }
     pub fn server(&self, config: &crate::ServerConfig) -> Result<Option<Generation>, Error> {
+        if self.profile == Profile::Protected && config.composed_export_addr.is_some() {
+            // The transport-3 export listener has no internal mTLS role admission yet.
+            return Err(Error::Configuration);
+        }
         if self.profile == Profile::LegacyLoopback {
             self.target(config.bind_addr)?;
             if let Some(replication) = &config.replication {
@@ -122,6 +126,17 @@ mod tests {
             ..crate::ServerConfig::default()
         };
         assert!(legacy.server(&config).is_err());
+        let protected = StartupSecurity::from_lookup(|name| match name {
+            "SIDER_SECURITY_PROFILE" => Some("protected".into()),
+            "SIDER_SECURITY_DIR" => Some(std::env::temp_dir().into_os_string()),
+            _ => None,
+        })
+        .unwrap();
+        let export = crate::ServerConfig {
+            composed_export_addr: Some("127.0.0.1:0".parse().unwrap()),
+            ..crate::ServerConfig::default()
+        };
+        assert!(protected.server(&export).is_err());
         assert!(
             StartupSecurity::from_lookup(|name| match name {
                 "SIDER_SECURITY_PROFILE" => Some("legacy-loopback".into()),

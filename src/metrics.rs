@@ -526,6 +526,12 @@ memory_max_lifecycle_scratch_bytes:16777216\r\n",
     )
     .unwrap();
     writeln!(text, "aof_configured:{}\r", u8::from(config.aof.is_some())).unwrap();
+    writeln!(
+        text,
+        "composed_export_enabled:{}\r",
+        u8::from(config.composed_export_addr.is_some())
+    )
+    .unwrap();
     if let Some(aof) = &config.aof {
         writeln!(
             text,

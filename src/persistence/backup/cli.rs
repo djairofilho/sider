@@ -11,6 +11,7 @@ use crate::persistence::DurableLayout;
 pub enum Action {
     Export(ExportOptions),
     ExportMemory(ExportOptions),
+    ExportComposed(ExportOptions),
     Verify {
         source: PathBuf,
         layout: DurableLayout,
@@ -21,8 +22,21 @@ pub enum Action {
         layout: DurableLayout,
         limits: Limits,
     },
+    VerifyComposed {
+        source: PathBuf,
+        layout: DurableLayout,
+        limits: Limits,
+    },
     Restore(RestoreOptions),
     RestoreMemory(RestoreOptions),
+    RestoreComposed(RestoreOptions),
+}
+
+#[derive(Clone, Copy)]
+enum Profile {
+    Legacy,
+    Memory,
+    Composed,
 }
 
 pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Error> {
@@ -52,6 +66,7 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
                 | "--max-dataset-bytes"
                 | "--timeout-ms"
                 | "--record-version"
+                | "--profile"
         ) {
             return Err(Error::Invalid("unknown option"));
         }
@@ -77,11 +92,26 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
             .map_err(|_| Error::Invalid("integer out of range"))
     }
     let mut limits = Limits::default();
-    let memory = match values.remove("--record-version") {
-        None => false,
-        Some(version) if version == "1" => false,
-        Some(version) if version == "2" => true,
-        Some(_) => return Err(Error::Invalid("record version must be 1 or 2")),
+    let version = values.remove("--record-version");
+    let selected = values.remove("--profile");
+    if version.is_some() && selected.is_some() {
+        return Err(Error::Invalid(
+            "profile and record version are incompatible",
+        ));
+    }
+    let profile = match (version, selected) {
+        (None, None) => Profile::Legacy,
+        (Some(ref value), None) if value == "1" => Profile::Legacy,
+        (Some(ref value), None) if value == "2" => Profile::Memory,
+        (None, Some(ref value)) if value == "legacy" => Profile::Legacy,
+        (None, Some(ref value)) if value == "memory" => Profile::Memory,
+        (None, Some(ref value)) if value == "composed" => Profile::Composed,
+        (Some(_), None) => return Err(Error::Invalid("record version must be 1 or 2")),
+        _ => {
+            return Err(Error::Invalid(
+                "profile must be legacy, memory, or composed",
+            ));
+        }
     };
     for (name, field) in [
         ("--max-record-bytes", &mut limits.max_record_bytes),
@@ -118,10 +148,10 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
             source_sha,
             limits,
         };
-        if memory {
-            Action::ExportMemory(options)
-        } else {
-            Action::Export(options)
+        match profile {
+            Profile::Legacy => Action::Export(options),
+            Profile::Memory => Action::ExportMemory(options),
+            Profile::Composed => Action::ExportComposed(options),
         }
     } else {
         let layout = DurableLayout {
@@ -139,24 +169,28 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, Er
                 layout,
                 limits,
             };
-            if memory {
-                Action::RestoreMemory(options)
-            } else {
-                Action::Restore(options)
+            match profile {
+                Profile::Legacy => Action::Restore(options),
+                Profile::Memory => Action::RestoreMemory(options),
+                Profile::Composed => Action::RestoreComposed(options),
             }
         } else {
-            if memory {
-                Action::VerifyMemory {
+            match profile {
+                Profile::Legacy => Action::Verify {
                     source: source.into(),
                     layout,
                     limits,
-                }
-            } else {
-                Action::Verify {
+                },
+                Profile::Memory => Action::VerifyMemory {
                     source: source.into(),
                     layout,
                     limits,
-                }
+                },
+                Profile::Composed => Action::VerifyComposed {
+                    source: source.into(),
+                    layout,
+                    limits,
+                },
             }
         }
     };

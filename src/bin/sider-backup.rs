@@ -11,7 +11,7 @@ fn main() -> ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
     if args.len() == 1 && args[0] == "--help" {
         println!(
-            "Usage: sider-backup export --source IP:PORT --destination NEW_DIRECTORY --source-sha SHA [--record-version 1|2]\n     sider-backup verify --source BACKUP --shards N --routing 1 [--record-version 1|2]\n     sider-backup restore --source BACKUP --destination NEW_DIRECTORY --shards N --routing 1 [--record-version 1|2]\nRecord version defaults to 1; select 2 explicitly for memory backups.\nLimits: --max-record-bytes N --max-mutations N --max-snapshot-bytes N --max-dataset-bytes N --timeout-ms N"
+            "Usage: sider-backup export --source IP:PORT --destination NEW_DIRECTORY --source-sha SHA [--profile legacy|memory|composed]\n     sider-backup verify --source BACKUP --shards N --routing 1 [--profile legacy|memory|composed]\n     sider-backup restore --source BACKUP --destination NEW_DIRECTORY --shards N --routing 1 [--profile legacy|memory|composed]\nProfile defaults to legacy; --record-version 1|2 remains an alternative for legacy or memory.\nLimits: --max-record-bytes N --max-mutations N --max-snapshot-bytes N --max-dataset-bytes N --timeout-ms N"
         );
         return ExitCode::SUCCESS;
     }
@@ -22,8 +22,9 @@ fn main() -> ExitCode {
     let result = backup::cli::parse(args).and_then(|action| {
         let clock = Arc::new(SystemClock);
         match action {
-            Action::Export(options) => export(options, false, clock),
-            Action::ExportMemory(options) => export(options, true, clock),
+            Action::Export(options) => export(options, ExportKind::Legacy, clock),
+            Action::ExportMemory(options) => export(options, ExportKind::Memory, clock),
+            Action::ExportComposed(options) => export(options, ExportKind::Composed, clock),
             Action::Verify {
                 source,
                 layout,
@@ -34,8 +35,16 @@ fn main() -> ExitCode {
                 layout,
                 limits,
             } => backup::verify_memory(&source, layout, limits, clock).map(report),
+            Action::VerifyComposed {
+                source,
+                layout,
+                limits,
+            } => backup::verify_composed(&source, layout, limits, clock).map(report),
             Action::Restore(options) => backup::restore(options, clock).map(report),
             Action::RestoreMemory(options) => backup::restore_memory(options, clock).map(report),
+            Action::RestoreComposed(options) => {
+                backup::restore_composed(options, clock).map(report)
+            }
         }
     });
     match result {
@@ -50,9 +59,16 @@ fn main() -> ExitCode {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ExportKind {
+    Legacy,
+    Memory,
+    Composed,
+}
+
 fn export(
     options: backup::ExportOptions,
-    memory: bool,
+    kind: ExportKind,
     clock: Arc<SystemClock>,
 ) -> Result<serde_json::Value, backup::Error> {
     let security = sider::security::StartupSecurity::from_env()
@@ -66,17 +82,23 @@ fn export(
             .internal
             .ok_or(backup::Error::Invalid("security configuration unavailable"))?
             .transport;
-        if memory {
-            runtime.block_on(backup::export_memory_secure(options, clock, transport))?
-        } else {
-            runtime.block_on(backup::export_secure(options, clock, transport))?
+        match kind {
+            ExportKind::Legacy => {
+                runtime.block_on(backup::export_secure(options, clock, transport))?
+            }
+            ExportKind::Memory => {
+                runtime.block_on(backup::export_memory_secure(options, clock, transport))?
+            }
+            ExportKind::Composed => {
+                runtime.block_on(backup::export_composed_secure(options, clock, transport))?
+            }
         }
     } else {
         eprintln!("legacy-loopback profile: plaintext and unauthenticated");
-        if memory {
-            runtime.block_on(backup::export_memory(options, clock))?
-        } else {
-            runtime.block_on(backup::export(options, clock))?
+        match kind {
+            ExportKind::Legacy => runtime.block_on(backup::export(options, clock))?,
+            ExportKind::Memory => runtime.block_on(backup::export_memory(options, clock))?,
+            ExportKind::Composed => runtime.block_on(backup::export_composed(options, clock))?,
         }
     };
     Ok(manifest.json())
