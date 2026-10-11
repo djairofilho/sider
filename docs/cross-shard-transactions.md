@@ -44,8 +44,10 @@ and appends it before either owner applies. Focused tests verify one append and
 whole-batch restart, whole-record limit rejection without effects, and fail-closed
 admission after an uncertain writer result or loss of the second owner. Recovery
 restores both owners after either failure.
-Replica application, remaining crash and fault boundaries, and release gates are
-still unproven.
+Process-kill tests now exercise nine points from pre-append through post-apply;
+each restart sees the previous state or the complete new batch. These tests do
+not simulate power loss or cover network and replica boundaries. Replica
+application and release gates are still unproven.
 The public server and tools still cannot select header 7; transport 3, backup 3,
 replica application, and RESP coordinated EXEC remain unimplemented.
 
@@ -357,9 +359,10 @@ until all required paths pass:
    only after passing results. Release requirements remain in [releases](releases.md).
 
 Issue #92 remains open until implementation and crash/network evidence satisfy all
-four acceptance criteria. Focused tests now exercise an internal coordinated
-mixed-owner batch through the actual writer and recovery path; they do not
-exercise RESP EXEC, replication, backup, or a release configuration.
+four acceptance criteria. Focused tests exercise an internal coordinated
+mixed-owner batch through the actual writer and recovery path, including nine
+process-kill boundaries. They do not exercise RESP EXEC, replication, backup,
+network failure, power loss, or a release configuration.
 
 ## Required deterministic tests
 
