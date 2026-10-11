@@ -79,7 +79,7 @@ impl Authority {
     pub(super) fn set_request(&mut self, message: &Message) {
         self.request = Some(match message {
             Message::Hello(_) => 1,
-            Message::Export { .. } => 10,
+            Message::Export { .. } | Message::MemoryExport { .. } => 10,
             Message::StatusRequest => 11,
             Message::Promote => 12,
             _ => 0,
@@ -158,6 +158,29 @@ pub(super) async fn read(
     )
 }
 
+pub(super) async fn read_memory(
+    socket: &mut (impl AsyncRead + Unpin),
+    limits: protocol::Limits,
+    deadline: Duration,
+    authority: Option<&Authority>,
+) -> Result<(bytes::Bytes, Message, Option<InternalLease>), Error> {
+    Ok(
+        protocol::read_memory_admitted(socket, limits, deadline, |kind| async move {
+            if kind != 10 {
+                return Err(protocol::Error::Invalid("permission denied"));
+            }
+            let Some(authority) = authority else {
+                return Ok(None);
+            };
+            authority
+                .admit(Some(kind))
+                .await
+                .map_err(|_| protocol::Error::Invalid("permission denied"))
+        })
+        .await?,
+    )
+}
+
 pub(super) async fn write(
     socket: &mut (impl AsyncWrite + Unpin),
     message: &Message,
@@ -171,6 +194,25 @@ pub(super) async fn write(
             None => None,
         };
         protocol::write(socket, message, limits, deadline).await?;
+        Ok(())
+    })
+    .await
+    .map_err(|_| protocol::Error::Timeout)?
+}
+
+pub(super) async fn write_memory(
+    socket: &mut (impl AsyncWrite + Unpin),
+    message: &Message,
+    limits: protocol::Limits,
+    deadline: Duration,
+    authority: Option<&Authority>,
+) -> Result<(), Error> {
+    tokio::time::timeout(deadline, async {
+        let _lease = match authority {
+            Some(authority) => authority.operation(deadline).await?,
+            None => None,
+        };
+        protocol::write_memory(socket, message, limits, deadline).await?;
         Ok(())
     })
     .await

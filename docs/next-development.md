@@ -100,8 +100,9 @@ failure evidence, including AOF, replication, backup, TTL, and exact-search
 behavior. The published 1.0.1 binary neither stores nor searches memory records.
 The development tree has bounded `MEM.*` lifecycle and exact search stages. Its
 default record-1 AOF profile refuses memory writes; an explicit record-2
-standalone server profile permits durable memory writes. Memory replication and
-release evidence remain pending.
+standalone server profile permits durable memory writes and an explicitly
+configured internal listener exports live record-2 backups. Memory replication
+and release evidence remain pending.
 
 For small datasets, exact search supplies a correctness oracle. Approximate
 indexes trade recall for speed and add memory and rebuild costs. Filtered search

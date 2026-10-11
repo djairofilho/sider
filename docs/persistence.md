@@ -54,11 +54,15 @@ the directory. Record 1 remains the default and refuses memory writes.
 
 Record 2 refuses a legacy AOF directory before repair; migrate a stopped legacy
 directory with `sider-aof-migrate --record-version 2` into a new directory first.
-A record-1 reader refuses a record-2 directory. The standalone record-2 server
-refuses replication configuration because its server-side transport and install
-path are still being integrated. Use the explicit memory-profile offline backup
-API described in [the memory backup guide](agent-memory-backup.md); the default
-`sider-backup` CLI remains on schema 1. These restrictions remain part of
+A record-1 reader refuses a record-2 directory. A record-2 server can expose a
+live transport-2 backup source through `SIDER_REPLICATION_ADDR`, with no
+`SIDER_REPLICA_OF`; replica following and promotion are still unavailable. The
+source validates receiver version and capacity before capturing a worker-owned
+snapshot. Use `backup::export_memory` on a controlled loopback listener or
+`backup::export_memory_secure` with internal mutual TLS. The explicit offline
+memory backup API remains available as described in
+[the memory backup guide](agent-memory-backup.md). The default `sider-backup` CLI
+remains on schema 1. These restrictions remain part of
 [issue #110](https://github.com/djairofilho/sider/issues/110).
 
 ## Acknowledgment and failure

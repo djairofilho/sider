@@ -107,7 +107,7 @@ pub async fn export_stream(
     .await
 }
 
-/// Explicit live record-2 backup consumer. No public server profile is activated.
+/// Explicit live record-2 backup consumer over an injected stream.
 pub async fn export_memory_stream(
     stream: &mut (impl AsyncRead + AsyncWrite + Unpin),
     options: ExportOptions,
@@ -142,6 +142,29 @@ pub async fn export_memory(
         clock,
         deadline,
         None,
+        super::Profile::Memory,
+    )
+    .await
+}
+
+/// Exports record-2 data through authenticated internal mutual TLS.
+pub async fn export_memory_secure(
+    options: ExportOptions,
+    clock: Arc<dyn Clock>,
+    transport: &crate::security::InternalTransport,
+) -> Result<Manifest, Error> {
+    options.validate()?;
+    let deadline = Instant::now() + options.limits.timeout;
+    let (mut stream, peer) = transport
+        .connect_with_peer(options.source)
+        .await
+        .map_err(|_| Error::Invalid("internal TLS authentication failed"))?;
+    receive(
+        &mut stream,
+        options,
+        clock,
+        deadline,
+        Some(&peer),
         super::Profile::Memory,
     )
     .await

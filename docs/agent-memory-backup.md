@@ -4,8 +4,9 @@ This development slice implements schema-2 archive export, verification and
 restoration for issue #110. It is not part of the published 1.0.1 package and
 does not complete the memory durability contract. The default server and backup
 CLI retain record 1. An explicit transport-2 snapshot producer and live backup
-consumer are now available as library APIs; server capture/listener wiring and
-native replication remain separate gates.
+consumer are now available as library APIs. The development server can expose
+an explicitly configured live record-2 source on its internal listener; native
+replication and the default backup CLI remain separate gates.
 
 ## Explicit profiles
 
@@ -19,8 +20,8 @@ native replication remain separate gates.
 
 No API infers a profile from the current values. Memory verification refuses
 legacy archives; the default verifier refuses schema 2. Both refuse header 7 and
-other unsupported versions. No implicit migration, downgrade, or new CLI/env
-selection was introduced.
+other unsupported versions. No implicit migration or downgrade is introduced.
+The server selects record 2 only with `SIDER_AOF_RECORD_VERSION=2`.
 
 ## Offline export
 
@@ -72,8 +73,9 @@ tool version and verification requires that same version. Offline
 `source_max_snapshot_bytes` records the explicit export ceiling, since an AOF
 source has no transport handshake announcing a snapshot limit. The transport
 digest is calculated from the frozen transport-2 tag-4 envelope for each record.
-A separate live consumer now reads these frames; the default server still has
-no memory-profile listener.
+A separate live consumer reads these frames. The development server exposes a
+memory-profile listener only when record 2 and `SIDER_REPLICATION_ADDR` are both
+configured; the default record-1 listener retains transport 1.
 
 ## Explicit live export stage
 
@@ -85,11 +87,17 @@ capture a worker cut, publish a journal or start a listener. Transport 1 remains
 the default for existing replication and backup entry points.
 
 `backup::export_memory_stream` accepts an injected transport-2 stream;
-`backup::export_memory` connects to an explicitly configured source address.
+`backup::export_memory` connects to an explicitly configured loopback source;
+`backup::export_memory_secure` uses authenticated mutual TLS.
 They verify the handshake and ordered complete images, write a sealed schema-2
-archive, and use the existing memory verifier and restorer. A caller must
-provide a trusted source. These APIs are not an authenticated server endpoint,
-and the default CLI does not select them.
+archive, and use the existing memory verifier and restorer. The server source
+captures all owner workers under the database barrier, flushes the same AOF cut,
+and emits its sequence with a zero epoch because no replica stream is active.
+It checks transport, record version, and receiver capacity before capture.
+Plaintext source connections require loopback; protected connections require a
+current internal backup role and recheck authorization during transfer. The
+listener accepts only a snapshot export request in this stage. The default CLI
+does not select the memory profile.
 
 ## Verify and restore
 
@@ -130,9 +138,9 @@ contract's complete 16 MiB lifecycle scratch proof.
 Focused Windows tests cover mixed types/memory, schema/version preflight,
 elapsed TTL, binary data, corruption, incomplete source history, source locking,
 quota/layout rejection, and injected partial writes and publication failures.
-Server-owned live export and secure network integration, memory-specific child
-process/power-loss gates, Linux filesystem checks and the full release gates
-remain pending.
+Memory-specific child process/power-loss gates, Linux filesystem checks, the
+extracted-package exercise, the default CLI integration, replica synchronization,
+and full release gates remain pending.
 
 ## Verification commands
 

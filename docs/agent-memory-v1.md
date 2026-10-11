@@ -812,7 +812,8 @@ The development source includes bounded `MEM.*` commands, exact search, and
 explicit record-2 AOF, backup, migration, and transport stages. The default
 record-1 server profile still refuses memory writes. The development server can
 explicitly select record 2 for a standalone AOF directory; server-side memory
-replication, cross-platform evidence, and release gates remain
+backup export is available through an explicit internal listener. Memory
+replica installation, cross-platform evidence, and release gates remain
 tracked by #110 and #111. The published 1.0.1 binary has no `MEM.*` support.
 #109 covers this versioned contract; #110 and #111 remain separate
 implementation and evidence tasks.

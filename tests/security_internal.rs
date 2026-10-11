@@ -1843,6 +1843,103 @@ async fn startup_ready(path: &std::path::Path) -> SocketAddr {
 }
 
 #[tokio::test]
+async fn security_memory_live_export_requires_current_backup_role() {
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let remote = certs.leaf(PEER, 2, None);
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let directory = StartupDirectory::new();
+    let mut config = directory.config();
+    config.aof =
+        Some(sider::persistence::AofConfig::new(directory.0.join("aof")).with_memory_profile());
+    let preflight = sider::security::ServerPreflight::new(
+        &config,
+        runtime_generation(
+            1,
+            &certs,
+            &primary,
+            &crl,
+            runtime_policy(&["backup"]),
+            false,
+        ),
+    )
+    .unwrap();
+    let runtime = preflight.runtime();
+    let (stop, shutdown) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(sider::server::serve_live(
+        config.clone(),
+        async {
+            let _ = shutdown.await;
+        },
+        preflight,
+    ));
+    let address = startup_ready(
+        config
+            .replication
+            .as_ref()
+            .unwrap()
+            .ready_file
+            .as_deref()
+            .unwrap(),
+    )
+    .await;
+    let tool = certs.transport(&remote, &crl, tool_policy(SERVER), true);
+    let options = |destination| sider::persistence::backup::ExportOptions {
+        source: address,
+        destination,
+        source_sha: "a".repeat(40),
+        limits: sider::persistence::backup::Limits::default(),
+    };
+    let accepted = directory.0.join("memory-accepted");
+    let manifest = sider::persistence::backup::export_memory_secure(
+        options(accepted.clone()),
+        Arc::new(sider::storage::SystemClock),
+        &tool,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        manifest.profile,
+        sider::persistence::backup::Profile::Memory
+    );
+    assert_eq!(manifest.entries, 0);
+    sider::persistence::backup::verify_memory(
+        &accepted,
+        config.aof.as_ref().unwrap().layout,
+        sider::persistence::backup::Limits::default(),
+        Arc::new(sider::storage::SystemClock),
+    )
+    .unwrap();
+    runtime
+        .activate(runtime_generation(
+            2,
+            &certs,
+            &primary,
+            &crl,
+            runtime_policy(&["monitor"]),
+            false,
+        ))
+        .await
+        .unwrap();
+    let denied = directory.0.join("memory-denied");
+    assert!(
+        sider::persistence::backup::export_memory_secure(
+            options(denied.clone()),
+            Arc::new(sider::storage::SystemClock),
+            &tool,
+        )
+        .await
+        .is_err()
+    );
+    assert!(!denied.exists());
+    stop.send(()).unwrap();
+    timeout(DEADLINE, server).await.unwrap().unwrap().unwrap();
+}
+
+#[tokio::test]
 async fn security_startup_live_server_uses_shared_runtime_for_client_and_internal() {
     let certs = Certificates::new();
     let primary = certs.leaf(SERVER, 1, None);
