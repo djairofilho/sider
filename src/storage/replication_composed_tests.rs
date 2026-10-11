@@ -41,6 +41,14 @@ impl Harness {
                 .as_nanos(),
             NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed),
         ));
+        Self::new_at(directory, quota_bytes, faults).await
+    }
+
+    async fn new_at(
+        directory: PathBuf,
+        quota_bytes: usize,
+        faults: Arc<dyn FaultInjector>,
+    ) -> Self {
         std::fs::create_dir(&directory).unwrap();
         let mut config = AofConfig::new(directory.clone());
         config.layout.shard_count = 2;
@@ -726,6 +734,172 @@ async fn composed_replica_append_apply_and_sync_faults_recover_only_complete_bat
             Some(Bytes::from_static(b"right"))
         };
         assert_eq!(get(&mut store, b"b"), Reply::Bulk(expected), "{point}");
+        drop(store);
+        cleanup(&directory);
+    }
+}
+
+struct PauseAtReplicaBoundary {
+    point: String,
+    directory: PathBuf,
+    armed: AtomicBool,
+}
+
+impl FaultInjector for PauseAtReplicaBoundary {
+    fn hit(&self, point: &'static str) -> std::io::Result<()> {
+        if self.armed.load(Ordering::SeqCst) && point == self.point {
+            use std::io::Write;
+            let mut signal = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(self.directory.join("paused"))?;
+            signal.write_all(point.as_bytes())?;
+            signal.sync_all()?;
+            loop {
+                std::thread::park_timeout(Duration::from_secs(1));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[test]
+#[ignore = "crash helper executed only by the parent process"]
+fn replica_crash_child() {
+    let directory = PathBuf::from(std::env::var_os("SIDER_TEST_REPLICA_AOF_DIR").unwrap());
+    let fault = Arc::new(PauseAtReplicaBoundary {
+        point: std::env::var("SIDER_TEST_REPLICA_POINT").unwrap(),
+        directory: directory.clone(),
+        armed: AtomicBool::new(false),
+    });
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let harness = Harness::new_at(directory, 4096, fault.clone()).await;
+            fault.armed.store(true, Ordering::SeqCst);
+            harness
+                .db
+                .apply_replica(
+                    harness.context.clone(),
+                    harness.generation,
+                    Cursor {
+                        epoch: EPOCH,
+                        sequence: 1,
+                    },
+                    batch(b"left", b"right"),
+                )
+                .await
+                .unwrap();
+            panic!("replica apply returned before the child was terminated");
+        });
+}
+
+struct CrashChild(std::process::Child);
+
+impl Drop for CrashChild {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_none() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
+
+#[test]
+fn composed_replica_process_crashes_recover_whole_batches_at_each_boundary() {
+    use std::process::{Command, Stdio};
+    use std::time::Instant;
+
+    for point in [
+        "before_append",
+        "after_append",
+        "before_sync",
+        "after_sync",
+        "before_reply",
+        "replica_mixed_before_first_apply",
+        "replica_mixed_after_first_apply",
+        "replica_mixed_after_all_apply",
+    ] {
+        let directory = std::env::temp_dir().join(format!(
+            "sider-composed-replica-{}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed),
+        ));
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--ignored", "replica_crash_child", "--nocapture"])
+            .env("SIDER_TEST_REPLICA_AOF_DIR", &directory)
+            .env("SIDER_TEST_REPLICA_POINT", point)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = CrashChild(command.spawn().unwrap());
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !directory.join("paused").is_file() {
+            assert!(
+                child.0.try_wait().unwrap().is_none(),
+                "child exited before {point}"
+            );
+            assert!(Instant::now() < deadline, "point not reached: {point}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            std::fs::read(directory.join("paused")).unwrap(),
+            point.as_bytes()
+        );
+        child.0.kill().unwrap();
+        child.0.wait().unwrap();
+
+        let mut config = AofConfig::new(directory.clone());
+        config.layout.shard_count = 2;
+        let recovered = persistence::recover_composed_legacy_mixed(
+            config,
+            StoreConfig {
+                max_dataset_bytes: 4096,
+            },
+            Arc::new(SystemClock),
+            Arc::new(NoFaults),
+        )
+        .unwrap();
+        assert_eq!(
+            recovered.metadata.replication,
+            Some(ReplicationMetadata {
+                role: Role::Replica,
+                epoch: EPOCH,
+            }),
+            "{point}"
+        );
+        let sequence = recovered.metadata.sequence;
+        assert!(sequence <= 1, "{point}: sequence {sequence}");
+        if point == "before_append" {
+            assert_eq!(sequence, 0, "{point}");
+        }
+        if matches!(
+            point,
+            "after_sync"
+                | "before_reply"
+                | "replica_mixed_before_first_apply"
+                | "replica_mixed_after_first_apply"
+                | "replica_mixed_after_all_apply"
+        ) {
+            assert_eq!(sequence, 1, "{point}");
+        }
+        let mut store = recovered.store;
+        let expected_left = (sequence == 1).then(|| Bytes::from_static(b"left"));
+        let expected_right = (sequence == 1).then(|| Bytes::from_static(b"right"));
+        assert_eq!(get(&mut store, b"a"), Reply::Bulk(expected_left), "{point}");
+        assert_eq!(
+            get(&mut store, b"b"),
+            Reply::Bulk(expected_right),
+            "{point}"
+        );
         drop(store);
         cleanup(&directory);
     }
