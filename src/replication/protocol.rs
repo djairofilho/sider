@@ -6,12 +6,14 @@ use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::Cursor;
+use crate::persistence::composed_format;
 use crate::persistence::format::{self, Next, Record};
 use crate::persistence::memory_format;
 use crate::storage::Mutation;
 
 pub const VERSION: u16 = 1;
 pub const MEMORY_VERSION: u16 = 2;
+pub const COMPOSED_VERSION: u16 = 3;
 pub const MAGIC: &[u8; 8] = b"SIDERREP";
 pub const HEADER_BYTES: usize = 24;
 pub const MAX_FRAME_BYTES: usize = format::MAX_RECORD_BYTES + 128;
@@ -79,6 +81,33 @@ impl Hello {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComposedHello {
+    pub base: Hello,
+    pub aof_header_version: u32,
+    pub required_capabilities: u32,
+}
+
+impl ComposedHello {
+    pub fn accepts(&self, source: &Self) -> Result<(), Reject> {
+        for peer in [self, source] {
+            if peer.base.record_version != composed_format::RecordVersion::Legacy as u32
+                || peer.aof_header_version != composed_format::HEADER_VERSION
+                || peer.required_capabilities != composed_format::MIXED_OWNER_BATCH
+            {
+                return Err(Reject::IncompatibleVersion);
+            }
+        }
+        self.base.accepts(&source.base)?;
+        if self.aof_header_version != source.aof_header_version
+            || self.required_capabilities != source.required_capabilities
+        {
+            return Err(Reject::IncompatibleVersion);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Reject {
@@ -93,6 +122,7 @@ pub enum Reject {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
     Hello(Hello),
+    ComposedHello(ComposedHello),
     /// Single snapshot for backup; creates no incremental subscription and requires no ACK.
     Export {
         sider_version: Bytes,
@@ -174,6 +204,43 @@ pub fn encode_memory(message: &Message, limits: Limits) -> Result<Bytes, Error> 
     encode_profile(message, limits, MEMORY_VERSION)
 }
 
+/// Isolated header-7 record-1 transport codec; no production session selects it.
+pub fn encode_composed(message: &Message, limits: Limits) -> Result<Bytes, Error> {
+    encode_profile(message, limits, COMPOSED_VERSION)
+}
+
+fn encode_hello(body: &mut Vec<u8>, hello: &Hello) -> Result<(), Error> {
+    if hello.sider_version.is_empty()
+        || hello.sider_version.len() > 32
+        || !hello.sider_version.iter().all(u8::is_ascii_graphic)
+        || hello.shard_count == 0
+        || hello.routing_version == 0
+        || hello.record_version == 0
+        || hello.max_record_bytes == 0
+        || hello.max_mutations == 0
+        || hello.max_snapshot_bytes == 0
+    {
+        return Err(Error::Invalid("handshake"));
+    }
+    body.push(hello.sider_version.len() as u8);
+    body.extend_from_slice(&hello.sider_version);
+    for value in [
+        hello.record_version,
+        hello.shard_count,
+        hello.routing_version,
+        hello.max_record_bytes,
+        hello.max_mutations,
+    ] {
+        body.extend_from_slice(&value.to_le_bytes());
+    }
+    body.extend_from_slice(&hello.max_snapshot_bytes.to_le_bytes());
+    body.push(u8::from(hello.cursor.is_some()));
+    if let Some(cursor) = hello.cursor {
+        write_cursor(body, cursor);
+    }
+    Ok(())
+}
+
 fn encode_profile(message: &Message, limits: Limits, version: u16) -> Result<Bytes, Error> {
     limits.validate()?;
     // The AOF encoder checks size before allocating. Its budget must also fit in
@@ -239,40 +306,29 @@ fn encode_profile(message: &Message, limits: Limits, version: u16) -> Result<Byt
         | Message::MemoryExport { .. } => {
             return Err(Error::Invalid("record-2 message requires transport 2"));
         }
-        Message::Hello(hello) => {
+        Message::ComposedHello(hello) if version == COMPOSED_VERSION => {
+            if hello.base.record_version != composed_format::RecordVersion::Legacy as u32
+                || hello.aof_header_version != composed_format::HEADER_VERSION
+                || hello.required_capabilities != composed_format::MIXED_OWNER_BATCH
+            {
+                return Err(Error::Invalid("composed profile"));
+            }
+            encode_hello(&mut body, &hello.base)?;
+            body.extend_from_slice(&hello.aof_header_version.to_le_bytes());
+            body.extend_from_slice(&hello.required_capabilities.to_le_bytes());
+            1
+        }
+        Message::ComposedHello(_) => {
+            return Err(Error::Invalid("composed hello requires transport 3"));
+        }
+        Message::Hello(hello) if version != COMPOSED_VERSION => {
             if version == MEMORY_VERSION && hello.record_version != memory_format::RECORD_VERSION {
                 return Err(Error::Invalid("record version"));
             }
-            if hello.sider_version.is_empty()
-                || hello.sider_version.len() > 32
-                || !hello.sider_version.iter().all(u8::is_ascii_graphic)
-                || hello.shard_count == 0
-                || hello.routing_version == 0
-                || hello.record_version == 0
-                || hello.max_record_bytes == 0
-                || hello.max_mutations == 0
-                || hello.max_snapshot_bytes == 0
-            {
-                return Err(Error::Invalid("handshake"));
-            }
-            body.push(hello.sider_version.len() as u8);
-            body.extend_from_slice(&hello.sider_version);
-            for value in [
-                hello.record_version,
-                hello.shard_count,
-                hello.routing_version,
-                hello.max_record_bytes,
-                hello.max_mutations,
-            ] {
-                body.extend_from_slice(&value.to_le_bytes());
-            }
-            body.extend_from_slice(&hello.max_snapshot_bytes.to_le_bytes());
-            body.push(u8::from(hello.cursor.is_some()));
-            if let Some(cursor) = hello.cursor {
-                write_cursor(&mut body, cursor);
-            }
+            encode_hello(&mut body, hello)?;
             1
         }
+        Message::Hello(_) => return Err(Error::Invalid("transport 3 requires composed hello")),
         Message::Continue(cursor) => {
             write_cursor(&mut body, *cursor);
             2
@@ -282,7 +338,7 @@ fn encode_profile(message: &Message, limits: Limits, version: u16) -> Result<Byt
             body.extend_from_slice(&entries.to_le_bytes());
             3
         }
-        Message::SnapshotEntry(mutation @ Mutation::Put { .. }) if version == VERSION => {
+        Message::SnapshotEntry(mutation @ Mutation::Put { .. }) if version != MEMORY_VERSION => {
             body = format::encode(&Record::Snapshot(mutation.clone()), record_limits)?;
             4
         }
@@ -299,7 +355,7 @@ fn encode_profile(message: &Message, limits: Limits, version: u16) -> Result<Byt
             body.extend_from_slice(&digest.to_le_bytes());
             5
         }
-        Message::Batch { sequence, batch } if version == VERSION => {
+        Message::Batch { sequence, batch } if version != MEMORY_VERSION => {
             body = format::encode(
                 &Record::Batch {
                     sequence: *sequence,
@@ -309,7 +365,9 @@ fn encode_profile(message: &Message, limits: Limits, version: u16) -> Result<Byt
             )?;
             6
         }
-        Message::Batch { .. } => return Err(Error::Invalid("legacy batch requires transport 1")),
+        Message::Batch { .. } => {
+            return Err(Error::Invalid("legacy batch requires transport 1 or 3"));
+        }
         Message::Ack(cursor) => {
             write_cursor(&mut body, *cursor);
             7
@@ -415,17 +473,25 @@ fn header(header: &[u8], limits: Limits, expected_version: u16) -> Result<(u8, u
         return Err(Error::Limit);
     }
     let valid_size = match header[10] {
-        1 => len <= 86,
+        1 => {
+            len <= if expected_version == COMPOSED_VERSION {
+                94
+            } else {
+                86
+            }
+        }
         2 | 7 | 8 => len == 24,
         3 => len == 32,
         5 => len == 36,
         9 => len == 1,
         10 => {
-            len <= if expected_version == MEMORY_VERSION {
-                49
-            } else {
-                45
-            }
+            expected_version != COMPOSED_VERSION
+                && len
+                    <= if expected_version == MEMORY_VERSION {
+                        49
+                    } else {
+                        45
+                    }
         }
         11 | 12 => len == 1,
         13 => len == 24,
@@ -489,6 +555,10 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
 
 pub fn decode_memory(frame: Bytes, limits: Limits) -> Result<Message, Error> {
     decode_profile(frame, limits, MEMORY_VERSION)
+}
+
+pub fn decode_composed(frame: Bytes, limits: Limits) -> Result<Message, Error> {
+    decode_profile(frame, limits, COMPOSED_VERSION)
 }
 
 fn decode_profile(frame: Bytes, limits: Limits, version: u16) -> Result<Message, Error> {
@@ -580,7 +650,15 @@ fn decode_profile(frame: Bytes, limits: Limits, version: u16) -> Result<Message,
                 },
             };
             // Reuses fixed-field validation without allocating data proportional to the peer.
-            let message = Message::Hello(hello);
+            let message = if version == COMPOSED_VERSION {
+                Message::ComposedHello(ComposedHello {
+                    base: hello,
+                    aof_header_version: fields.u32()?,
+                    required_capabilities: fields.u32()?,
+                })
+            } else {
+                Message::Hello(hello)
+            };
             encode_profile(&message, limits, version)?;
             message
         }
@@ -733,6 +811,35 @@ where
     read_admitted_profile(input, limits, deadline, admit, MEMORY_VERSION).await
 }
 
+pub async fn read_composed_admitted<A, F, Admission>(
+    input: &mut (impl AsyncRead + Unpin),
+    limits: Limits,
+    deadline: Duration,
+    admit: F,
+) -> Result<(Bytes, Message, A), Error>
+where
+    F: FnOnce(u8) -> Admission,
+    Admission: std::future::Future<Output = Result<A, Error>>,
+{
+    read_admitted_profile(input, limits, deadline, admit, COMPOSED_VERSION).await
+}
+
+pub async fn read_composed_in_phase(
+    input: &mut (impl AsyncRead + Unpin),
+    limits: Limits,
+    deadline: Duration,
+    phase: crate::security::InternalPhase,
+) -> Result<(Bytes, Message), Error> {
+    read_authorized_profile(
+        input,
+        limits,
+        deadline,
+        |kind| phase.permits(kind),
+        COMPOSED_VERSION,
+    )
+    .await
+}
+
 /// Transport 2 checks the version and phase before allocating a payload.
 pub async fn read_memory_in_phase(
     input: &mut (impl AsyncRead + Unpin),
@@ -842,6 +949,34 @@ pub async fn write_memory(
     .await
     .map_err(|_| Error::Timeout)??;
     Ok(())
+}
+
+pub async fn write_composed(
+    output: &mut (impl AsyncWrite + Unpin),
+    message: &Message,
+    limits: Limits,
+    deadline: Duration,
+) -> Result<(), Error> {
+    if deadline.is_zero() || tokio::time::Instant::now().checked_add(deadline).is_none() {
+        return Err(Error::Limit);
+    }
+    let frame = encode_composed(message, limits)?;
+    tokio::time::timeout(deadline, async {
+        output.write_all(&frame).await?;
+        output.flush().await
+    })
+    .await
+    .map_err(|_| Error::Timeout)??;
+    Ok(())
+}
+
+pub async fn read_composed_authorized(
+    input: &mut (impl AsyncRead + Unpin),
+    limits: Limits,
+    deadline: Duration,
+    authorize_kind: impl FnOnce(u8) -> bool,
+) -> Result<(Bytes, Message), Error> {
+    read_authorized_profile(input, limits, deadline, authorize_kind, COMPOSED_VERSION).await
 }
 
 /// Caller supplies initial request authority before payload allocation.
