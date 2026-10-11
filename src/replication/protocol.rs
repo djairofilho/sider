@@ -7,9 +7,11 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::Cursor;
 use crate::persistence::format::{self, Next, Record};
+use crate::persistence::memory_format;
 use crate::storage::Mutation;
 
 pub const VERSION: u16 = 1;
+pub const MEMORY_VERSION: u16 = 2;
 pub const MAGIC: &[u8; 8] = b"SIDERREP";
 pub const HEADER_BYTES: usize = 24;
 pub const MAX_FRAME_BYTES: usize = format::MAX_RECORD_BYTES + 128;
@@ -97,6 +99,19 @@ pub enum Message {
         max_record_bytes: u32,
         max_snapshot_bytes: u64,
     },
+    /// Transport-2 export; record version is checked before snapshot capture.
+    MemoryExport {
+        sider_version: Bytes,
+        record_version: u32,
+        max_record_bytes: u32,
+        max_snapshot_bytes: u64,
+    },
+    MemorySnapshotEntry(memory_format::Mutation),
+    MemoryBatch {
+        sequence: u64,
+        origin: crate::storage::MutationOrigin,
+        mutations: Vec<memory_format::Mutation>,
+    },
     Continue(Cursor),
     FullStart {
         cursor: Cursor,
@@ -151,6 +166,15 @@ fn write_cursor(out: &mut Vec<u8>, cursor: Cursor) {
 }
 
 pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
+    encode_profile(message, limits, VERSION)
+}
+
+/// Explicit record-2 transport; default entry points retain transport 1.
+pub fn encode_memory(message: &Message, limits: Limits) -> Result<Bytes, Error> {
+    encode_profile(message, limits, MEMORY_VERSION)
+}
+
+fn encode_profile(message: &Message, limits: Limits, version: u16) -> Result<Bytes, Error> {
     limits.validate()?;
     // The AOF encoder checks size before allocating. Its budget must also fit in
     // the negotiated frame, including both headers.
@@ -163,7 +187,62 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
     };
     let mut body = Vec::new();
     let kind = match message {
+        Message::MemorySnapshotEntry(
+            mutation @ (memory_format::Mutation::Image { .. }
+            | memory_format::Mutation::Legacy(Mutation::Put { .. })),
+        ) if version == MEMORY_VERSION => {
+            body = memory_format::encode(
+                &memory_format::Record::Snapshot(mutation.clone()),
+                record_limits,
+            )?;
+            4
+        }
+        Message::MemoryBatch {
+            sequence,
+            origin,
+            mutations,
+        } if version == MEMORY_VERSION => {
+            body = memory_format::encode(
+                &memory_format::Record::Batch {
+                    sequence: *sequence,
+                    origin: *origin,
+                    mutations: mutations.clone(),
+                },
+                record_limits,
+            )?;
+            6
+        }
+        Message::MemoryExport {
+            sider_version,
+            record_version,
+            max_record_bytes,
+            max_snapshot_bytes,
+        } if version == MEMORY_VERSION => {
+            if sider_version.is_empty()
+                || sider_version.len() > 32
+                || !sider_version.iter().all(u8::is_ascii_graphic)
+                || *record_version != memory_format::RECORD_VERSION
+                || *max_record_bytes == 0
+                || *max_snapshot_bytes == 0
+            {
+                return Err(Error::Invalid("export request"));
+            }
+            body.push(sider_version.len() as u8);
+            body.extend_from_slice(sider_version);
+            body.extend_from_slice(&record_version.to_le_bytes());
+            body.extend_from_slice(&max_record_bytes.to_le_bytes());
+            body.extend_from_slice(&max_snapshot_bytes.to_le_bytes());
+            10
+        }
+        Message::MemorySnapshotEntry(_)
+        | Message::MemoryBatch { .. }
+        | Message::MemoryExport { .. } => {
+            return Err(Error::Invalid("record-2 message requires transport 2"));
+        }
         Message::Hello(hello) => {
+            if version == MEMORY_VERSION && hello.record_version != memory_format::RECORD_VERSION {
+                return Err(Error::Invalid("record version"));
+            }
             if hello.sider_version.is_empty()
                 || hello.sider_version.len() > 32
                 || !hello.sider_version.iter().all(u8::is_ascii_graphic)
@@ -203,11 +282,11 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
             body.extend_from_slice(&entries.to_le_bytes());
             3
         }
-        Message::SnapshotEntry(mutation @ Mutation::Put { .. }) => {
+        Message::SnapshotEntry(mutation @ Mutation::Put { .. }) if version == VERSION => {
             body = format::encode(&Record::Snapshot(mutation.clone()), record_limits)?;
             4
         }
-        Message::SnapshotEntry(Mutation::Delete { .. }) => {
+        Message::SnapshotEntry(_) => {
             return Err(Error::Invalid("removal within snapshot"));
         }
         Message::FullEnd {
@@ -220,7 +299,7 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
             body.extend_from_slice(&digest.to_le_bytes());
             5
         }
-        Message::Batch { sequence, batch } => {
+        Message::Batch { sequence, batch } if version == VERSION => {
             body = format::encode(
                 &Record::Batch {
                     sequence: *sequence,
@@ -230,6 +309,7 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
             )?;
             6
         }
+        Message::Batch { .. } => return Err(Error::Invalid("legacy batch requires transport 1")),
         Message::Ack(cursor) => {
             write_cursor(&mut body, *cursor);
             7
@@ -247,6 +327,9 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
             max_record_bytes,
             max_snapshot_bytes,
         } => {
+            if version != VERSION {
+                return Err(Error::Invalid("legacy export requires transport 1"));
+            }
             if sider_version.is_empty()
                 || sider_version.len() > 32
                 || !sider_version.iter().all(u8::is_ascii_graphic)
@@ -300,7 +383,7 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
     let len = u32::try_from(body.len()).map_err(|_| Error::Limit)?;
     let mut frame = Vec::with_capacity(size);
     frame.extend_from_slice(MAGIC);
-    frame.extend_from_slice(&VERSION.to_le_bytes());
+    frame.extend_from_slice(&version.to_le_bytes());
     frame.push(kind);
     frame.push(0);
     frame.extend_from_slice(&len.to_le_bytes());
@@ -311,13 +394,13 @@ pub fn encode(message: &Message, limits: Limits) -> Result<Bytes, Error> {
     Ok(Bytes::from(frame))
 }
 
-fn header(header: &[u8], limits: Limits) -> Result<(u8, usize), Error> {
+fn header(header: &[u8], limits: Limits, expected_version: u16) -> Result<(u8, usize), Error> {
     limits.validate()?;
     if header.len() != HEADER_BYTES || &header[..8] != MAGIC || header[11] != 0 {
         return Err(Error::Invalid("header"));
     }
     let version = u16::from_le_bytes(header[8..10].try_into().unwrap());
-    if version != VERSION {
+    if version != expected_version {
         return Err(Error::Version(version));
     }
     if !(1..=14).contains(&header[10]) {
@@ -337,7 +420,13 @@ fn header(header: &[u8], limits: Limits) -> Result<(u8, usize), Error> {
         3 => len == 32,
         5 => len == 36,
         9 => len == 1,
-        10 => len <= 45,
+        10 => {
+            len <= if expected_version == MEMORY_VERSION {
+                49
+            } else {
+                45
+            }
+        }
         11 | 12 => len == 1,
         13 => len == 24,
         14 => len == 59,
@@ -395,10 +484,18 @@ impl Fields {
 
 /// Accepts exactly one frame without ignoring trailing bytes.
 pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
+    decode_profile(frame, limits, VERSION)
+}
+
+pub fn decode_memory(frame: Bytes, limits: Limits) -> Result<Message, Error> {
+    decode_profile(frame, limits, MEMORY_VERSION)
+}
+
+fn decode_profile(frame: Bytes, limits: Limits, version: u16) -> Result<Message, Error> {
     if frame.len() < HEADER_BYTES {
         return Err(Error::Invalid("incomplete header"));
     }
-    let (kind, len) = header(&frame[..HEADER_BYTES], limits)?;
+    let (kind, len) = header(&frame[..HEADER_BYTES], limits, version)?;
     if frame.len() != HEADER_BYTES + len {
         return Err(Error::Invalid("payload length"));
     }
@@ -416,6 +513,37 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
             return Err(Error::Invalid("record length"));
         }
         let mut input = body.as_ref();
+        if version == MEMORY_VERSION {
+            let record = memory_format::read_record(&mut input, limits.record)?;
+            if !input.is_empty() {
+                return Err(Error::Invalid("bytes after record"));
+            }
+            return match record {
+                memory_format::Next::Record(record) => match (kind, *record) {
+                    (
+                        4,
+                        memory_format::Record::Snapshot(
+                            mutation @ (memory_format::Mutation::Image { .. }
+                            | memory_format::Mutation::Legacy(Mutation::Put { .. })),
+                        ),
+                    ) => Ok(Message::MemorySnapshotEntry(mutation)),
+                    (
+                        6,
+                        memory_format::Record::Batch {
+                            sequence,
+                            origin,
+                            mutations,
+                        },
+                    ) => Ok(Message::MemoryBatch {
+                        sequence,
+                        origin,
+                        mutations,
+                    }),
+                    _ => Err(Error::Invalid("incompatible record")),
+                },
+                _ => Err(Error::Invalid("incomplete record")),
+            };
+        }
         let record = format::read_record(&mut input, limits.record)?;
         if !input.is_empty() {
             return Err(Error::Invalid("bytes after record"));
@@ -453,7 +581,7 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
             };
             // Reuses fixed-field validation without allocating data proportional to the peer.
             let message = Message::Hello(hello);
-            encode(&message, limits)?;
+            encode_profile(&message, limits, version)?;
             message
         }
         2 => Message::Continue(fields.cursor()?),
@@ -479,13 +607,25 @@ pub fn decode(frame: Bytes, limits: Limits) -> Result<Message, Error> {
         }),
         10 => {
             let length = fields.byte()? as usize;
-            let message = Message::Export {
-                sider_version: fields.take(length)?,
-                max_record_bytes: fields.u32()?,
-                max_snapshot_bytes: fields.u64()?,
-            };
-            encode(&message, limits)?;
-            message
+            let sider_version = fields.take(length)?;
+            if version == MEMORY_VERSION {
+                let message = Message::MemoryExport {
+                    sider_version,
+                    record_version: fields.u32()?,
+                    max_record_bytes: fields.u32()?,
+                    max_snapshot_bytes: fields.u64()?,
+                };
+                encode_profile(&message, limits, version)?;
+                message
+            } else {
+                let message = Message::Export {
+                    sider_version,
+                    max_record_bytes: fields.u32()?,
+                    max_snapshot_bytes: fields.u64()?,
+                };
+                encode_profile(&message, limits, version)?;
+                message
+            }
         }
         11 | 12 => {
             if fields.byte()? != 0 {
@@ -560,6 +700,33 @@ pub async fn read_authorized(
     deadline: Duration,
     authorize_kind: impl FnOnce(u8) -> bool,
 ) -> Result<(Bytes, Message), Error> {
+    read_authorized_profile(input, limits, deadline, authorize_kind, VERSION).await
+}
+
+/// Transport 2 checks the version and phase before allocating a payload.
+pub async fn read_memory_in_phase(
+    input: &mut (impl AsyncRead + Unpin),
+    limits: Limits,
+    deadline: Duration,
+    phase: crate::security::InternalPhase,
+) -> Result<(Bytes, Message), Error> {
+    read_authorized_profile(
+        input,
+        limits,
+        deadline,
+        |kind| phase.permits(kind),
+        MEMORY_VERSION,
+    )
+    .await
+}
+
+async fn read_authorized_profile(
+    input: &mut (impl AsyncRead + Unpin),
+    limits: Limits,
+    deadline: Duration,
+    authorize_kind: impl FnOnce(u8) -> bool,
+    version: u16,
+) -> Result<(Bytes, Message), Error> {
     if deadline.is_zero() || tokio::time::Instant::now().checked_add(deadline).is_none() {
         return Err(Error::Limit);
     }
@@ -567,7 +734,7 @@ pub async fn read_authorized(
     tokio::time::timeout(deadline, async {
         let mut prefix = [0; HEADER_BYTES];
         input.read_exact(&mut prefix).await?;
-        let (kind, size) = header(&prefix, limits)?;
+        let (kind, size) = header(&prefix, limits, version)?;
         if !authorize_kind(kind) {
             return Err(Error::Invalid("permission denied"));
         }
@@ -575,7 +742,7 @@ pub async fn read_authorized(
         frame[..HEADER_BYTES].copy_from_slice(&prefix);
         input.read_exact(&mut frame[HEADER_BYTES..]).await?;
         let frame = Bytes::from(frame);
-        let message = decode(frame.clone(), limits)?;
+        let message = decode_profile(frame.clone(), limits, version)?;
         Ok((frame, message))
     })
     .await
@@ -599,4 +766,34 @@ pub async fn write(
     .await
     .map_err(|_| Error::Timeout)??;
     Ok(())
+}
+
+/// Writes one explicitly selected transport-2 message.
+pub async fn write_memory(
+    output: &mut (impl AsyncWrite + Unpin),
+    message: &Message,
+    limits: Limits,
+    deadline: Duration,
+) -> Result<(), Error> {
+    if deadline.is_zero() || tokio::time::Instant::now().checked_add(deadline).is_none() {
+        return Err(Error::Limit);
+    }
+    let frame = encode_memory(message, limits)?;
+    tokio::time::timeout(deadline, async {
+        output.write_all(&frame).await?;
+        output.flush().await
+    })
+    .await
+    .map_err(|_| Error::Timeout)??;
+    Ok(())
+}
+
+/// Caller supplies initial request authority before payload allocation.
+pub async fn read_memory_authorized(
+    input: &mut (impl AsyncRead + Unpin),
+    limits: Limits,
+    deadline: Duration,
+    authorize_kind: impl FnOnce(u8) -> bool,
+) -> Result<(Bytes, Message), Error> {
+    read_authorized_profile(input, limits, deadline, authorize_kind, MEMORY_VERSION).await
 }
