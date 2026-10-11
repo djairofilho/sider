@@ -271,6 +271,143 @@ fn image() -> persistence::memory_format::Mutation {
 }
 
 #[tokio::test]
+async fn memory_primary_journal_publishes_committed_transport2_batch() {
+    use sider::replication::{Cursor, journal, protocol};
+    use sider::storage::MutationOrigin;
+
+    let directory = Directory::new();
+    let (store, aof, writer) = recover(&directory).start();
+    drop(store);
+    let cursor = Cursor {
+        epoch: [0x63; 16],
+        sequence: 20,
+    };
+    let metadata = persistence::ReplicationMetadata {
+        role: persistence::Role::Primary,
+        epoch: cursor.epoch,
+    };
+    aof.install_memory_snapshot(Vec::new(), cursor.sequence, metadata)
+        .await
+        .unwrap();
+    let limits = journal::Limits {
+        max_bytes: 8192,
+        max_batches: 8,
+        max_frame_bytes: 8192,
+    };
+    assert!(matches!(
+        aof.attach_journal(
+            journal::Journal::new(
+                Cursor {
+                    sequence: 19,
+                    ..cursor
+                },
+                limits
+            )
+            .unwrap()
+        )
+        .await,
+        Err(persistence::AofError::Sequence)
+    ));
+    let journal = journal::Journal::new(cursor, limits).unwrap();
+    let mut subscriber = journal.subscribe(cursor).unwrap();
+    aof.attach_journal(journal.clone()).await.unwrap();
+    let mutation = image();
+    assert_eq!(
+        aof.append_memory(MutationOrigin::Client, vec![mutation.clone()])
+            .await
+            .unwrap(),
+        21
+    );
+    let entry = subscriber.next().await.unwrap();
+    assert_eq!(entry.cursor.sequence, 21);
+    assert_eq!(
+        protocol::decode_memory(entry.frame, protocol::Limits::default()).unwrap(),
+        protocol::Message::MemoryBatch {
+            sequence: 21,
+            origin: MutationOrigin::Client,
+            mutations: vec![mutation],
+        }
+    );
+    assert_eq!(aof.flush().await.unwrap(), 21);
+    drop(aof);
+    writer.await.unwrap().unwrap();
+    let recovered = recover(&directory);
+    assert_eq!(recovered.metadata.sequence, 21);
+    assert_eq!(recovered.metadata.replication, Some(metadata));
+}
+
+#[tokio::test]
+async fn memory_primary_snapshot_subscribes_at_the_exact_durable_position() {
+    use sider::replication::{Cursor, journal, protocol, state::Runtime};
+    use sider::storage::replication::Context;
+
+    let directory = Directory::new();
+    let config = directory.config();
+    let (store, aof, writer) = recover(&directory).start();
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let (database, owner) =
+        worker::channel_with_store(4, Duration::from_secs(5), shutdown, store).unwrap();
+    let runtime = Runtime::new(
+        persistence::Role::Primary,
+        Cursor {
+            epoch: [0; 16],
+            sequence: 0,
+        },
+    );
+    let database = database.with_replication(runtime.clone());
+    let owner_task = tokio::spawn(
+        owner
+            .with_aof(aof.clone(), 0)
+            .with_replication(runtime.clone())
+            .run(),
+    );
+    let context = Context {
+        aof: aof.clone(),
+        runtime: runtime.clone(),
+        layout: config.layout,
+        store_config: StoreConfig::default(),
+        clock: Arc::new(SystemClock),
+        journal_limits: journal::Limits {
+            max_bytes: 8192,
+            max_batches: 8,
+            max_frame_bytes: 8192,
+        },
+        aof_limits: config.limits,
+    };
+    let cursor = database
+        .promote_replica(context.clone(), [0x72; 16])
+        .await
+        .unwrap();
+    assert_eq!(cursor.sequence, 0);
+    let key = Bytes::from_static(b"c");
+    database
+        .execute_memory(key.clone(), Operation::Create(descriptor()))
+        .await
+        .unwrap();
+    let mut snapshot = database.replication_snapshot(&context, true).await.unwrap();
+    assert_eq!(snapshot.cursor.sequence, 1);
+    assert_eq!(snapshot.mutations.len(), 1);
+    database
+        .execute_memory(key, put(member(), Ttl::Persistent))
+        .await
+        .unwrap();
+    let entry = snapshot.subscription.take().unwrap().next().await.unwrap();
+    assert_eq!(entry.cursor.sequence, 2);
+    assert!(matches!(
+        protocol::decode_memory(entry.frame, protocol::Limits::default()).unwrap(),
+        protocol::Message::MemoryBatch { sequence: 2, .. }
+    ));
+    stop.send_replace(true);
+    owner_task.await.unwrap();
+    drop(snapshot);
+    drop(database);
+    drop(context);
+    drop(aof);
+    writer.await.unwrap().unwrap();
+    assert_eq!(recover(&directory).metadata.sequence, 2);
+}
+
+#[tokio::test]
 async fn memory_aof_replica_install_publishes_complete_header5_generation() {
     use sider::storage::{Mutation, Store, Value, memory::Edit};
 

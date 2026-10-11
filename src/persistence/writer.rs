@@ -322,11 +322,6 @@ impl AofHandle {
         &self,
         journal: crate::replication::journal::Journal,
     ) -> Result<(), AofError> {
-        if self.memory_profile {
-            return Err(AofError::Migration(
-                "record-2 replication journal is not activated",
-            ));
-        }
         let (reply, response) = oneshot::channel();
         self.requests
             .send(Request::Journal(journal, reply))
@@ -1043,7 +1038,7 @@ impl Writer {
         origin: crate::storage::MutationOrigin,
         mutations: Vec<memory_format::Mutation>,
     ) -> Result<u64, AofError> {
-        if !self.config.memory_profile || self.journal.is_some() {
+        if !self.config.memory_profile {
             return Err(FormatError::Version(2).into());
         }
         let mut selected = None;
@@ -1055,6 +1050,29 @@ impl Writer {
             selected = Some(shard);
         }
         let sequence = self.sequence.checked_add(1).ok_or(AofError::Sequence)?;
+        let replication_frame = if self.journal.is_some() {
+            Some(
+                crate::replication::protocol::encode_memory(
+                    &crate::replication::protocol::Message::MemoryBatch {
+                        sequence,
+                        origin,
+                        mutations: mutations.clone(),
+                    },
+                    crate::replication::protocol::Limits {
+                        max_frame_bytes: self.config.limits.max_record_bytes
+                            + crate::replication::protocol::HEADER_BYTES
+                            + 12,
+                        record: self.config.limits,
+                    },
+                )
+                .map_err(|error| match error {
+                    crate::replication::protocol::Error::Record(error) => AofError::Format(error),
+                    _ => AofError::Sequence,
+                })?,
+            )
+        } else {
+            None
+        };
         let encoded = memory_format::encode(
             &memory_format::Record::Batch {
                 sequence,
@@ -1063,7 +1081,7 @@ impl Writer {
             },
             self.config.limits,
         )?;
-        self.append_encoded(sequence, encoded, None)
+        self.append_encoded(sequence, encoded, replication_frame)
     }
 
     fn append_encoded(

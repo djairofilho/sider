@@ -442,17 +442,28 @@ impl DbHandle {
             let cursor = Cursor { epoch, sequence };
             let journal = Journal::new(cursor, context.journal_limits)?;
             let publication = database.admission.publication();
-            let decision = context
-                .aof
-                .install_snapshot(
-                    snapshot,
-                    sequence,
-                    ReplicationMetadata {
-                        role: Role::Primary,
-                        epoch,
-                    },
-                )
-                .await;
+            let metadata = ReplicationMetadata {
+                role: Role::Primary,
+                epoch,
+            };
+            let decision = if context.aof.is_memory_profile() {
+                context
+                    .aof
+                    .install_memory_snapshot(
+                        snapshot
+                            .into_iter()
+                            .map(memory_format::Mutation::from_storage)
+                            .collect(),
+                        sequence,
+                        metadata,
+                    )
+                    .await
+            } else {
+                context
+                    .aof
+                    .install_snapshot(snapshot, sequence, metadata)
+                    .await
+            };
             if let Err(error) = decision {
                 if !matches!(error, crate::persistence::AofError::Unavailable) {
                     publication.complete();
