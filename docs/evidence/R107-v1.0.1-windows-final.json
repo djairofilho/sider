@@ -1,0 +1,1931 @@
+{
+    "schema_version":  1,
+    "issue":  107,
+    "runbook_version":  1,
+    "recorded_date":  "2026-10-10",
+    "source_sha":  "b738a0b4f97074fe272bc21f1eacf5db93cd020e",
+    "platform":  "Windows 11 Pro 10.0.26300 x64 MSVC, NTFS",
+    "status":  "Final Windows published package drill passed using absolute deadline brackets",
+    "final_attempt":  3,
+    "previous_attempts":  {
+                              "summary":  "R107-v1.0.1-windows.json",
+                              "raw_archive":  "R107-v1.0.1-windows-raw.zip",
+                              "note":  "Both earlier attempts remain preserved; only earlier attempt 2 checks monotonic elapsed TTL; neither validates this final bracket oracle"
+                          },
+    "limitations":  [
+                        "Single debug-harness observation; not an RTO guarantee or release gate receipt.",
+                        "No replica promotion, power loss, or physical storage-device-failure result is claimed.",
+                        "Large AOF/backup/tail files are retained only at the recorded temporary paths and are not versioned."
+                    ],
+    "native_checks":  [
+                          {
+                              "command":  "cargo test --locked --test recovery_drill -- --nocapture",
+                              "exit_code":  0,
+                              "passed":  11,
+                              "ignored_opt_in_test":  1
+                          },
+                          {
+                              "command":  "cargo clippy --locked --test recovery_drill -- -D warnings",
+                              "exit_code":  0
+                          }
+                      ],
+    "raw_archive":  {
+                        "file":  "R107-v1.0.1-windows-final-raw.zip",
+                        "bytes":  165064,
+                        "sha256":  "136b0a311f3ecde11067d6a85e3cb864e40c2391d3615a119673ce4be894e470",
+                        "contains":  "Final raw stdout/stderr, commands, exits, Cargo/contracts/Clippy logs, context, phase journal, source, manifest/checksums and support files; excludes large data and release executables"
+                    },
+    "attempt":  {
+                    "attempt":  3,
+                    "retained_directory":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3",
+                    "cargo_exit_code":  0,
+                    "test_elapsed_seconds":  448.84,
+                    "runner":  {
+                                   "command":  "cargo test --locked --test recovery_drill -- --ignored --exact extracted_package_operator_recovery_drill --nocapture",
+                                   "debug_assertions":  true,
+                                   "runner_checkout_sha":  "0f0f232f56fd42b88a56e61954f2bc892458f04d",
+                                   "runner_test_sha256":  "9a6cf3d1a619dcd95bc7d1eadd5e8b77e3118b59f2c37e112e9ceeb3a9d81ca6",
+                                   "started_unix_ms":  1791614466453
+                               },
+                    "validates_absolute_deadline_brackets":  true,
+                    "result":  {
+                                   "detail":  {
+                                                  "linux":  "pending",
+                                                  "replica_promotion":  "pending optional separate drill",
+                                                  "results":  [
+                                                                  {
+                                                                      "bulk_payload_bytes":  66560000,
+                                                                      "cut":  36,
+                                                                      "digest_sha256":  "4ec432af9a7a99af453ae41ee3e5a163cec0a2c3ad1facc1c10caa41f21c0e8d",
+                                                                      "logical_bytes":  66578821,
+                                                                      "long_ttl_before_ms":  3599994,
+                                                                      "long_ttl_restored_ms":  3576201,
+                                                                      "shard_usage":  [
+                                                                                          66578821
+                                                                                      ],
+                                                                      "shards":  1,
+                                                                      "transactions_after":  2489,
+                                                                      "transactions_before":  5,
+                                                                      "transactions_final":  2492
+                                                                  },
+                                                                  {
+                                                                      "bulk_payload_bytes":  66560000,
+                                                                      "cut":  43,
+                                                                      "digest_sha256":  "1407019fa4fb67c427f7baf527d68090b044d53afd9b6b4f6b781c30a63c45e0",
+                                                                      "logical_bytes":  66578821,
+                                                                      "long_ttl_before_ms":  3599996,
+                                                                      "long_ttl_restored_ms":  3578461,
+                                                                      "shard_usage":  [
+                                                                                          16644323,
+                                                                                          16644326,
+                                                                                          16645849,
+                                                                                          16644323
+                                                                                      ],
+                                                                      "shards":  4,
+                                                                      "transactions_after":  2720,
+                                                                      "transactions_before":  5,
+                                                                      "transactions_final":  2725
+                                                                  }
+                                                              ],
+                                                  "source_sha":  "b738a0b4f97074fe272bc21f1eacf5db93cd020e"
+                                              },
+                                   "issue":  107,
+                                   "platform":  "windows",
+                                   "schema":  1,
+                                   "status":  "success"
+                               },
+                    "package":  {
+                                    "archive":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc.zip",
+                                    "archive_sha256":  "40c9f8363d2d9524815f240466b44efdaa4dcb857a536218b541eb403fe547e1",
+                                    "binaries":  [
+                                                     {
+                                                         "bytes":  2900992,
+                                                         "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc\\sider.exe",
+                                                         "sha256":  "2ffe4aa76fd42e450bce2dfac49139c5ab9caff0b1608219298a4640b3d4068a"
+                                                     },
+                                                     {
+                                                         "bytes":  966656,
+                                                         "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc\\sider-backup.exe",
+                                                         "sha256":  "85406acb9fe9a409dc63c3e209d372001e9a5b52d51766764fc5cc1aeb13654f"
+                                                     },
+                                                     {
+                                                         "bytes":  687616,
+                                                         "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc\\sider-replica.exe",
+                                                         "sha256":  "1e8d9813f03ab99513766bad92189ceb2bea353c1434196ef02390ce493d8cbe"
+                                                     },
+                                                     {
+                                                         "bytes":  437760,
+                                                         "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\sider-v1.0.1-x86_64-pc-windows-msvc\\sider-aof-migrate.exe",
+                                                         "sha256":  "c3dde28d0543014ba9a88cc028833c37cdaad160867e7fcb2b757a894e3a3e7f"
+                                                     }
+                                                 ],
+                                    "checksums_sha256":  "09209e0a2666ec45dfed2b5411f398363304675a02a1aa1aeea6e0709b4d5794",
+                                    "manifest_sha256":  "d577be2462fd31b234879e2a9d9928d1d69d3d8dde801df85c43554be2b74543",
+                                    "source_sha":  "b738a0b4f97074fe272bc21f1eacf5db93cd020e",
+                                    "target":  "x86_64-pc-windows-msvc"
+                                },
+                    "context":  {
+                                    "os":  "Microsoft Windows 11 Pro 10.0.26300 x64",
+                                    "cpu":  "Intel(R) Core(TM) i5-9300H CPU @ 2.40GHz, 4 cores / 8 logical processors",
+                                    "ram_bytes":  34188873728,
+                                    "storage":  {
+                                                    "selected_volume":  "C:",
+                                                    "device":  "SSDG3NVME1T-W",
+                                                    "bus":  "NVMe",
+                                                    "temporary_evidence_path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1"
+                                                },
+                                    "filesystem":  "NTFS",
+                                    "workload_isolation":  "no competing benchmark, build, or load test",
+                                    "power_plan":  "GUID do Esquema de Energia: 381b4222-f694-41f0-9685-ff5bb260df2e  (Equilibrado)",
+                                    "shutdown":  "forced termination of exact owned child PID",
+                                    "package_release":  "https://github.com/djairofilho/sider/releases/tag/v1.0.1",
+                                    "file_cache":  "not flushed; no cold cache claim",
+                                    "recorded_utc":  "2026-10-10T06:40:40.9164083Z"
+                                },
+                    "phase_journal_monotonic":  true,
+                    "timings":  [
+                                    {
+                                        "detail":  {
+                                                       "source_sha":  "b738a0b4f97074fe272bc21f1eacf5db93cd020e",
+                                                       "target":  "x86_64-pc-windows-msvc"
+                                                   },
+                                        "elapsed_ms":  2623.9955999999997,
+                                        "end_ns":  "2726140800",
+                                        "phase":  "package_identity",
+                                        "start_ns":  "102146800"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  67.53389999999999,
+                                        "end_ns":  "2925652800",
+                                        "phase":  "primary_ready",
+                                        "start_ns":  "2858120500"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "bulk_keys":  128,
+                                                       "bulk_payload_bytes":  66560000,
+                                                       "seed":  107,
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  3649.0531,
+                                        "end_ns":  "6578486300",
+                                        "phase":  "load",
+                                        "start_ns":  "2929434500"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "civil_minus_monotonic_ms":  0,
+                                                       "inferred_deadline_ms":  [
+                                                                                    1791618072931,
+                                                                                    1791618072931
+                                                                                ],
+                                                       "query_monotonic_ms":  0,
+                                                       "remaining_ms":  3599994,
+                                                       "sample_valid":  true,
+                                                       "shards":  1,
+                                                       "stage":  "anchor",
+                                                       "tolerance_ms":  250,
+                                                       "wall_after_ms":  1791614472937,
+                                                       "wall_before_ms":  1791614472937
+                                                   },
+                                        "elapsed_ms":  0.4358,
+                                        "end_ns":  "6582654000",
+                                        "phase":  "ttl_sample",
+                                        "start_ns":  "6582219500"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "long_pttl_ms":  3599994,
+                                                       "oracle":  "absolute_deadline_brackets_v1",
+                                                       "shards":  1,
+                                                       "short_pttl_positive":  true,
+                                                       "tolerance_ms":  250
+                                                   },
+                                        "elapsed_ms":  2.6207000000000003,
+                                        "end_ns":  "6584833600",
+                                        "phase":  "ttl_anchor",
+                                        "start_ns":  "6582214200"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "after":  2489,
+                                                       "before":  5,
+                                                       "manifest":  {
+                                                                        "aof_header_version":  2,
+                                                                        "cursor":  {
+                                                                                       "epoch":  "78a6b50a186d96500fb81fa8438652de",
+                                                                                       "sequence":  166
+                                                                                   },
+                                                                        "layout":  {
+                                                                                       "routing_version":  1,
+                                                                                       "shard_count":  1
+                                                                                   },
+                                                                        "received_at_unix_ms":  1791614474867,
+                                                                        "record_version":  1,
+                                                                        "schema_version":  1,
+                                                                        "sider_version":  "1.0.1",
+                                                                        "snapshot":  {
+                                                                                         "bytes":  66565405,
+                                                                                         "entries":  137,
+                                                                                         "file":  "snapshot.aof",
+                                                                                         "sha256":  "f0e0fc23a046efff4525e1502714ef3cf7d967b965e8231a56089c29ca053b0f"
+                                                                                     },
+                                                                        "source_limits":  {
+                                                                                              "max_mutations":  100000,
+                                                                                              "max_record_bytes":  67108864,
+                                                                                              "max_snapshot_bytes":  67108864
+                                                                                          },
+                                                                        "source_sha_declared":  "b738a0b4f97074fe272bc21f1eacf5db93cd020e",
+                                                                        "transport_digest_crc32":  3035808245,
+                                                                        "validation_max_dataset_bytes":  67108864
+                                                                    },
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  4231.604899999999,
+                                        "end_ns":  "10828158700",
+                                        "phase":  "export",
+                                        "start_ns":  "6596555300"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "sha256":  "4ec432af9a7a99af453ae41ee3e5a163cec0a2c3ad1facc1c10caa41f21c0e8d",
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  8852.1481,
+                                        "end_ns":  "20435873500",
+                                        "phase":  "source_compare",
+                                        "start_ns":  "11583727000"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "report":  {
+                                                                      "live_entries":  136,
+                                                                      "manifest":  {
+                                                                                       "aof_header_version":  2,
+                                                                                       "cursor":  {
+                                                                                                      "epoch":  "78a6b50a186d96500fb81fa8438652de",
+                                                                                                      "sequence":  166
+                                                                                                  },
+                                                                                       "layout":  {
+                                                                                                      "routing_version":  1,
+                                                                                                      "shard_count":  1
+                                                                                                  },
+                                                                                       "received_at_unix_ms":  1791614474867,
+                                                                                       "record_version":  1,
+                                                                                       "schema_version":  1,
+                                                                                       "sider_version":  "1.0.1",
+                                                                                       "snapshot":  {
+                                                                                                        "bytes":  66565405,
+                                                                                                        "entries":  137,
+                                                                                                        "file":  "snapshot.aof",
+                                                                                                        "sha256":  "f0e0fc23a046efff4525e1502714ef3cf7d967b965e8231a56089c29ca053b0f"
+                                                                                                    },
+                                                                                       "source_limits":  {
+                                                                                                             "max_mutations":  100000,
+                                                                                                             "max_record_bytes":  67108864,
+                                                                                                             "max_snapshot_bytes":  67108864
+                                                                                                         },
+                                                                                       "source_sha_declared":  "b738a0b4f97074fe272bc21f1eacf5db93cd020e",
+                                                                                       "transport_digest_crc32":  3035808245,
+                                                                                       "validation_max_dataset_bytes":  67108864
+                                                                                   },
+                                                                      "shard_usage":  [
+                                                                                          66578821
+                                                                                      ],
+                                                                      "status":  "verified"
+                                                                  },
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  2189.1134,
+                                        "end_ns":  "22627304500",
+                                        "phase":  "verify",
+                                        "start_ns":  "20438192900"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  5770.651,
+                                        "end_ns":  "28400987800",
+                                        "phase":  "restore",
+                                        "start_ns":  "22630338500"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  1970.7913,
+                                        "end_ns":  "30372862900",
+                                        "phase":  "restored_ready",
+                                        "start_ns":  "28402073100"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "civil_minus_monotonic_ms":  1,
+                                                       "inferred_deadline_ms":  [
+                                                                                    1791618072931,
+                                                                                    1791618072932
+                                                                                ],
+                                                       "query_monotonic_ms":  0,
+                                                       "remaining_ms":  3576201,
+                                                       "sample_valid":  true,
+                                                       "shards":  1,
+                                                       "stage":  "restore",
+                                                       "tolerance_ms":  250,
+                                                       "wall_after_ms":  1791614496731,
+                                                       "wall_before_ms":  1791614496730
+                                                   },
+                                        "elapsed_ms":  0.5823,
+                                        "end_ns":  "30375944800",
+                                        "phase":  "ttl_sample",
+                                        "start_ns":  "30375364100"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "anchor_deadline_ms":  [
+                                                                                  1791618072931,
+                                                                                  1791618072931
+                                                                              ],
+                                                       "interval_gap_ms":  0,
+                                                       "oracle":  "absolute_deadline_brackets_v1",
+                                                       "sample_deadline_ms":  [
+                                                                                  1791618072931,
+                                                                                  1791618072932
+                                                                              ],
+                                                       "shards":  1,
+                                                       "stage":  "restore",
+                                                       "tolerance_ms":  250
+                                                   },
+                                        "elapsed_ms":  0.34640000000000004,
+                                        "end_ns":  "30377695700",
+                                        "phase":  "ttl_deadline_check",
+                                        "start_ns":  "30377350700"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "long_ttl_ms":  3576201,
+                                                       "sha256":  "4ec432af9a7a99af453ae41ee3e5a163cec0a2c3ad1facc1c10caa41f21c0e8d",
+                                                       "shards":  1,
+                                                       "short_ttl":  -2,
+                                                       "transaction_cut":  36
+                                                   },
+                                        "elapsed_ms":  8301.7445,
+                                        "end_ns":  "38680766800",
+                                        "phase":  "restored_compare",
+                                        "start_ns":  "30379023900"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  16052.8555,
+                                        "end_ns":  "38683192400",
+                                        "phase":  "restore_to_data_validated",
+                                        "start_ns":  "22630338300"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  18246.3452,
+                                        "end_ns":  "38684536700",
+                                        "phase":  "verify_to_data_validated",
+                                        "start_ns":  "20438192900"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  782.3820999999999,
+                                        "end_ns":  "46593246700",
+                                        "phase":  "aof_restart_ready",
+                                        "start_ns":  "45810866300"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "civil_minus_monotonic_ms":  0,
+                                                       "inferred_deadline_ms":  [
+                                                                                    1791618072932,
+                                                                                    1791618072932
+                                                                                ],
+                                                       "query_monotonic_ms":  0,
+                                                       "remaining_ms":  3559982,
+                                                       "sample_valid":  true,
+                                                       "shards":  1,
+                                                       "stage":  "aof_restart",
+                                                       "tolerance_ms":  250,
+                                                       "wall_after_ms":  1791614512950,
+                                                       "wall_before_ms":  1791614512950
+                                                   },
+                                        "elapsed_ms":  0.5795,
+                                        "end_ns":  "46595213600",
+                                        "phase":  "ttl_sample",
+                                        "start_ns":  "46594635200"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "anchor_deadline_ms":  [
+                                                                                  1791618072931,
+                                                                                  1791618072931
+                                                                              ],
+                                                       "interval_gap_ms":  1,
+                                                       "oracle":  "absolute_deadline_brackets_v1",
+                                                       "sample_deadline_ms":  [
+                                                                                  1791618072932,
+                                                                                  1791618072932
+                                                                              ],
+                                                       "shards":  1,
+                                                       "stage":  "aof_restart",
+                                                       "tolerance_ms":  250
+                                                   },
+                                        "elapsed_ms":  0.2694,
+                                        "end_ns":  "46596747700",
+                                        "phase":  "ttl_deadline_check",
+                                        "start_ns":  "46596479800"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "acknowledged_transactions":  2492,
+                                                       "sha256":  "4ec432af9a7a99af453ae41ee3e5a163cec0a2c3ad1facc1c10caa41f21c0e8d",
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  8551.5743,
+                                        "end_ns":  "55145876700",
+                                        "phase":  "aof_restart_compare",
+                                        "start_ns":  "46594304000"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  9337.7436,
+                                        "end_ns":  "55148608200",
+                                        "phase":  "aof_restart_to_data_validated",
+                                        "start_ns":  "45810866200"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  1686.8634,
+                                        "end_ns":  "76094069700",
+                                        "phase":  "tail_recovery_ready",
+                                        "start_ns":  "74407208100"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "civil_minus_monotonic_ms":  0,
+                                                       "inferred_deadline_ms":  [
+                                                                                    1791618072932,
+                                                                                    1791618072932
+                                                                                ],
+                                                       "query_monotonic_ms":  0,
+                                                       "remaining_ms":  3530480,
+                                                       "sample_valid":  true,
+                                                       "shards":  1,
+                                                       "stage":  "tail_recovery",
+                                                       "tolerance_ms":  250,
+                                                       "wall_after_ms":  1791614542452,
+                                                       "wall_before_ms":  1791614542452
+                                                   },
+                                        "elapsed_ms":  0.5837,
+                                        "end_ns":  "76097165900",
+                                        "phase":  "ttl_sample",
+                                        "start_ns":  "76096583700"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "anchor_deadline_ms":  [
+                                                                                  1791618072931,
+                                                                                  1791618072931
+                                                                              ],
+                                                       "interval_gap_ms":  1,
+                                                       "oracle":  "absolute_deadline_brackets_v1",
+                                                       "sample_deadline_ms":  [
+                                                                                  1791618072932,
+                                                                                  1791618072932
+                                                                              ],
+                                                       "shards":  1,
+                                                       "stage":  "tail_recovery",
+                                                       "tolerance_ms":  250
+                                                   },
+                                        "elapsed_ms":  0.2825,
+                                        "end_ns":  "76098807400",
+                                        "phase":  "ttl_deadline_check",
+                                        "start_ns":  "76098526400"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "pre_repair_sha256":  "1786234822af771fc5a2445bfcd253c6cf24ba3bea1b3128a08949815e2b3092",
+                                                       "preserved":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\incomplete-tail\\tail-00000000000000000002-24884-0.bak",
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  16592.2202,
+                                        "end_ns":  "90999426900",
+                                        "phase":  "tail_recovery_to_data_validated",
+                                        "start_ns":  "74407208100"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "aof_original_preserved":  true,
+                                                       "backup_original_preserved":  true,
+                                                       "shards":  1
+                                                   },
+                                        "elapsed_ms":  130962.1683,
+                                        "end_ns":  "229296990000",
+                                        "phase":  "negative_cases",
+                                        "start_ns":  "98334824900"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  61.2781,
+                                        "end_ns":  "229362007900",
+                                        "phase":  "primary_ready",
+                                        "start_ns":  "229300731700"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "bulk_keys":  128,
+                                                       "bulk_payload_bytes":  66560000,
+                                                       "seed":  107,
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  3038.0719,
+                                        "end_ns":  "232403589800",
+                                        "phase":  "load",
+                                        "start_ns":  "229365519400"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "civil_minus_monotonic_ms":  0,
+                                                       "inferred_deadline_ms":  [
+                                                                                    1791618298757,
+                                                                                    1791618298757
+                                                                                ],
+                                                       "query_monotonic_ms":  0,
+                                                       "remaining_ms":  3599996,
+                                                       "sample_valid":  true,
+                                                       "shards":  4,
+                                                       "stage":  "anchor",
+                                                       "tolerance_ms":  250,
+                                                       "wall_after_ms":  1791614698761,
+                                                       "wall_before_ms":  1791614698761
+                                                   },
+                                        "elapsed_ms":  0.4288,
+                                        "end_ns":  "232406239100",
+                                        "phase":  "ttl_sample",
+                                        "start_ns":  "232405811700"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "long_pttl_ms":  3599996,
+                                                       "oracle":  "absolute_deadline_brackets_v1",
+                                                       "shards":  4,
+                                                       "short_pttl_positive":  true,
+                                                       "tolerance_ms":  250
+                                                   },
+                                        "elapsed_ms":  2.0225,
+                                        "end_ns":  "232407832700",
+                                        "phase":  "ttl_anchor",
+                                        "start_ns":  "232405811500"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "after":  2720,
+                                                       "before":  5,
+                                                       "manifest":  {
+                                                                        "aof_header_version":  2,
+                                                                        "cursor":  {
+                                                                                       "epoch":  "a64e92fc53c4bb2c5544616c2e01faee",
+                                                                                       "sequence":  173
+                                                                                   },
+                                                                        "layout":  {
+                                                                                       "routing_version":  1,
+                                                                                       "shard_count":  4
+                                                                                   },
+                                                                        "received_at_unix_ms":  1791614700397,
+                                                                        "record_version":  1,
+                                                                        "schema_version":  1,
+                                                                        "sider_version":  "1.0.1",
+                                                                        "snapshot":  {
+                                                                                         "bytes":  66565405,
+                                                                                         "entries":  137,
+                                                                                         "file":  "snapshot.aof",
+                                                                                         "sha256":  "0dd0723bf94090c9eb56599845b9c6703641407e618499cf89cad1d95a662046"
+                                                                                     },
+                                                                        "source_limits":  {
+                                                                                              "max_mutations":  100000,
+                                                                                              "max_record_bytes":  67108864,
+                                                                                              "max_snapshot_bytes":  67108864
+                                                                                          },
+                                                                        "source_sha_declared":  "b738a0b4f97074fe272bc21f1eacf5db93cd020e",
+                                                                        "transport_digest_crc32":  148703861,
+                                                                        "validation_max_dataset_bytes":  67108864
+                                                                    },
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  3806.0236999999997,
+                                        "end_ns":  "236226399700",
+                                        "phase":  "export",
+                                        "start_ns":  "232420378300"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "sha256":  "1407019fa4fb67c427f7baf527d68090b044d53afd9b6b4f6b781c30a63c45e0",
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  8346.033200000002,
+                                        "end_ns":  "245762043700",
+                                        "phase":  "source_compare",
+                                        "start_ns":  "237416012100"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "report":  {
+                                                                      "live_entries":  136,
+                                                                      "manifest":  {
+                                                                                       "aof_header_version":  2,
+                                                                                       "cursor":  {
+                                                                                                      "epoch":  "a64e92fc53c4bb2c5544616c2e01faee",
+                                                                                                      "sequence":  173
+                                                                                                  },
+                                                                                       "layout":  {
+                                                                                                      "routing_version":  1,
+                                                                                                      "shard_count":  4
+                                                                                                  },
+                                                                                       "received_at_unix_ms":  1791614700397,
+                                                                                       "record_version":  1,
+                                                                                       "schema_version":  1,
+                                                                                       "sider_version":  "1.0.1",
+                                                                                       "snapshot":  {
+                                                                                                        "bytes":  66565405,
+                                                                                                        "entries":  137,
+                                                                                                        "file":  "snapshot.aof",
+                                                                                                        "sha256":  "0dd0723bf94090c9eb56599845b9c6703641407e618499cf89cad1d95a662046"
+                                                                                                    },
+                                                                                       "source_limits":  {
+                                                                                                             "max_mutations":  100000,
+                                                                                                             "max_record_bytes":  67108864,
+                                                                                                             "max_snapshot_bytes":  67108864
+                                                                                                         },
+                                                                                       "source_sha_declared":  "b738a0b4f97074fe272bc21f1eacf5db93cd020e",
+                                                                                       "transport_digest_crc32":  148703861,
+                                                                                       "validation_max_dataset_bytes":  67108864
+                                                                                   },
+                                                                      "shard_usage":  [
+                                                                                          16644323,
+                                                                                          16644326,
+                                                                                          16645849,
+                                                                                          16644323
+                                                                                      ],
+                                                                      "status":  "verified"
+                                                                  },
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  2231.7765999999997,
+                                        "end_ns":  "247996220800",
+                                        "phase":  "verify",
+                                        "start_ns":  "245764446100"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  4746.9945,
+                                        "end_ns":  "252746389500",
+                                        "phase":  "restore",
+                                        "start_ns":  "247999397100"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  1190.5321,
+                                        "end_ns":  "253938079000",
+                                        "phase":  "restored_ready",
+                                        "start_ns":  "252747548500"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "civil_minus_monotonic_ms":  1,
+                                                       "inferred_deadline_ms":  [
+                                                                                    1791618298756,
+                                                                                    1791618298757
+                                                                                ],
+                                                       "query_monotonic_ms":  0,
+                                                       "remaining_ms":  3578461,
+                                                       "sample_valid":  true,
+                                                       "shards":  4,
+                                                       "stage":  "restore",
+                                                       "tolerance_ms":  250,
+                                                       "wall_after_ms":  1791614720296,
+                                                       "wall_before_ms":  1791614720295
+                                                   },
+                                        "elapsed_ms":  0.6105,
+                                        "end_ns":  "253941184900",
+                                        "phase":  "ttl_sample",
+                                        "start_ns":  "253940575700"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "anchor_deadline_ms":  [
+                                                                                  1791618298757,
+                                                                                  1791618298757
+                                                                              ],
+                                                       "interval_gap_ms":  0,
+                                                       "oracle":  "absolute_deadline_brackets_v1",
+                                                       "sample_deadline_ms":  [
+                                                                                  1791618298756,
+                                                                                  1791618298757
+                                                                              ],
+                                                       "shards":  4,
+                                                       "stage":  "restore",
+                                                       "tolerance_ms":  250
+                                                   },
+                                        "elapsed_ms":  0.2855,
+                                        "end_ns":  "253942929800",
+                                        "phase":  "ttl_deadline_check",
+                                        "start_ns":  "253942645700"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "long_ttl_ms":  3578461,
+                                                       "sha256":  "1407019fa4fb67c427f7baf527d68090b044d53afd9b6b4f6b781c30a63c45e0",
+                                                       "shards":  4,
+                                                       "short_ttl":  -2,
+                                                       "transaction_cut":  43
+                                                   },
+                                        "elapsed_ms":  8384.4678,
+                                        "end_ns":  "262328660000",
+                                        "phase":  "restored_compare",
+                                        "start_ns":  "253944193600"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  14332.2559,
+                                        "end_ns":  "262331650900",
+                                        "phase":  "restore_to_data_validated",
+                                        "start_ns":  "247999396900"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  16568.712600000003,
+                                        "end_ns":  "262333157100",
+                                        "phase":  "verify_to_data_validated",
+                                        "start_ns":  "245764446100"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  1083.3136000000002,
+                                        "end_ns":  "269907853700",
+                                        "phase":  "aof_restart_ready",
+                                        "start_ns":  "268824541600"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "civil_minus_monotonic_ms":  1,
+                                                       "inferred_deadline_ms":  [
+                                                                                    1791618298756,
+                                                                                    1791618298757
+                                                                                ],
+                                                       "query_monotonic_ms":  0,
+                                                       "remaining_ms":  3562491,
+                                                       "sample_valid":  true,
+                                                       "shards":  4,
+                                                       "stage":  "aof_restart",
+                                                       "tolerance_ms":  250,
+                                                       "wall_after_ms":  1791614736266,
+                                                       "wall_before_ms":  1791614736265
+                                                   },
+                                        "elapsed_ms":  0.6119,
+                                        "end_ns":  "269911070300",
+                                        "phase":  "ttl_sample",
+                                        "start_ns":  "269910459900"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "anchor_deadline_ms":  [
+                                                                                  1791618298757,
+                                                                                  1791618298757
+                                                                              ],
+                                                       "interval_gap_ms":  0,
+                                                       "oracle":  "absolute_deadline_brackets_v1",
+                                                       "sample_deadline_ms":  [
+                                                                                  1791618298756,
+                                                                                  1791618298757
+                                                                              ],
+                                                       "shards":  4,
+                                                       "stage":  "aof_restart",
+                                                       "tolerance_ms":  250
+                                                   },
+                                        "elapsed_ms":  0.3586,
+                                        "end_ns":  "269912848100",
+                                        "phase":  "ttl_deadline_check",
+                                        "start_ns":  "269912491100"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "acknowledged_transactions":  2725,
+                                                       "sha256":  "1407019fa4fb67c427f7baf527d68090b044d53afd9b6b4f6b781c30a63c45e0",
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  8312.642,
+                                        "end_ns":  "278222714100",
+                                        "phase":  "aof_restart_compare",
+                                        "start_ns":  "269910073800"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  9410.7148,
+                                        "end_ns":  "278235254300",
+                                        "phase":  "aof_restart_to_data_validated",
+                                        "start_ns":  "268824541500"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  1920.5145,
+                                        "end_ns":  "300289429700",
+                                        "phase":  "tail_recovery_ready",
+                                        "start_ns":  "298368916900"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "civil_minus_monotonic_ms":  0,
+                                                       "inferred_deadline_ms":  [
+                                                                                    1791618298756,
+                                                                                    1791618298756
+                                                                                ],
+                                                       "query_monotonic_ms":  0,
+                                                       "remaining_ms":  3532109,
+                                                       "sample_valid":  true,
+                                                       "shards":  4,
+                                                       "stage":  "tail_recovery",
+                                                       "tolerance_ms":  250,
+                                                       "wall_after_ms":  1791614766647,
+                                                       "wall_before_ms":  1791614766647
+                                                   },
+                                        "elapsed_ms":  0.6277,
+                                        "end_ns":  "300292621600",
+                                        "phase":  "ttl_sample",
+                                        "start_ns":  "300291995700"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "anchor_deadline_ms":  [
+                                                                                  1791618298757,
+                                                                                  1791618298757
+                                                                              ],
+                                                       "interval_gap_ms":  1,
+                                                       "oracle":  "absolute_deadline_brackets_v1",
+                                                       "sample_deadline_ms":  [
+                                                                                  1791618298756,
+                                                                                  1791618298756
+                                                                              ],
+                                                       "shards":  4,
+                                                       "stage":  "tail_recovery",
+                                                       "tolerance_ms":  250
+                                                   },
+                                        "elapsed_ms":  0.306,
+                                        "end_ns":  "300294333600",
+                                        "phase":  "ttl_deadline_check",
+                                        "start_ns":  "300294029000"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "pre_repair_sha256":  "9cf90d5263d63c0647b214210bd12483bf923eefec16930869742e45125cbf71",
+                                                       "preserved":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\incomplete-tail\\tail-00000000000000000002-21156-0.bak",
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  16908.8181,
+                                        "end_ns":  "315277733200",
+                                        "phase":  "tail_recovery_to_data_validated",
+                                        "start_ns":  "298368916900"
+                                    },
+                                    {
+                                        "detail":  {
+                                                       "aof_original_preserved":  true,
+                                                       "backup_original_preserved":  true,
+                                                       "shards":  4
+                                                   },
+                                        "elapsed_ms":  126916.4555,
+                                        "end_ns":  "448832110500",
+                                        "phase":  "negative_cases",
+                                        "start_ns":  "321915656500"
+                                    }
+                                ]
+                },
+    "raw_file_inventory":  [
+                               {
+                                   "path":  "windows-attempt-3/context.json",
+                                   "bytes":  936,
+                                   "sha256":  "ded2856a509b3c6589f11b0173476f0f1b24acd8197d6a9e492ecf96669b25d5"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/package.json",
+                                   "bytes":  1548,
+                                   "sha256":  "4ff420ba25cf39d6ac00819a7fd089fe91f377715c7c4c95610668f8b7c896b2"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/phases.jsonl",
+                                   "bytes":  13671,
+                                   "sha256":  "3470badccf0e9307fd867d43bcd314befe43cd623b446b42928d628cae461984"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/recovery_drill.rs",
+                                   "bytes":  40966,
+                                   "sha256":  "9a6cf3d1a619dcd95bc7d1eadd5e8b77e3118b59f2c37e112e9ceeb3a9d81ca6"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/release-manifest.json",
+                                   "bytes":  867041,
+                                   "sha256":  "d577be2462fd31b234879e2a9d9928d1d69d3d8dde801df85c43554be2b74543"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/result.json",
+                                   "bytes":  1258,
+                                   "sha256":  "f9a24cfb34c2f937c691bb5fefe37d7bd0e1aaeec8d2f6b37d6d5b4d9bc1454c"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/runner.json",
+                                   "bytes":  360,
+                                   "sha256":  "8b391ea3f4306e1aa138e4acd5e8d4c0af4e9940fbc9ea2aff9a33c61b3ed82d"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/sider-backup-version.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/sider-backup-version.stdout",
+                                   "bytes":  19,
+                                   "sha256":  "cbf64b086b18f3aa8cefb00dad5dfadedf04b2ec808e2743a73fdeda1ec2452f"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/sider-version.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/sider-version.stdout",
+                                   "bytes":  12,
+                                   "sha256":  "978e5f5ba82afbca222123b97b5167f3b37dd2681495f5cd22fe3601f45a0ddc"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/aof-restart-command.json",
+                                   "bytes":  713,
+                                   "sha256":  "d7c387fd35ac3cf0ab628a923a1b88dd12926cf03ce92a51b53a4b3a4468fe00"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/aof-restart-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "1bc199a483569ee2355051ea971f96d9c6b68871775b05446afb1bc0ff939cfb"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/aof-restart-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "0fe1122e8ba600f69a5f7613c8cfc864d710eb8a0f2ffcbee7c79751e5ad08e4"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/aof-restart.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "6cb332da4153f67bd28a74802764dfc20cb53e4c47ebc986d9e2cccf3c7a97d9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/aof-restart.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/corrupt-aof-command.json",
+                                   "bytes":  717,
+                                   "sha256":  "f0536b6d003fa74d35c8d0bd9804337659c625cb4a39076ec36a0e4448c15457"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/corrupt-aof.stderr",
+                                   "bytes":  145,
+                                   "sha256":  "44e9836f13912daf63213af510dd73610e283f48bb3993de22fbce3b34cddee9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/corrupt-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/corrupt-restore-command.json",
+                                   "bytes":  530,
+                                   "sha256":  "4df613aad49c20e44cd50f29dac01837570fdb52f493ad6bf0f7546c144eda89"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/corrupt-restore-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/corrupt-restore.stderr",
+                                   "bytes":  59,
+                                   "sha256":  "0700e6930cb92fb1514c70d9c9aee0fa22a1dd5b08938a350a171e2e14d1400c"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/corrupt-restore.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/corrupt-verify-command.json",
+                                   "bytes":  386,
+                                   "sha256":  "0e120aaf9041c6a74df2b4c0da7c8d32e6ac447fcb8de084280a2f51be651347"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/corrupt-verify-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/corrupt-verify.stderr",
+                                   "bytes":  59,
+                                   "sha256":  "0700e6930cb92fb1514c70d9c9aee0fa22a1dd5b08938a350a171e2e14d1400c"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/corrupt-verify.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/dataset.json",
+                                   "bytes":  2185,
+                                   "sha256":  "d19543dcbf89cb831fecea23bced96286b7a516f6df47f7af70c86508d5d1f93"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/existing-destination-command.json",
+                                   "bytes":  514,
+                                   "sha256":  "ff428c675ea7d1e5dab36c7c4a3cc8eed8294f22344b63bc46e45e0a46c627e1"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/existing-destination-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/existing-destination.stderr",
+                                   "bytes":  94,
+                                   "sha256":  "1740ec9c5dd7580b2af4390037bd8f33a253c130626c59faddc9bfa175bf5450"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/existing-destination.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/export-command.json",
+                                   "bytes":  438,
+                                   "sha256":  "ba00f9c3327dede2a297d98d1f03f7544ea41aef0ead9e5dac5a5d2c3e741582"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/export-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/export.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/export.stdout",
+                                   "bytes":  621,
+                                   "sha256":  "2fc92c1b0280e1eb700ed9135dd606f9dab7541f450a571b5727f4180d45c46e"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/incompatible-aof-command.json",
+                                   "bytes":  731,
+                                   "sha256":  "808e4814de4da9a17a0832e6d1d9593b24ffd59b03ed29c6db255e212011eca3"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/incompatible-aof.stderr",
+                                   "bytes":  283,
+                                   "sha256":  "4a623c424fa138493044e693de8cd045f94279f626a4fcc961169a60e6102a7b"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/incompatible-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/incompatible-restore-command.json",
+                                   "bytes":  526,
+                                   "sha256":  "27675b0733a398563fb44103ea284e23b2da6b316145c449fc672dd87be6aa7d"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/incompatible-restore-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/incompatible-restore.stderr",
+                                   "bytes":  70,
+                                   "sha256":  "d119bd20124d1b2d7c80c25d68e713e54efb1d1ad23fe8237c739f71ada8ebab"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/incompatible-restore.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/incompatible-verify-command.json",
+                                   "bytes":  378,
+                                   "sha256":  "5f3ea6abb7fb922e1179a44735627fb561e08ce65f4a48d195ac918947055a6b"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/incompatible-verify-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/incompatible-verify.stderr",
+                                   "bytes":  70,
+                                   "sha256":  "d119bd20124d1b2d7c80c25d68e713e54efb1d1ad23fe8237c739f71ada8ebab"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/incompatible-verify.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/primary-after-restart.json",
+                                   "bytes":  330,
+                                   "sha256":  "1eb78c36b9b1402e5d6c5375098a46a0e362e6deb37a1d92bd26d6f42c9c8b06"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/primary-before-restart.json",
+                                   "bytes":  324,
+                                   "sha256":  "0574f4e07815b35cce42ab2d921acf2bfe5ebd4ac97bb423ef98608868b16c85"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/primary-command.json",
+                                   "bytes":  705,
+                                   "sha256":  "37d2db55ed01a692b346ed360ba759fdced6979ba9e809636d2ebf3bbc7a68df"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/primary-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "5c2360e9461b0790c16bb43c8a569445a0faf137c8ce9aa840c2c0642c334aeb"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/primary-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "8e5413cbbfb0adf361c715f76b86831ed151619f124075cde4de5ffe5c5ee164"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/primary.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "80d576aa92f5463a45c9d138f489434aafb857f648a901fe614b07cb0ba3100d"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/primary.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/restore-command.json",
+                                   "bytes":  513,
+                                   "sha256":  "3dce779f65a3bc499c9f71ed1c3feb8c5c31f0cace6471f3110b0dbadedc556a"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/restore-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/restore.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/restore.stdout",
+                                   "bytes":  698,
+                                   "sha256":  "6225fa22aca15663f7c61a45cc5769dffcde9988dda9f894435c7872b5bc1192"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/restored-command.json",
+                                   "bytes":  708,
+                                   "sha256":  "77b9e3bc436407ba95fa97af5c34bfcab36a57162846151322c4bb831a7465a6"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/restored-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "26742d1da796afa6dceafb431163f9b861f5a0ba3420624e7fcc7beb5d861a45"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/restored-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "e148469fb0560f8ecc1a5c3fc49e9bebf9a1ea9b1cd292f47ca5712bcc74a527"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/restored.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "e06401bb20701d3fc8d8e074741d3dfb0c929967ce4659aec8c1e47533aa53c8"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/restored.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/tail-recovery-command.json",
+                                   "bytes":  725,
+                                   "sha256":  "07909e7d32785be4d69fc3400c1ebfad4867ecdb9abd16f3b60b91b16f0bedad"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/tail-recovery-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "3103f7609a9c92bf7563373a29ec3cc610713616ffee58bbd160e79740b98aea"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/tail-recovery-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "da9ac36456f15eb160414788df3c23cf83752b91e3a55cfdf6afccdc59cc2660"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/tail-recovery.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "5f68ac05815ce6f52b5b662438ab37b117c414977a12fec9d6814ba1e6c884e1"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/tail-recovery.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/unknown-version-aof-command.json",
+                                   "bytes":  741,
+                                   "sha256":  "3c66ef2358d43ac3ce02aea96f71ab51fb839f6cbd847da78963991a3b19c068"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/unknown-version-aof.stderr",
+                                   "bytes":  145,
+                                   "sha256":  "f5f01afd0a53f9fb729fee90719c1079200ceb2303cbd3d83bc2f6dd46ff9a72"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/unknown-version-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/verify-command.json",
+                                   "bytes":  377,
+                                   "sha256":  "8a7225d9eb7ee9207ea3c60ce99336f46d363dac58cff3d127f0266b12a7cc55"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/verify-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/verify.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/verify.stdout",
+                                   "bytes":  698,
+                                   "sha256":  "6225fa22aca15663f7c61a45cc5769dffcde9988dda9f894435c7872b5bc1192"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/backup/backup-manifest.json",
+                                   "bytes":  748,
+                                   "sha256":  "a3b90108841fdae508e8d468d668e4924491fd08319174d6fbcbf7c1ddc533b8"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/backup/SHA256SUMS",
+                                   "bytes":  166,
+                                   "sha256":  "94a23e595682fe73e2d18b5c4ede77a802c37ae1c1ca3437809c11607f3d81f9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/corrupt-backup/backup-manifest.json",
+                                   "bytes":  748,
+                                   "sha256":  "a3b90108841fdae508e8d468d668e4924491fd08319174d6fbcbf7c1ddc533b8"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-1/corrupt-backup/SHA256SUMS",
+                                   "bytes":  166,
+                                   "sha256":  "94a23e595682fe73e2d18b5c4ede77a802c37ae1c1ca3437809c11607f3d81f9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/aof-restart-command.json",
+                                   "bytes":  713,
+                                   "sha256":  "b61c192a099e225bc0234537d7a2d359ef12ceb017ee4a8d94efa5e763aec931"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/aof-restart-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "c1169a0433ff30a02073e9b9e690a0fdf868584a42e869f09ecc5685d6822124"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/aof-restart-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "c2480f7a6f87a79f39ffba227ed3ea1031e83ee87d7824514c67eec9be1cad21"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/aof-restart.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "642a690dc60734906a67f5cea1293ab014b801672ec4e7f3791cecbf02d26663"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/aof-restart.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/corrupt-aof-command.json",
+                                   "bytes":  717,
+                                   "sha256":  "d01d9db3391da61250405ecce62f31846888ccaf583efbd431026a67076a1d17"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/corrupt-aof.stderr",
+                                   "bytes":  145,
+                                   "sha256":  "feb5c3fc4164f0d515eb63ebfd91c9f545eaa41a5231f3d9f44cd859853ed191"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/corrupt-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/corrupt-restore-command.json",
+                                   "bytes":  530,
+                                   "sha256":  "9fcccf07639f6ab62a5167508bd4314734c33ea1f42f58f63720b79e9dd22933"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/corrupt-restore-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/corrupt-restore.stderr",
+                                   "bytes":  59,
+                                   "sha256":  "0700e6930cb92fb1514c70d9c9aee0fa22a1dd5b08938a350a171e2e14d1400c"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/corrupt-restore.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/corrupt-verify-command.json",
+                                   "bytes":  386,
+                                   "sha256":  "ab3ad3801bf42b5588dbf6c434834dd145748abc862eca1c5a29c42dc1871004"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/corrupt-verify-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/corrupt-verify.stderr",
+                                   "bytes":  59,
+                                   "sha256":  "0700e6930cb92fb1514c70d9c9aee0fa22a1dd5b08938a350a171e2e14d1400c"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/corrupt-verify.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/dataset.json",
+                                   "bytes":  2185,
+                                   "sha256":  "ca9e7ab41dea34a647d5fafabb7b06274aa67ec498e11338fd69e51600b92b60"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/existing-destination-command.json",
+                                   "bytes":  514,
+                                   "sha256":  "8f95894f6d35f62393107d81a9efcbcec25ccad258001eba9bc4d9db4e694664"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/existing-destination-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/existing-destination.stderr",
+                                   "bytes":  94,
+                                   "sha256":  "1740ec9c5dd7580b2af4390037bd8f33a253c130626c59faddc9bfa175bf5450"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/existing-destination.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/export-command.json",
+                                   "bytes":  438,
+                                   "sha256":  "657e4f302ebe6c3c7712fa01defe1d8a290a4cee74ef9fdc18999223a3df1214"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/export-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/export.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/export.stdout",
+                                   "bytes":  620,
+                                   "sha256":  "ccd1a67f47a7a62412b1a170264edc8c6258621441c041c60e10f780e8d3ec26"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/incompatible-aof-command.json",
+                                   "bytes":  732,
+                                   "sha256":  "822f7b346f6d7610cfd97fc830285920bf550675f18ad40b31ad3ead8a21afb1"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/incompatible-aof.stderr",
+                                   "bytes":  283,
+                                   "sha256":  "c20808dd1f812c83e731701888bdf815dd48f89a586ac7005847e9ab6ade5ec5"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/incompatible-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/incompatible-restore-command.json",
+                                   "bytes":  526,
+                                   "sha256":  "d854d54833d507f05ac0186f8f2e668c50d72d8311b4cd24f0ab5a3a42763569"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/incompatible-restore-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/incompatible-restore.stderr",
+                                   "bytes":  70,
+                                   "sha256":  "d119bd20124d1b2d7c80c25d68e713e54efb1d1ad23fe8237c739f71ada8ebab"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/incompatible-restore.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/incompatible-verify-command.json",
+                                   "bytes":  378,
+                                   "sha256":  "9e583b77e5aed9819d423db8f44de2105c2e0a3a187ee58c1ebe95e9ade7493c"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/incompatible-verify-exit.json",
+                                   "bytes":  57,
+                                   "sha256":  "62658da0db417c9ce0b9bed4f3d8c6b3d95fb2b9fe440d405cd487c70b2b26e9"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/incompatible-verify.stderr",
+                                   "bytes":  70,
+                                   "sha256":  "d119bd20124d1b2d7c80c25d68e713e54efb1d1ad23fe8237c739f71ada8ebab"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/incompatible-verify.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/primary-after-restart.json",
+                                   "bytes":  330,
+                                   "sha256":  "b9196763cdc758dd3e8bed9e79b5eea6de5f402a2b8b73e7240cbd8f9e8817e6"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/primary-before-restart.json",
+                                   "bytes":  324,
+                                   "sha256":  "d869821b0746920fb2a3c24728282fd4a50b88c3d0d42d12ad1748f80397325e"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/primary-command.json",
+                                   "bytes":  705,
+                                   "sha256":  "8436da10ab7ac044a4a4b57fe6e1e690f0cf3775921cb57059cc0e451d429f70"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/primary-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "505c6b422ead51f92eb8963a98ce30db966044c7460fff954787a9da906638ab"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/primary-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "8e3bb5d3db20cc861c0da3f96a32f79a433aee5b3c10af1179722d56839a9b11"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/primary.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "933d28cd11c73aede66ef6613ae82b85311c60109c0c31dd02a40aa021816ea8"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/primary.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/restore-command.json",
+                                   "bytes":  513,
+                                   "sha256":  "32f9c404ec91b2fd56a2631bdb6db67e9ef16187009bc8d762d65f7443e8a0c3"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/restore-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/restore.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/restore.stdout",
+                                   "bytes":  724,
+                                   "sha256":  "add01e770c5b2196b79fc109ac2d985d841eb850911148fdfa80b2166dce742f"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/restored-command.json",
+                                   "bytes":  707,
+                                   "sha256":  "5184ca51cb529536e2eab59fe13590cd120f5a38f4632d73aa0452feded075b8"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/restored-internal.json",
+                                   "bytes":  45,
+                                   "sha256":  "338cde07d03dba58236afd19ae9f770de93773b0bf566dbf5d2f0c1c5700f952"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/restored-ready.json",
+                                   "bytes":  45,
+                                   "sha256":  "8afe81bc60a852af062a6066c5ae418619a20ab9f37f2635a606cbd664e712ff"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/restored.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "4c77f45ab4580ea2219203595636528853c98003ef13ddcd72fd037cfede2575"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/restored.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/tail-recovery-command.json",
+                                   "bytes":  725,
+                                   "sha256":  "11308ca1cb1a1153f0e1328ce57023590271de0549a66d683649bd2167a031e5"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/tail-recovery-internal.json",
+                                   "bytes":  46,
+                                   "sha256":  "05fb9bb267fb5ce1030d0b4f6dbe8a9d34f9021fb559fc1fb04bed9b49bb1b75"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/tail-recovery-ready.json",
+                                   "bytes":  46,
+                                   "sha256":  "2e11025dbd84a2d84a47da188eacca1cfe15b2f8546acbb758d149ac4e392398"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/tail-recovery.stderr",
+                                   "bytes":  92,
+                                   "sha256":  "4ce474eeacac8e45f39d0b7642fbd88fe5b5ea97d87b6294f305b198c125922c"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/tail-recovery.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/unknown-version-aof-command.json",
+                                   "bytes":  741,
+                                   "sha256":  "2d5387f2f6ca0b82ab5a2acd28aae6ed18ec8d418c427088104dc3d0dbfb91d6"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/unknown-version-aof.stderr",
+                                   "bytes":  145,
+                                   "sha256":  "7e3ff478da0ee9c3b03ac297aa6c7eb99bec9579c7e5b7ad202d89df48b87a6e"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/unknown-version-aof.stdout",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/verify-command.json",
+                                   "bytes":  377,
+                                   "sha256":  "8566407c0ad1b2ba8e7793bbf645ecdb7b11167f315bc9c51ded8d8c38fc8429"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/verify-exit.json",
+                                   "bytes":  56,
+                                   "sha256":  "08b39fec2b90dc69d94c149bc51417df850b3384e434ca9f39bab9f81b658c4e"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/verify.stderr",
+                                   "bytes":  0,
+                                   "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/verify.stdout",
+                                   "bytes":  724,
+                                   "sha256":  "add01e770c5b2196b79fc109ac2d985d841eb850911148fdfa80b2166dce742f"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/backup/backup-manifest.json",
+                                   "bytes":  747,
+                                   "sha256":  "519a8bbd22fb2b4e3883d6e6096e63467f17651302fa131a01b50ab154e0fef7"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/backup/SHA256SUMS",
+                                   "bytes":  166,
+                                   "sha256":  "918f7acc867a9d1056b22e812284097158ff5e65f0fed85fefe14258282e2e75"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/corrupt-backup/backup-manifest.json",
+                                   "bytes":  747,
+                                   "sha256":  "519a8bbd22fb2b4e3883d6e6096e63467f17651302fa131a01b50ab154e0fef7"
+                               },
+                               {
+                                   "path":  "windows-attempt-3/shards-4/corrupt-backup/SHA256SUMS",
+                                   "bytes":  166,
+                                   "sha256":  "918f7acc867a9d1056b22e812284097158ff5e65f0fed85fefe14258282e2e75"
+                               },
+                               {
+                                   "path":  "windows-attempt-3-cargo.log",
+                                   "bytes":  1794,
+                                   "sha256":  "9457d5661869bd2b019f4d0ce8b48e0c74973ce57223cf2ca338d4e29f381d52"
+                               },
+                               {
+                                   "path":  "windows-attempt-3-cargo-exit.txt",
+                                   "bytes":  2,
+                                   "sha256":  "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+                               },
+                               {
+                                   "path":  "windows-native-contracts-final.log",
+                                   "bytes":  3436,
+                                   "sha256":  "7e5f7718d93895a1422c3e973690c434d89496de31026d7d3a0d913d2a61f883"
+                               },
+                               {
+                                   "path":  "windows-native-clippy-final.log",
+                                   "bytes":  1024,
+                                   "sha256":  "70e496c4d83ff46e38d3a18fd37c5b3b89fa6b3f6efb65f425a96bdcb3a171bc"
+                               },
+                               {
+                                   "path":  "windows-final.ps1",
+                                   "bytes":  1912,
+                                   "sha256":  "851ec3359f6e48ddc5d22cbb6f20c739fc8db300b47e498a352e92a147e93e58"
+                               },
+                               {
+                                   "path":  "runner-support/tests/common/process.rs",
+                                   "bytes":  8839,
+                                   "sha256":  "3396f33930c244cb2f221ba0e1eee2eb93781ab13d6e2f7defbc404c4f7623c3"
+                               },
+                               {
+                                   "path":  "runner-support/tests/common/wire.rs",
+                                   "bytes":  6878,
+                                   "sha256":  "8da2190c61a84d18c625ff84722f2bf1db9828526e7e530c3c538f86991d9dd5"
+                               },
+                               {
+                                   "path":  "runner-support/Cargo.toml",
+                                   "bytes":  724,
+                                   "sha256":  "7892813b1b898a7b639b485f2b3f940fd123c03ffd603e76662561ea94404571"
+                               },
+                               {
+                                   "path":  "runner-support/Cargo.lock",
+                                   "bytes":  16734,
+                                   "sha256":  "191dc0b62d78611fcbe77a90669a407b59dc7c44d5383277925833bb2370ca16"
+                               },
+                               {
+                                   "path":  "runner-support/rust-toolchain.toml",
+                                   "bytes":  86,
+                                   "sha256":  "559f488c181e0e9e77cf17c29de663977f036ec7ff2e2060585714bf53c52d62"
+                               }
+                           ],
+    "large_file_inventory":  [
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\backup\\snapshot.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "f0e0fc23a046efff4525e1502714ef3cf7d967b965e8231a56089c29ca053b0f",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\corrupt-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66794056,
+                                     "sha256":  "b3a6297e6ee94c6b65c636136d13780f9d20e9f386783b04e6de84a037858a74",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\corrupt-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "951ffe8bfddd453e42dc179a76dbc397b3ea783e4d8e86032b0e335177edb532",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\corrupt-backup\\snapshot.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "b0c175547634b316d65d4731d2e3b0bf5e3fef75a822f83ec22c1ea84473b40c",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\incompatible-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66794056,
+                                     "sha256":  "b3a6297e6ee94c6b65c636136d13780f9d20e9f386783b04e6de84a037858a74",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\incompatible-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "6d69db32072683f6329ec228f9279545c3b3a031ca4be94f944db74cfa8e05b5",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\incomplete-tail\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "6d69db32072683f6329ec228f9279545c3b3a031ca4be94f944db74cfa8e05b5",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\incomplete-tail\\generation-00000000000000000003.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "8ddbdb4da87b1f3e26983bd34bdc3ee5338909b21b845abb137cf519d5c89f0a",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\incomplete-tail\\tail-00000000000000000002-24884-0.bak",
+                                     "bytes":  66565381,
+                                     "sha256":  "1786234822af771fc5a2445bfcd253c6cf24ba3bea1b3128a08949815e2b3092",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\primary\\generation-00000000000000000001.aof",
+                                     "bytes":  66794056,
+                                     "sha256":  "b3a6297e6ee94c6b65c636136d13780f9d20e9f386783b04e6de84a037858a74",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\primary\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "6d69db32072683f6329ec228f9279545c3b3a031ca4be94f944db74cfa8e05b5",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\restored\\generation-00000000000000000000.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "f0e0fc23a046efff4525e1502714ef3cf7d967b965e8231a56089c29ca053b0f",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\restored\\generation-00000000000000000001.aof",
+                                     "bytes":  66565374,
+                                     "sha256":  "d25e03a492976526449341d58bf53036126dab681bba0d294d29feeb969a1520",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\unknown-version-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66794056,
+                                     "sha256":  "b3a6297e6ee94c6b65c636136d13780f9d20e9f386783b04e6de84a037858a74",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-1\\unknown-version-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "d1d432ca5ec11d4991cf711a4fc4ea87025a947441ea1aeb14bb7de262d06095",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\backup\\snapshot.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "0dd0723bf94090c9eb56599845b9c6703641407e618499cf89cad1d95a662046",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\corrupt-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66815492,
+                                     "sha256":  "9c0f637d6eb203c3b2ff8b2156a4cbb3f55ffcc27c362b3fa427295234517c85",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\corrupt-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "9f7b6076a6f4d1d86ada3b5352603da07b343adc619ae19af75a06ca57defd32",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\corrupt-backup\\snapshot.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "c6532aa4e6ee78d4a34a4504d8d2acbe1d663eea1eb2049d48948eae3296d647",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\incompatible-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66815492,
+                                     "sha256":  "9c0f637d6eb203c3b2ff8b2156a4cbb3f55ffcc27c362b3fa427295234517c85",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\incompatible-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "4fb98276409f739ce45e9675f2b127a140c87bc3dbd7c35dec727f3d68c802cb",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\incomplete-tail\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "4fb98276409f739ce45e9675f2b127a140c87bc3dbd7c35dec727f3d68c802cb",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\incomplete-tail\\generation-00000000000000000003.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "88aad4b8fb5f4883044f16dda6b59b1c20584cf9766592f716fc2811fbe0c7c2",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\incomplete-tail\\tail-00000000000000000002-21156-0.bak",
+                                     "bytes":  66565381,
+                                     "sha256":  "9cf90d5263d63c0647b214210bd12483bf923eefec16930869742e45125cbf71",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\primary\\generation-00000000000000000001.aof",
+                                     "bytes":  66815492,
+                                     "sha256":  "9c0f637d6eb203c3b2ff8b2156a4cbb3f55ffcc27c362b3fa427295234517c85",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\primary\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "4fb98276409f739ce45e9675f2b127a140c87bc3dbd7c35dec727f3d68c802cb",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\restored\\generation-00000000000000000000.aof",
+                                     "bytes":  66565405,
+                                     "sha256":  "0dd0723bf94090c9eb56599845b9c6703641407e618499cf89cad1d95a662046",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\restored\\generation-00000000000000000001.aof",
+                                     "bytes":  66565374,
+                                     "sha256":  "bd3e6e7c85d96ffdfbc4e0fc7192ffa38939803946164abe7d60337a75ec27b0",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\unknown-version-aof\\generation-00000000000000000001.aof",
+                                     "bytes":  66815492,
+                                     "sha256":  "9c0f637d6eb203c3b2ff8b2156a4cbb3f55ffcc27c362b3fa427295234517c85",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 },
+                                 {
+                                     "path":  "C:\\Users\\Usuario\\AppData\\Local\\Temp\\sider-recovery-107-v1.0.1\\windows-attempt-3\\shards-4\\unknown-version-aof\\generation-00000000000000000002.aof",
+                                     "bytes":  66565378,
+                                     "sha256":  "7167d12e03f480cee55770231ab13a168638cb259de6f50ed61ce8460282cd92",
+                                     "versioned":  false,
+                                     "retention":  "Temporary Windows path only; excluded from raw ZIP; move to durable storage before temporary cleanup"
+                                 }
+                             ]
+}

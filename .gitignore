@@ -1,5 +1,7 @@
 /target/
 /xtask/target/
+/tests/client-audit/node_modules/
+/spikes/lua-containment/target/
 
 .env
 .env.*

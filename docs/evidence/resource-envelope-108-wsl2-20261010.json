@@ -1,0 +1,330 @@
+{
+  "archive": {
+    "bytes": 406464,
+    "file": "resource-envelope-108-wsl2-20261010.zip",
+    "member_count": 23,
+    "sha256": "1c8be8e0b6bb76c37b7461c40253f57790501392b5674b95236b29655727f00c"
+  },
+  "claim_status": "measurement_only",
+  "elapsed_seconds": 81.99,
+  "event_observations": {
+    "automatic_compactions": "12/12 AOF scenarios",
+    "expiration_scenarios": "18/18",
+    "slow_client_evictions": "18/18"
+  },
+  "groups": {
+    "shards_1_aof_always": {
+      "recovery_harness_ms": {
+        "max": 124.52737499999999,
+        "median": 104.228042,
+        "min": 93.652712
+      },
+      "repetitions": 3,
+      "resource_peaks": {
+        "aof_queue_requests": 1,
+        "dataset_logical_bytes": 4793315,
+        "rss_bytes": 11685888,
+        "worker_queue_requests": 7
+      },
+      "saturation": {
+        "p50_ms_median": 38.837966,
+        "p95_ms_median": 77.377742,
+        "p99_ms_median": 93.879722,
+        "throughput_ops_per_second_median": 180.27310491986728
+      },
+      "server_cpu_seconds": {
+        "max": 0.98,
+        "median": 0.47,
+        "min": 0.0
+      },
+      "startup_harness_ms": {
+        "max": 43.471616,
+        "median": 43.376315999999996,
+        "min": 43.178442
+      }
+    },
+    "shards_1_aof_everysec": {
+      "recovery_harness_ms": {
+        "max": 106.61047599999999,
+        "median": 103.88528199999999,
+        "min": 93.746464
+      },
+      "repetitions": 3,
+      "resource_peaks": {
+        "aof_queue_requests": 1,
+        "dataset_logical_bytes": 4793315,
+        "rss_bytes": 11481088,
+        "worker_queue_requests": 6
+      },
+      "saturation": {
+        "p50_ms_median": 0.50575,
+        "p95_ms_median": 0.723881,
+        "p99_ms_median": 10.723145,
+        "throughput_ops_per_second_median": 6813.458640822259
+      },
+      "server_cpu_seconds": {
+        "max": 0.65,
+        "median": 0.315,
+        "min": 0.0
+      },
+      "startup_harness_ms": {
+        "max": 43.206591,
+        "median": 43.181901,
+        "min": 33.231053
+      }
+    },
+    "shards_1_aof_off": {
+      "recovery_harness_ms": null,
+      "repetitions": 3,
+      "resource_peaks": {
+        "aof_queue_requests": 0,
+        "dataset_logical_bytes": 4251317,
+        "rss_bytes": 10186752,
+        "worker_queue_requests": 0
+      },
+      "saturation": {
+        "p50_ms_median": 0.150358,
+        "p95_ms_median": 0.541838,
+        "p99_ms_median": 7.91978,
+        "throughput_ops_per_second_median": 15485.899120981652
+      },
+      "server_cpu_seconds": {
+        "max": 0.24,
+        "median": 0.21,
+        "min": 0.21
+      },
+      "startup_harness_ms": {
+        "max": 32.890718,
+        "median": 23.728267000000002,
+        "min": 23.127815
+      }
+    },
+    "shards_4_aof_always": {
+      "recovery_harness_ms": {
+        "max": 93.844306,
+        "median": 93.646012,
+        "min": 83.629547
+      },
+      "repetitions": 3,
+      "resource_peaks": {
+        "aof_queue_requests": 4,
+        "dataset_logical_bytes": 4793319,
+        "rss_bytes": 12300288,
+        "worker_queue_requests": 4
+      },
+      "saturation": {
+        "p50_ms_median": 24.593193,
+        "p95_ms_median": 117.130938,
+        "p99_ms_median": 155.635164,
+        "throughput_ops_per_second_median": 181.39718812526968
+      },
+      "server_cpu_seconds": {
+        "max": 0.9,
+        "median": 0.435,
+        "min": 0.0
+      },
+      "startup_harness_ms": {
+        "max": 83.672416,
+        "median": 33.624112,
+        "min": 33.258455999999995
+      }
+    },
+    "shards_4_aof_everysec": {
+      "recovery_harness_ms": {
+        "max": 134.238218,
+        "median": 93.845789,
+        "min": 93.663121
+      },
+      "repetitions": 3,
+      "resource_peaks": {
+        "aof_queue_requests": 1,
+        "dataset_logical_bytes": 4797569,
+        "rss_bytes": 11845632,
+        "worker_queue_requests": 1
+      },
+      "saturation": {
+        "p50_ms_median": 0.259342,
+        "p95_ms_median": 1.421135,
+        "p99_ms_median": 13.469576,
+        "throughput_ops_per_second_median": 7350.552341966014
+      },
+      "server_cpu_seconds": {
+        "max": 0.57,
+        "median": 0.275,
+        "min": 0.0
+      },
+      "startup_harness_ms": {
+        "max": 43.438349,
+        "median": 33.672274,
+        "min": 33.103010000000005
+      }
+    },
+    "shards_4_aof_off": {
+      "recovery_harness_ms": null,
+      "repetitions": 3,
+      "resource_peaks": {
+        "aof_queue_requests": 0,
+        "dataset_logical_bytes": 4251321,
+        "rss_bytes": 10440704,
+        "worker_queue_requests": 0
+      },
+      "saturation": {
+        "p50_ms_median": 0.161983,
+        "p95_ms_median": 0.535829,
+        "p99_ms_median": 3.200354,
+        "throughput_ops_per_second_median": 17335.04993213853
+      },
+      "server_cpu_seconds": {
+        "max": 0.34,
+        "median": 0.24,
+        "min": 0.21
+      },
+      "startup_harness_ms": {
+        "max": 83.721201,
+        "median": 46.825278,
+        "min": 22.994062
+      }
+    }
+  },
+  "harness": {
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "test_binary_sha256": "87c2a699abf833424b97dec97f9c7ec2c37e4efa073a71a25c140dd70e4b04e8"
+  },
+  "host": {
+    "cpu": [
+      "model name\t: Intel(R) Core(TM) i5-9300H CPU @ 2.40GHz",
+      "siblings\t: 8",
+      "cpu cores\t: 4"
+    ],
+    "environment": "WSL2, ext4",
+    "kernel": "Linux DESKTOP-UVOITNB 6.6.87.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun  5 18:30:46 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux",
+    "loadavg_after": "1.64 1.43 1.12 1/435 1551\n",
+    "loadavg_before": "0.89 1.28 1.05 1/441 863\n",
+    "logical_processors": 8,
+    "memory_total": "MemTotal:       16294100 kB",
+    "os": "Ubuntu 24.04.4 LTS",
+    "pre_run_contention": "vmstat showed 96% idle in first interval then 100% for the next four; no Docker containers. WSL system services remained. No continuous host-process sampling, so contention cannot be ruled out."
+  },
+  "latency_records": 28992,
+  "limitations": [
+    "One WSL2 host and three repetitions do not establish capacity thresholds, operator limits, production predictions, or durability guarantees.",
+    "Saturation values are medians of per-repetition nearest-rank percentiles and throughput.",
+    "RSS and queues were sampled; short peaks may be missed. Queue units are requests, not bytes.",
+    "Logical bytes are Store accounting and are separate from process RSS.",
+    "Binary provenance is not proven by the executable hash alone."
+  ],
+  "members": {
+    "SHA256SUMS.txt": {
+      "bytes": 2037,
+      "sha256": "de372b412a85bf7322776c1ef2664abfa9ba2d4c3f1a0bebb349776ef2e37ca4"
+    },
+    "logs/build.log": {
+      "bytes": 2280,
+      "sha256": "927bd263f373a06239b1cad90c210c0fb6558bc7e6caa30097016afe1df4e48c"
+    },
+    "logs/host-after-run.log": {
+      "bytes": 4726,
+      "sha256": "ee1ec28edb56245d3de0dcf170d85bfcb86c8dec0fc1e316a7db06510b00020d"
+    },
+    "logs/host-before-build.log": {
+      "bytes": 1631,
+      "sha256": "a3bffeff39f3caeb023a212c7a556705a22ae34af71e43f2445a65ec122a5cd5"
+    },
+    "logs/host-before-run.log": {
+      "bytes": 4413,
+      "sha256": "1346ae51b08476ae16135decc0ddbea12bc80ff54d640f671af62e1e8c819e0f"
+    },
+    "logs/preflight-and-harness.txt": {
+      "bytes": 573,
+      "sha256": "f642cce9f09cd57179a41815468e21d5e0672d865f740516aa9cb81a7ff7196d"
+    },
+    "logs/workload-attempt-1.log": {
+      "bytes": 3140,
+      "sha256": "cb598ab2d46ebbd4d676dcb83b2a3f4740c6e009279efb9361c187ac901a2f26"
+    },
+    "release/package.json": {
+      "bytes": 1375,
+      "sha256": "6a36826e1118daf4f951bfcc129ff79c14304606f0208cdc2a6a10e1bb1d41cf"
+    },
+    "release/preflight-and-harness.txt": {
+      "bytes": 573,
+      "sha256": "f642cce9f09cd57179a41815468e21d5e0672d865f740516aa9cb81a7ff7196d"
+    },
+    "release/release-SHA256SUMS": {
+      "bytes": 765,
+      "sha256": "09209e0a2666ec45dfed2b5411f398363304675a02a1aa1aeea6e0709b4d5794"
+    },
+    "release/release-manifest.json": {
+      "bytes": 867041,
+      "sha256": "d577be2462fd31b234879e2a9d9928d1d69d3d8dde801df85c43554be2b74543"
+    },
+    "run/raw-sha256sums.txt": {
+      "bytes": 465,
+      "sha256": "aea56a3eead859ea8ab5d9489ac316f5b0931a64c6322f75cb866e34f7cff719"
+    },
+    "run/resource-envelope-latency.jsonl": {
+      "bytes": 2648068,
+      "sha256": "8df6b7b0e54222fc5d75ffcfd2d08e2f2b23b5a8d0915186fc8b0136a10441da"
+    },
+    "run/resource-envelope-observations.jsonl": {
+      "bytes": 1761458,
+      "sha256": "e6bc23eb9d2b9383c455ee05fc44f45e20f0261795df0ed2c1b3538390ed473b"
+    },
+    "run/resource-envelope-report.json": {
+      "bytes": 70466,
+      "sha256": "3deefcfaf8d0220acf099c41c651f3ddd7659768cbabe5917f5484435ec2c0a0"
+    },
+    "source/Cargo.lock": {
+      "bytes": 16761,
+      "sha256": "a93791cf98243122c96ed901ce951900569b05b0d1df97ba2f89677a236c9d8b"
+    },
+    "source/Cargo.toml": {
+      "bytes": 773,
+      "sha256": "b1fac1c72f6ca7d9ffa35cee386cf51d83c38d6aa4010b63af9e73e1ff5bc03a"
+    },
+    "source/process.rs": {
+      "bytes": 8839,
+      "sha256": "3396f33930c244cb2f221ba0e1eee2eb93781ab13d6e2f7defbc404c4f7623c3"
+    },
+    "source/resource-envelope-source.patch": {
+      "bytes": 51551,
+      "sha256": "e5c21ce10563311bfd519692fb73e9809e928c61057c22b11180a533b73c23f7"
+    },
+    "source/resource-envelope.json": {
+      "bytes": 935,
+      "sha256": "f90e1ba198009eac3f954db80ab34390357221dec78b01c40b8964895fd6ebef"
+    },
+    "source/resource_envelope.rs": {
+      "bytes": 40438,
+      "sha256": "c5ee7bb575f8e77d64074ac17ecfb7a4584c812974cd2798d93e17dbdbfc1948"
+    },
+    "source/sider_process.rs": {
+      "bytes": 10304,
+      "sha256": "6027726ca06c7c27f042b7521f87228463b918037be6bfd9e5e8e8c10efa929e"
+    },
+    "source/wire.rs": {
+      "bytes": 6878,
+      "sha256": "8da2190c61a84d18c625ff84722f2bf1db9828526e7e530c3c538f86991d9dd5"
+    }
+  },
+  "resource_observation_records": 801,
+  "run_id": "resource-envelope-108-wsl2-20261010-attempt-1",
+  "runner_status": "all_declared_scenarios_completed",
+  "scenario_count": 18,
+  "schema_version": 1,
+  "server_binary": {
+    "package_archive_sha256": "acc9520e120d5960c286a184d8e0079774398ad4479610cd9e6a540f5274243d",
+    "package_manifest_source_sha": "b738a0b4f97074fe272bc21f1eacf5db93cd020e",
+    "provenance_note": "Package metadata and hashes are retained; benchmark report marks executable build provenance unverified.",
+    "sha256": "ae5b426e6f7ca3c47c18beb2fe4926c1401d7d53c9ecc6253cb61573449fee6a",
+    "version": "sider 1.0.1"
+  },
+  "source": {
+    "git_commit_sha": "0f0f232f56fd42b88a56e61954f2bc892458f04d",
+    "head_tree_sha": "730452d9704c988a180dc429c2dbe9b1a75ef188",
+    "index_matches_head": false,
+    "measured_git_tree_sha": "1b221ce7eec93d112cb896b98d1839f14cd5f9ff",
+    "worktree_matches_index": true
+  }
+}
