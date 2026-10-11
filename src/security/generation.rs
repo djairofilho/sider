@@ -323,6 +323,7 @@ fn restricted_files_at(
     use std::{fs::File, io::Read, os::unix::fs::MetadataExt};
     let uid = rustix::process::geteuid().as_raw();
     let read = |name: &str| -> Result<Vec<u8>, Error> {
+        validate_restricted_directory(directory, uid, true)?;
         let mut file = File::from(
             rustix::fs::openat(
                 directory,
@@ -348,6 +349,7 @@ fn restricted_files_at(
         if bytes.len() > 4 * 1024 * 1024 || bytes.is_empty() {
             return Err(Error::Configuration);
         }
+        validate_restricted_directory(directory, uid, true)?;
         Ok(bytes)
     };
     let mut files = BTreeMap::new();
@@ -652,6 +654,11 @@ mod tests {
             anchored_child.metadata().unwrap().ino(),
             fs::metadata(directory.0.join("moved/child")).unwrap().ino()
         );
+        let moved = directory.0.join("moved");
+        fs::set_permissions(&moved, fs::Permissions::from_mode(0o770)).unwrap();
+        assert!(restricted_files_at(&opened, CLIENT).is_err());
+        fs::set_permissions(&moved, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(restricted_files_at(&opened, CLIENT).is_ok());
         assert!(Generation::server(&nested, false, false).is_err());
     }
 
