@@ -32,8 +32,7 @@ pub enum SyncPolicy {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AofConfig {
-    /// Explicit record-2 profile; server configuration may select it for a
-    /// standalone instance, while replication remains unavailable.
+    /// Explicit record-2 profile; server-side replica following remains gated.
     memory_profile: bool,
     pub directory: PathBuf,
     pub layout: DurableLayout,
@@ -58,7 +57,7 @@ impl AofConfig {
         }
     }
     /// Selects the record-2/header-4-or-5 profile explicitly.
-    /// Server-side replication remains gated.
+    /// Server-side replica following remains gated.
     /// Explicit offline memory backup and migration APIs handle this profile.
     pub fn with_memory_profile(mut self) -> Self {
         self.memory_profile = true;
@@ -165,6 +164,12 @@ enum Request {
         metadata: ReplicationMetadata,
         reply: Response<()>,
     },
+    InstallMemory {
+        snapshot: Vec<memory_format::Mutation>,
+        sequence: u64,
+        metadata: ReplicationMetadata,
+        reply: Response<()>,
+    },
     Journal(crate::replication::journal::Journal, Response<()>),
 }
 
@@ -256,6 +261,29 @@ impl AofHandle {
         let (reply, response) = oneshot::channel();
         self.requests
             .send(Request::Install {
+                snapshot,
+                sequence,
+                metadata,
+                reply,
+            })
+            .await
+            .map_err(|_| AofError::Unavailable)?;
+        response.await.map_err(|_| AofError::Unavailable)?
+    }
+
+    /// Publishes a complete record-2 replica image as one durable generation.
+    pub async fn install_memory_snapshot(
+        &self,
+        snapshot: Vec<memory_format::Mutation>,
+        sequence: u64,
+        metadata: ReplicationMetadata,
+    ) -> Result<(), AofError> {
+        if !self.memory_profile {
+            return Err(FormatError::Version(2).into());
+        }
+        let (reply, response) = oneshot::channel();
+        self.requests
+            .send(Request::InstallMemory {
                 snapshot,
                 sequence,
                 metadata,
@@ -738,33 +766,6 @@ fn batch_shard(mutations: &[Mutation], layout: DurableLayout) -> Result<usize, A
     Ok(selected.unwrap_or(0))
 }
 
-fn replay_routed(
-    store: &mut Store,
-    mutations: &[Mutation],
-    layout: DurableLayout,
-    total: usize,
-    usage: &mut [usize],
-) -> Result<(), AofError> {
-    let shard = batch_shard(mutations, layout)?;
-    let before = store.used_bytes();
-    store.replay(mutations)?;
-    let after = store.used_bytes();
-    if after >= before {
-        usage[shard] += after - before;
-    } else {
-        usage[shard] -= before - after;
-    }
-    let quota = layout.quota(total, shard)?;
-    if usage[shard] > quota {
-        return Err(AofError::ShardQuota {
-            shard,
-            used: usage[shard],
-            quota,
-        });
-    }
-    Ok(())
-}
-
 fn replay_routed_memory(
     store: &mut Store,
     mutations: &[memory_format::Mutation],
@@ -908,6 +909,22 @@ impl Writer {
                     reply,
                 })) => {
                     let result = self.install_snapshot(snapshot, sequence, metadata);
+                    if let Err(error) = &result {
+                        self.diagnostics.error(error);
+                    }
+                    let fatal = matches!(result, Err(AofError::Unavailable));
+                    let _ = reply.send(result);
+                    if fatal {
+                        return Err(AofError::Unavailable);
+                    }
+                }
+                Ok(Some(Request::InstallMemory {
+                    snapshot,
+                    sequence,
+                    metadata,
+                    reply,
+                })) => {
+                    let result = self.install_memory_snapshot(snapshot, sequence, metadata);
                     if let Err(error) = &result {
                         self.diagnostics.error(error);
                     }
@@ -1074,6 +1091,37 @@ impl Writer {
         sequence: u64,
         metadata: ReplicationMetadata,
     ) -> Result<(), AofError> {
+        if self.config.memory_profile {
+            return Err(FormatError::Version(2).into());
+        }
+        self.install_profile_snapshot(
+            snapshot
+                .into_iter()
+                .map(memory_format::Mutation::from_storage)
+                .collect(),
+            sequence,
+            metadata,
+        )
+    }
+
+    fn install_memory_snapshot(
+        &mut self,
+        snapshot: Vec<memory_format::Mutation>,
+        sequence: u64,
+        metadata: ReplicationMetadata,
+    ) -> Result<(), AofError> {
+        if !self.config.memory_profile {
+            return Err(FormatError::Version(2).into());
+        }
+        self.install_profile_snapshot(snapshot, sequence, metadata)
+    }
+
+    fn install_profile_snapshot(
+        &mut self,
+        snapshot: Vec<memory_format::Mutation>,
+        sequence: u64,
+        metadata: ReplicationMetadata,
+    ) -> Result<(), AofError> {
         if self.compaction.is_some() {
             return Err(AofError::Compacting);
         }
@@ -1083,13 +1131,16 @@ impl Writer {
         let mut usage = vec![0; self.config.layout.shard_count as usize];
         let mut previous = None;
         for mutation in &snapshot {
-            if !matches!(mutation, Mutation::Put { .. })
-                || previous.as_ref().is_some_and(|key| key >= mutation.key())
+            if !matches!(
+                mutation,
+                memory_format::Mutation::Image { .. }
+                    | memory_format::Mutation::Legacy(Mutation::Put { .. })
+            ) || previous.as_ref().is_some_and(|key| key >= mutation.key())
             {
                 return Err(AofError::Sequence);
             }
             previous = Some(mutation.key().clone());
-            replay_routed(
+            replay_routed_memory(
                 &mut checked,
                 std::slice::from_ref(mutation),
                 self.config.layout,
@@ -1100,6 +1151,7 @@ impl Writer {
         drop(checked);
         let temporary = temporary_path(&self.config.directory, "replication-install");
         let destination = generation_path(&self.config.directory, generation);
+        let profile = Profile(self.config.memory_profile);
         let result = (|| {
             self.faults.hit("replication_before_install")?;
             let mut file = OpenOptions::new()
@@ -1107,22 +1159,20 @@ impl Writer {
                 .write(true)
                 .create_new(true)
                 .open(&temporary)?;
-            format::write_header_with_replication(
-                &mut file,
-                sequence,
-                self.config.layout,
-                Some(metadata),
-            )?;
+            profile.write_header(&mut file, sequence, self.config.layout, Some(metadata))?;
             let mut entries = 0u64;
             let mut digest = 0;
             for mutation in snapshot {
-                let encoded = format::encode(&Record::Snapshot(mutation), self.config.limits)?;
+                let encoded = profile.encode(
+                    &memory_format::Record::Snapshot(mutation),
+                    self.config.limits,
+                )?;
                 digest = format::snapshot_digest(digest, &encoded);
                 entries += 1;
                 file.write_all(&encoded)?;
             }
-            file.write_all(&format::encode(
-                &Record::Seal {
+            file.write_all(&profile.encode(
+                &memory_format::Record::Seal {
                     sequence,
                     entries,
                     digest,
