@@ -209,6 +209,10 @@ and invalid fields with recomputed checksums. It does not select a supported
 profile or open, scan, repair, append, back up, replicate, or migrate a directory.
 An internal, unselectable writer profile now exercises record-1 mixed batches
 through append, whole-record replay, compaction, restart, and torn-tail repair.
+An internal test-only coordinator also appends one combined owner record before
+application. It verifies restart with both owners, record-limit rejection without
+an append, and fail-closed admission when the writer result is uncertain or the
+second owner is lost after the append.
 It refuses record 2, the missing mixed bit, and replica roles before record scan.
 No public AOF configuration selects that profile; default recovery still rejects
 version 7 before inspecting records, including every torn first-record prefix,

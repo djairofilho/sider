@@ -15,10 +15,23 @@ use crate::command::{Command, ExecutionError, Reply};
 use super::routing::TransactionPlan;
 use super::transaction::TransactionTime;
 use super::worker::{DbError, DbHandle, Worker};
-use super::{Clock, Prepared, WatchToken};
+use super::{Clock, MutationOrigin, Prepared, ResolvedBatch, WatchToken};
+
+#[cfg(test)]
+#[path = "coordinator_durable_tests.rs"]
+mod durable_tests;
+
+#[derive(Clone)]
+pub(super) enum Mode {
+    InMemory,
+    Composed(crate::persistence::AofHandle),
+}
 
 pub(super) enum Control {
-    Probe(oneshot::Sender<bool>),
+    Probe {
+        mode: Mode,
+        reply: oneshot::Sender<bool>,
+    },
     Clock(oneshot::Sender<TransactionTime>),
     CheckWatches {
         tokens: Vec<WatchToken>,
@@ -26,6 +39,7 @@ pub(super) enum Control {
         reply: oneshot::Sender<bool>,
     },
     Begin {
+        mode: Mode,
         keys: BTreeSet<Bytes>,
         time: TransactionTime,
         reply: oneshot::Sender<Result<(), DbError>>,
@@ -40,6 +54,7 @@ pub(super) enum Control {
     },
     Seal(oneshot::Sender<Result<Prepared, DbError>>),
     Apply {
+        mode: Mode,
         prepared: Prepared,
         reply: oneshot::Sender<Result<(), DbError>>,
     },
@@ -47,12 +62,21 @@ pub(super) enum Control {
 }
 
 impl Worker {
+    fn supports_coordinated_mode(&self, mode: &Mode) -> bool {
+        self.replication.is_none()
+            && match mode {
+                Mode::InMemory => self.aof.is_none(),
+                Mode::Composed(expected) => self.aof.as_ref().is_some_and(|actual| {
+                    actual.is_composed_legacy_mixed() && actual.same_writer(expected)
+                }),
+            }
+    }
+
     pub(super) fn coordination_control(&mut self, control: Control) {
         match control {
-            Control::Probe(reply) => {
-                let _ = reply.send(
-                    self.aof.is_none() && self.replication.is_none() && self.coordinated.is_none(),
-                );
+            Control::Probe { mode, reply } => {
+                let _ =
+                    reply.send(self.supports_coordinated_mode(&mode) && self.coordinated.is_none());
             }
             Control::Clock(reply) => {
                 let _ = reply.send(self.store.transaction_time());
@@ -64,10 +88,13 @@ impl Worker {
             } => {
                 let _ = reply.send(self.store.watches_valid_at(&tokens, time.now()));
             }
-            Control::Begin { keys, time, reply } => {
-                let result = if self.aof.is_some()
-                    || self.replication.is_some()
-                    || self.coordinated.is_some()
+            Control::Begin {
+                mode,
+                keys,
+                time,
+                reply,
+            } => {
+                let result = if !self.supports_coordinated_mode(&mode) || self.coordinated.is_some()
                 {
                     Err(DbError::Unavailable)
                 } else {
@@ -100,10 +127,12 @@ impl Worker {
                     .ok_or(DbError::Unavailable);
                 let _ = reply.send(result);
             }
-            Control::Apply { prepared, reply } => {
-                let result = if self.aof.is_some()
-                    || self.replication.is_some()
-                    || self.coordinated.is_some()
+            Control::Apply {
+                mode,
+                prepared,
+                reply,
+            } => {
+                let result = if !self.supports_coordinated_mode(&mode) || self.coordinated.is_some()
                 {
                     Err(DbError::Unavailable)
                 } else {
@@ -137,10 +166,11 @@ async fn control<T>(
 }
 
 impl DbHandle {
-    /// Executes a dataset-only queue across owners in memory. This internal path
-    /// rejects AOF-backed and replicated workers; the RESP EXEC path remains gated.
+    /// Executes a dataset-only queue across owners under exclusive admission.
+    /// The explicit local composed profile appends one record before application;
+    /// the RESP EXEC and replica paths remain gated.
     /// After acceptance, caller cancellation does not stop owner application.
-    pub(crate) async fn execute_coordinated_unpersisted(
+    pub(crate) async fn execute_coordinated(
         &self,
         commands: Vec<Command>,
         watched: Vec<WatchToken>,
@@ -222,8 +252,18 @@ async fn run(
     _exclusive: OwnedRwLockWriteGuard<()>,
 ) -> Result<Reply, DbError> {
     let participants = plan.participants().to_vec();
+    let mode = match &handle.composed_aof {
+        Some(aof) if aof.is_composed_legacy_mixed() => Mode::Composed(aof.clone()),
+        Some(_) => return Err(DbError::Unavailable),
+        None => Mode::InMemory,
+    };
     for sender in &handle.coordination {
-        if !control(sender, deadline, Control::Probe).await? {
+        if !control(sender, deadline, |reply| Control::Probe {
+            mode: mode.clone(),
+            reply,
+        })
+        .await?
+        {
             return Err(DbError::Unavailable);
         }
     }
@@ -254,7 +294,7 @@ async fn run(
     }
 
     let publication = handle.admission.publication();
-    let prepared = prepare(&handle, plan, time, deadline).await;
+    let prepared = prepare(&handle, plan, &mode, time, deadline).await;
     let (replies, owners) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -270,11 +310,52 @@ async fn run(
             return Err(error);
         }
     };
-    // The in-memory commit decision begins here. Exclusion remains held through
-    // every apply acknowledgment; any failed acknowledgment closes admission.
+    if let Mode::Composed(aof) = &mode {
+        let mut batch = ResolvedBatch {
+            origin: MutationOrigin::Client,
+            mutations: owners
+                .iter()
+                .flat_map(|(_, prepared)| prepared.batch.mutations.iter().cloned())
+                .collect(),
+        };
+        batch
+            .mutations
+            .sort_unstable_by(|left, right| left.key().cmp(right.key()));
+        if batch
+            .mutations
+            .windows(2)
+            .any(|pair| pair[0].key() == pair[1].key())
+        {
+            return Err(DbError::Unavailable);
+        }
+        if !batch.mutations.is_empty() {
+            match aof.append(batch).await {
+                Ok(_) => {}
+                Err(crate::persistence::AofError::Format(
+                    crate::persistence::format::FormatError::Limit,
+                )) => {
+                    publication.complete();
+                    return Ok(Reply::Error(ExecutionError::AofRecordLimit));
+                }
+                Err(error) => {
+                    tracing::error!(%error, "mixed-owner AOF decision failed; closing admission");
+                    return Err(DbError::Unavailable);
+                }
+            }
+        }
+    }
+    // The commit decision exists. Client timeout no longer cancels application.
+    // Any failed owner acknowledgment closes admission before exclusion drops.
+    let apply_deadline = Instant::now()
+        .checked_add(handle.request_timeout)
+        .ok_or(DbError::Timeout)?;
     for (owner, prepared) in owners {
-        control(&handle.coordination[owner], deadline, |reply| {
-            Control::Apply { prepared, reply }
+        control(&handle.coordination[owner], apply_deadline, |reply| {
+            Control::Apply {
+                mode: mode.clone(),
+                prepared,
+                reply,
+            }
         })
         .await??;
     }
@@ -296,6 +377,7 @@ async fn abort_all(
 async fn prepare(
     handle: &DbHandle,
     plan: TransactionPlan,
+    mode: &Mode,
     time: TransactionTime,
     deadline: Instant,
 ) -> Result<(Vec<Reply>, Vec<(usize, Prepared)>), DbError> {
@@ -313,6 +395,7 @@ async fn prepare(
     for &owner in &participants {
         control(&handle.coordination[owner], deadline, |reply| {
             Control::Begin {
+                mode: mode.clone(),
                 keys: std::mem::take(&mut keys[owner]),
                 time,
                 reply,

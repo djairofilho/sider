@@ -1,6 +1,6 @@
 # Proposed cross-shard transaction contract
 
-**Status: protocol proposed; native in-memory owner coordination and isolated replay foundations integrated.**
+**Status: protocol proposed; native owner coordination and an internal durable decision integrated.**
 This design addresses
 [issue #92](https://github.com/djairofilho/sider/issues/92) against source baseline
 `0f0f232`. It supplies a written contract and an implementation plan; it does not
@@ -10,7 +10,7 @@ The current [transactions](transactions.md), [routing](sharding.md), and
 Participant discovery includes watched-only keys and keeps owner IDs bounded and
 sorted. Owner-local candidate preparation and a shared execution time are in the
 development checkout; single-shard EXEC uses the latter for WATCH and TTL.
-Mixed-owner RESP EXEC, durable append, and replica application are not enabled.
+Mixed-owner RESP EXEC and replica application are not enabled.
 The recovery helper now stages postimages and validates each touched shard's
 projected quota before applying a record. An internal test exercises a mixed-owner
 record and a quota failure on its last owner; all production recovery calls still
@@ -38,8 +38,14 @@ concurrent opposite owner orders, and AOF/replication refusal. Phase-controlled
 tests also show that predecision rejection aborts overlays without closing
 admission; after the first owner applies, client cancellation cannot expose a
 partial read or snapshot; losing the second owner closes global admission.
-The durable decision, replica path, remaining fault boundaries, and release gates
-are still unproven.
+An internal test-only `DbHandle` path now binds both owners to the same
+header-7/record-1 writer, combines their sealed mutations into one sorted record,
+and appends it before either owner applies. Focused tests verify one append and
+whole-batch restart, whole-record limit rejection without effects, and fail-closed
+admission after an uncertain writer result or loss of the second owner. Recovery
+restores both owners after either failure.
+Replica application, remaining crash and fault boundaries, and release gates are
+still unproven.
 The public server and tools still cannot select header 7; transport 3, backup 3,
 replica application, and RESP coordinated EXEC remain unimplemented.
 
@@ -217,17 +223,18 @@ write_all and sync_all before application/success; `everysec` accepts write_all 
 can lose the unsynchronized suffix on system failure. Loss must remove the complete
 transaction, not a participant subset. In-memory mode has no restart durability.
 
-Current records can encode several keys, but current recovery rejects mixed-shard
-batches. Introduce an explicit format/capability version that older readers reject
-before applying anything, and update the replication handshake accordingly. Decide
-and document the exact version and migration compatibility during implementation;
-do not silently reinterpret a v2/v3 file as guaranteeing cross-shard recovery.
+Legacy records can encode several keys, but public recovery rejects mixed-shard
+batches. The internal header-7 profile stages mixed records before replay; older
+readers reject its header before applying anything. A release still needs matching
+replication and migration behavior. Do not reinterpret a v2/v3 file as guaranteeing
+cross-shard recovery.
 The accepted [memory contract](agent-memory-v1.md#durable-encoding-and-migration)
 reserves header versions 4 and 5 for a different record format. Cross-shard
 capability numbering and migration must account for both features, including files
 that eventually contain memory mutations and multi-shard batches.
 The [proposed durable format registry](durable-format-registry.md) defines a
-composable profile for review; it does not enable a reader, writer, or replica.
+composable profile for review. Its local reader and writer remain unselectable by
+the executable, and it does not enable a replica.
 Its explicit profile allowlist permits a complete record-1 mixed-owner release
 before memory record-2 support, provided every record-2 profile is rejected
 before scanning or repairing a file. Combined memory and mixed-owner data needs
@@ -350,8 +357,9 @@ until all required paths pass:
    only after passing results. Release requirements remain in [releases](releases.md).
 
 Issue #92 remains open until implementation and crash/network evidence satisfy all
-four acceptance criteria. Focused foundation tests pass locally, but they do not
-exercise a coordinated mixed-owner EXEC or authorize a release claim.
+four acceptance criteria. Focused tests now exercise an internal coordinated
+mixed-owner batch through the actual writer and recovery path; they do not
+exercise RESP EXEC, replication, backup, or a release configuration.
 
 ## Required deterministic tests
 
