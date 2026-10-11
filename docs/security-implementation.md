@@ -53,4 +53,11 @@ succeeds only after the mode is restored. This catches a persistent permission
 change at the pinned directory, but does not revalidate ancestor modes after
 the initial walk or prove resistance to a transient change and restore.
 
+Each opened material file is also rechecked after reading. The reader rejects
+a file whose owner, mode, type, or length remains changed at that check, and
+requires the byte count to match both observed lengths. Deterministic tests
+change the file mode and extend its contents at the post-read boundary; both
+reads fail. This does not prove an in-place same-length rewrite cannot race the
+read, although the manifest digest checks the resulting material bytes.
+
 Issue #93 still requires broader executable deployment evidence for generation activation, close barriers, reconnects, and operation leases; full real TLS replica/backup/admin allow and deny matrices across certificate chains; further POSIX replacement and concurrent permission-change tests; and the remaining Windows permission cases including alternate owner, file reparse points, and replacement races. The Windows protected startup gate stays closed. Ignored package, external, soak, and release tests have not been promoted into evidence for this feature.
