@@ -10,7 +10,7 @@ import struct
 import sys
 import time
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
 
 IDENTITY = (b"fixture", b"two-axis-demo", b"1", b"l2sq-f32le-v1")
@@ -130,13 +130,18 @@ def read_response(stream: socket.socket):
 
 
 class Sider:
-    def __init__(self, host: str, port: int, timeout: float = 5.0) -> None:
+    def __init__(self, host: str, port: int, timeout: float = 5.0,
+                 record: Callable[[tuple[bytes, ...], object], None] | None = None) -> None:
         self.socket = socket.create_connection((host, port), timeout=timeout)
         self.socket.settimeout(timeout)
+        self.record = record
 
     def command(self, *args: bytes):
         self.socket.sendall(encode(tuple(args)))
-        return read_response(self.socket)
+        result = read_response(self.socket)
+        if self.record is not None:
+            self.record(args, result)
+        return result
 
     def close(self) -> None:
         self.socket.close()
@@ -162,9 +167,11 @@ def ingest(client: Sider, prepared: list[tuple[Source, bytes]]) -> None:
             raise RuntimeError(f"unexpected MEM.PUT result: {result!r}")
 
 
-def run(host: str, port: int, fail_provider: bool, check_empty: bool) -> None:
+def run(host: str, port: int, fail_provider: bool, check_empty: bool,
+        durable: bool = False,
+        record: Callable[[tuple[bytes, ...], object], None] | None = None) -> None:
     if check_empty:
-        client = Sider(host, port)
+        client = Sider(host, port, record=record)
         try:
             info = client.command(b"MEM.INFO", COLLECTION)
             print("MEM.INFO after restart:", info)
@@ -182,7 +189,7 @@ def run(host: str, port: int, fail_provider: bool, check_empty: bool) -> None:
             return
         raise
 
-    client = Sider(host, port)
+    client = Sider(host, port, record=record)
     try:
         ingest(client, prepared)
         print("ingested: 3 records")
@@ -241,7 +248,39 @@ def run(host: str, port: int, fail_provider: bool, check_empty: bool) -> None:
         print("deletion:", deleted, "GET after DEL:", absent)
         if deleted != 1 or absent is not None:
             raise AssertionError("MEM.DEL did not remove the requested record")
-        print("restart/recovery: in-memory mode only; restart loses records (AOF record-2 activation is a later stage)")
+        if durable:
+            print("restart/recovery: restart the record-2 AOF server, then run --check-recovered")
+        else:
+            print("restart/recovery: in-memory mode; restart loses records")
+    finally:
+        client.close()
+
+
+def check_recovered(host: str, port: int,
+                    record: Callable[[tuple[bytes, ...], object], None] | None = None) -> None:
+    client = Sider(host, port, record=record)
+    try:
+        info = client.command(b"MEM.INFO", COLLECTION)
+        if info != [1, 2, b"L2SQ", *IDENTITY]:
+            raise AssertionError(f"memory schema not recovered: {info!r}")
+        hit = client.command(
+            b"MEM.SEARCH", COLLECTION, *IDENTITY, struct.pack("<2f", *QUERY),
+            b"5", b"team-a", b"1", b"category", b"BYTES", b"policy",
+        )
+        if [row[0] for row in hit] != [b"policy-1"]:
+            raise AssertionError(f"filtered result changed after recovery: {hit!r}")
+        source = client.command(b"MEM.GET", COLLECTION, b"policy-1")
+        if source is None or source[1] != b"Signing keys stay offline; rotate access quarterly.":
+            raise AssertionError("replacement content not recovered")
+        if [b"source", b"handbook://security"] not in source[5] or \
+                [b"source_revision", b"rev-8"] not in source[5]:
+            raise AssertionError("source attribution not recovered")
+        if client.command(b"MEM.GET", COLLECTION, b"policy-3") is None:
+            raise AssertionError("other-namespace record lost during recovery")
+        for member_id in (b"note-2", b"temporary"):
+            if client.command(b"MEM.GET", COLLECTION, member_id) is not None:
+                raise AssertionError(f"removed or expired record survived: {member_id!r}")
+        print("recovery: schema, filtered retrieval, replacement, source, deletion, TTL: OK")
     finally:
         client.close()
 
@@ -251,9 +290,15 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=6379)
     parser.add_argument("--fail-provider", action="store_true", help="exercise zero-write preflight failure")
-    parser.add_argument("--check-empty", action="store_true", help="verify collection is absent after in-memory restart")
+    check = parser.add_mutually_exclusive_group()
+    check.add_argument("--check-empty", action="store_true", help="verify collection is absent after in-memory restart")
+    check.add_argument("--check-recovered", action="store_true", help="verify record-2 AOF state after restart")
+    parser.add_argument("--durable", action="store_true", help="describe a record-2 AOF run")
     args = parser.parse_args()
-    run(args.host, args.port, args.fail_provider, args.check_empty)
+    if args.check_recovered:
+        check_recovered(args.host, args.port)
+    else:
+        run(args.host, args.port, args.fail_provider, args.check_empty, durable=args.durable)
     return 0
 
 
