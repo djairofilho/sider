@@ -3,6 +3,9 @@
 pub struct InfoSections(u8);
 
 impl InfoSections {
+    pub(crate) fn valid_name(name: &[u8]) -> bool {
+        Self::from_names([name]).0 != 0
+    }
     pub const SERVER: u8 = 1;
     pub const CLIENTS: u8 = 2;
     pub const STATS: u8 = 4;

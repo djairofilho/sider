@@ -95,10 +95,12 @@ query predicate, not authorization. The database receives vectors and never
 runs inference in an owning worker. The reference integration records provider,
 model revision, transformation, and source provenance.
 
-#109 remains open until the accepted document is versioned. #110
-and #111 own implementation and failure evidence, including AOF, replication,
-backup, TTL, and an independent exact-search oracle. The contract does not
-claim that the current binary stores or searches memory records.
+#109 remains open until its contract PR is reviewed and integrated. #110 and #111
+own implementation and failure evidence, including AOF, replication, backup,
+TTL, and an independent exact-search oracle. The published 1.0.1 binary neither
+stores nor searches memory records. The development branch has a bounded
+`MEM.*` lifecycle stage, but its default record-1 AOF profile refuses memory
+writes; complete durable activation and exact search remain pending.
 
 For small datasets, exact search supplies a correctness oracle. Approximate
 indexes trade recall for speed and add memory and rebuild costs. Filtered search

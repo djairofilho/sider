@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Semaphore, watch};
 use tokio::task::JoinSet;
@@ -17,6 +17,7 @@ use super::{
     protocol::{self, Hello, Message, Reject},
 };
 use crate::persistence::format;
+use crate::security::InternalPhase;
 use crate::storage::{
     Mutation,
     replication::{Context, Snapshot},
@@ -57,7 +58,37 @@ pub async fn serve(
     database: DbHandle,
     context: Context,
     config: Config,
+    shutdown: watch::Receiver<bool>,
+) -> Result<(), Error> {
+    serve_inner(listener, database, context, config, shutdown, None).await
+}
+
+pub async fn serve_secure(
+    listener: TcpListener,
+    database: DbHandle,
+    context: Context,
+    config: Config,
+    shutdown: watch::Receiver<bool>,
+    security: crate::security::InternalSecurity,
+) -> Result<(), Error> {
+    serve_inner(
+        listener,
+        database,
+        context,
+        config,
+        shutdown,
+        Some(security),
+    )
+    .await
+}
+
+async fn serve_inner(
+    listener: TcpListener,
+    database: DbHandle,
+    context: Context,
+    config: Config,
     mut shutdown: watch::Receiver<bool>,
+    security: Option<crate::security::InternalSecurity>,
 ) -> Result<(), Error> {
     let slots = Arc::new(Semaphore::new(config.max_connections));
     let mut sessions = JoinSet::new();
@@ -78,9 +109,15 @@ pub async fn serve(
                 let database = database.clone();
                 let context = context.clone();
                 let config = config.clone();
+                let security = security.clone();
                 sessions.spawn(async move {
                     let _slot = slot;
-                    serve_connection(socket, peer.ip().is_loopback(), database, context, config).await
+                    socket.set_nodelay(true)?;
+                    let (socket, authority): (Box<dyn crate::security::NetworkStream>, _) = if let Some(security) = security {
+                        let (socket, proof) = security.transport.accept_with_peer(socket).await?;
+                        (socket, Some((security.policy, proof)))
+                    } else { (Box::new(socket), None) };
+                    serve_connection(socket, peer.ip().is_loopback(), database, context, config, authority).await
                 });
             }
         }
@@ -91,7 +128,7 @@ pub async fn serve(
 }
 
 async fn reject(
-    socket: &mut TcpStream,
+    socket: &mut (impl AsyncRead + AsyncWrite + Unpin),
     reason: Reject,
     context: &Context,
     config: &Config,
@@ -107,17 +144,38 @@ async fn reject(
 }
 
 async fn serve_connection(
-    mut socket: TcpStream,
+    mut socket: Box<dyn crate::security::NetworkStream>,
     local: bool,
     database: DbHandle,
     context: Context,
     config: Config,
+    authority: Option<(
+        Arc<crate::security::InternalPolicy>,
+        crate::security::InternalPeer,
+    )>,
 ) -> Result<(), Error> {
-    socket.set_nodelay(true)?;
-    let request = protocol::read(&mut socket, limits(&context), config.frame_timeout).await?;
+    let request = protocol::read_authorized(
+        &mut socket,
+        limits(&context),
+        config.frame_timeout,
+        |kind| {
+            let Some((policy, peer)) = &authority else {
+                return true;
+            };
+            peer.current() && crate::security::authorize_internal_request(policy, peer.uri(), kind)
+        },
+    )
+    .await?
+    .1;
+    if authority.as_ref().is_some_and(|(_, peer)| !peer.current()) {
+        return Err(crate::security::Error::Transport.into());
+    }
+    if database.check_admission().is_err() {
+        return reject(&mut socket, Reject::Unavailable, &context, &config).await;
+    }
     match request {
         Message::StatusRequest => {
-            let status = context.runtime.status();
+            let status = database.replication_status(&context.runtime).await?;
             let bytes = context
                 .runtime
                 .journal()
@@ -126,7 +184,7 @@ async fn serve_connection(
             protocol::write(
                 &mut socket,
                 &Message::Status {
-                    readonly: context.runtime.readonly(),
+                    readonly: status.role == crate::persistence::Role::Replica,
                     cursor: status.applied,
                     upstream_sequence: status.upstream_sequence,
                     connected: status.connected,
@@ -140,7 +198,7 @@ async fn serve_connection(
             .await?;
             return Ok(());
         }
-        Message::Promote if local => {
+        Message::Promote if local || authority.is_some() => {
             let cursor = if context.runtime.readonly() {
                 database
                     .promote_replica(context.clone(), super::new_epoch()?)
@@ -269,7 +327,7 @@ async fn serve_connection(
 }
 
 async fn send_snapshot(
-    socket: &mut TcpStream,
+    socket: &mut (impl AsyncRead + AsyncWrite + Unpin),
     snapshot: &Snapshot,
     context: &Context,
     config: &Config,
@@ -312,12 +370,19 @@ async fn send_snapshot(
 }
 
 async fn expect_ack(
-    socket: &mut TcpStream,
+    socket: &mut (impl AsyncRead + AsyncWrite + Unpin),
     cursor: Cursor,
     context: &Context,
     config: &Config,
 ) -> Result<(), Error> {
-    if protocol::read(socket, limits(context), config.frame_timeout).await? != Message::Ack(cursor)
+    if protocol::read_in_phase(
+        socket,
+        limits(context),
+        config.frame_timeout,
+        InternalPhase::ReplicaAck,
+    )
+    .await?
+    .1 != Message::Ack(cursor)
     {
         return Err(Error::Sequence);
     }
@@ -325,7 +390,7 @@ async fn expect_ack(
 }
 
 async fn stream(
-    socket: &mut TcpStream,
+    socket: &mut (impl AsyncRead + AsyncWrite + Unpin),
     mut sent: Cursor,
     mut subscription: Subscriber,
     context: &Context,
@@ -349,6 +414,9 @@ async fn stream(
                 )
                 .await?;
                 timeout(config.frame_timeout, socket.write_all(&entry.frame))
+                    .await
+                    .map_err(|_| protocol::Error::Timeout)??;
+                timeout(config.frame_timeout, socket.flush())
                     .await
                     .map_err(|_| protocol::Error::Timeout)??;
                 expect_ack(socket, sent, context, config).await?;
@@ -383,7 +451,27 @@ pub async fn follow(
     database: DbHandle,
     context: Context,
     config: Config,
+    shutdown: watch::Receiver<bool>,
+) -> Result<(), Error> {
+    follow_inner(database, context, config, shutdown, None).await
+}
+
+pub async fn follow_secure(
+    database: DbHandle,
+    context: Context,
+    config: Config,
+    shutdown: watch::Receiver<bool>,
+    security: crate::security::InternalSecurity,
+) -> Result<(), Error> {
+    follow_inner(database, context, config, shutdown, Some(security)).await
+}
+
+async fn follow_inner(
+    database: DbHandle,
+    context: Context,
+    config: Config,
     mut shutdown: watch::Receiver<bool>,
+    security: Option<crate::security::InternalSecurity>,
 ) -> Result<(), Error> {
     let mut backoff = config.reconnect_min;
     loop {
@@ -396,7 +484,7 @@ pub async fn follow(
             biased;
             () = stopped(&mut shutdown) => return Ok(()),
             () = context.runtime.cancelled(generation) => continue,
-            result = receive_session(&database, &context, &config, generation) => result,
+            result = receive_session(&database, &context, &config, generation, security.as_ref()) => result,
         };
         context.runtime.disconnected(generation);
         if let Err(error) = &result {
@@ -424,13 +512,21 @@ async fn receive_session(
     context: &Context,
     config: &Config,
     generation: u64,
+    security: Option<&crate::security::InternalSecurity>,
 ) -> Result<(), Error> {
     let mut position = database.replication_position(&context.runtime).await?;
     let address = config.upstream.ok_or(Error::Stale)?;
-    let mut socket = timeout(config.frame_timeout, TcpStream::connect(address))
-        .await
-        .map_err(|_| protocol::Error::Timeout)??;
-    socket.set_nodelay(true)?;
+    let (mut socket, peer): (Box<dyn crate::security::NetworkStream>, _) =
+        if let Some(security) = security {
+            let (socket, peer) = security.transport.connect_with_peer(address).await?;
+            (socket, Some(peer))
+        } else {
+            let socket = timeout(config.frame_timeout, TcpStream::connect(address))
+                .await
+                .map_err(|_| protocol::Error::Timeout)??;
+            socket.set_nodelay(true)?;
+            (Box::new(socket), None)
+        };
     let cursor = (position.epoch != [0; 16]).then_some(position);
     protocol::write(
         &mut socket,
@@ -439,8 +535,14 @@ async fn receive_session(
         config.frame_timeout,
     )
     .await?;
-    let Message::Hello(source) =
-        protocol::read(&mut socket, limits(context), config.frame_timeout).await?
+    let Message::Hello(source) = protocol::read_in_phase(
+        &mut socket,
+        limits(context),
+        config.frame_timeout,
+        InternalPhase::Hello,
+    )
+    .await?
+    .1
     else {
         return Err(Error::Sequence);
     };
@@ -448,7 +550,15 @@ async fn receive_session(
         .accepts(&source)
         .map_err(|_| Error::Limit)?;
     let head = source.cursor.ok_or(Error::Sequence)?;
-    match protocol::read(&mut socket, limits(context), config.frame_timeout).await? {
+    match protocol::read_in_phase(
+        &mut socket,
+        limits(context),
+        config.frame_timeout,
+        InternalPhase::ReplicaStart,
+    )
+    .await?
+    .1
+    {
         Message::Continue(cursor)
             if cursor == position
                 && head.epoch == position.epoch
@@ -463,6 +573,9 @@ async fn receive_session(
             )
             .await
             .map_err(|_| protocol::Error::Timeout)??;
+            if peer.as_ref().is_some_and(|peer| !peer.current()) {
+                return Err(crate::security::Error::Transport.into());
+            }
             database
                 .install_replica(context.clone(), generation, cursor, mutations)
                 .await?;
@@ -480,8 +593,13 @@ async fn receive_session(
     .await?;
     let mut previous: Option<Bytes> = None;
     loop {
-        let (frame, message) =
-            protocol::read_with_frame(&mut socket, limits(context), config.frame_timeout).await?;
+        let (frame, message) = protocol::read_in_phase(
+            &mut socket,
+            limits(context),
+            config.frame_timeout,
+            InternalPhase::ReplicaStream,
+        )
+        .await?;
         match message {
             Message::Heartbeat(head)
                 if head.epoch == position.epoch && head.sequence >= position.sequence =>
@@ -499,6 +617,9 @@ async fn receive_session(
                         sequence,
                         ..position
                     };
+                    if peer.as_ref().is_some_and(|peer| !peer.current()) {
+                        return Err(crate::security::Error::Transport.into());
+                    }
                     database
                         .apply_replica(context.clone(), generation, cursor, batch)
                         .await?;
@@ -519,7 +640,7 @@ async fn receive_session(
 }
 
 async fn receive_snapshot(
-    socket: &mut TcpStream,
+    socket: &mut (impl AsyncRead + AsyncWrite + Unpin),
     cursor: Cursor,
     entries: u64,
     context: &Context,
@@ -533,8 +654,13 @@ async fn receive_snapshot(
     let mut digest = 0;
     let mut previous = None;
     loop {
+        let phase = if mutations.len() < entries as usize {
+            InternalPhase::SnapshotEntry
+        } else {
+            InternalPhase::SnapshotEnd
+        };
         let (frame, message) =
-            protocol::read_with_frame(socket, limits(context), config.frame_timeout).await?;
+            protocol::read_in_phase(socket, limits(context), config.frame_timeout, phase).await?;
         match message {
             Message::SnapshotEntry(mutation) if mutations.len() < entries as usize => {
                 if previous.as_ref().is_some_and(|key| key >= mutation.key()) {

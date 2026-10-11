@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use bytes::{Bytes, BytesMut};
 use thiserror::Error;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{Notify, mpsc, watch};
 
 use crate::command::{Command, Reply};
 use crate::metrics::{Counter, Metrics};
@@ -64,6 +64,7 @@ struct Entry {
     channels: BTreeSet<Bytes>,
     messages: mpsc::Sender<Message>,
     evicted: watch::Sender<bool>,
+    wake: Arc<Notify>,
 }
 
 impl State {
@@ -82,10 +83,13 @@ impl State {
             .unwrap_or_default();
         let mut accepted = 0;
         for id in members {
-            let sent = self
-                .subscribers
-                .get(&id)
-                .is_some_and(|entry| entry.messages.try_send(message.clone()).is_ok());
+            let sent = self.subscribers.get(&id).is_some_and(|entry| {
+                let sent = entry.messages.try_send(message.clone()).is_ok();
+                if sent {
+                    entry.wake.notify_one();
+                }
+                sent
+            });
             if sent {
                 accepted += 1;
             } else {
@@ -102,6 +106,7 @@ impl State {
             self.subscriptions -= entry.channels.len();
             self.active_subscribers -= usize::from(!entry.channels.is_empty());
             entry.evicted.send_replace(true);
+            entry.wake.notify_one();
             for channel in entry.channels {
                 if let Some(members) = self.channels.get_mut(&channel) {
                     members.remove(&id);
@@ -133,6 +138,7 @@ impl Hub {
     ) -> Result<Subscription, PubSubError> {
         let (messages, receiver) = mpsc::channel(capacity);
         let (evicted, eviction) = watch::channel(false);
+        let wake = Arc::new(Notify::new());
         let mut state = self.state.lock().expect("mutex Pub/Sub envenenado");
         let id = state.next_id;
         state.next_id = id.checked_add(1).ok_or(PubSubError::Closed)?;
@@ -142,6 +148,7 @@ impl Hub {
                 channels: BTreeSet::new(),
                 messages,
                 evicted,
+                wake: wake.clone(),
             },
         );
         Ok(Subscription {
@@ -150,6 +157,8 @@ impl Hub {
             max_channels,
             receiver,
             eviction,
+            resp3: false,
+            wake,
         })
     }
 
@@ -165,11 +174,13 @@ impl Hub {
 
 /// Connection guard: drop, cancellation, error, and EOF remove all subscriptions.
 pub(crate) struct Subscription {
+    pub(crate) resp3: bool,
     hub: Hub,
     id: u64,
     max_channels: usize,
     receiver: mpsc::Receiver<Message>,
     eviction: watch::Receiver<bool>,
+    wake: Arc<Notify>,
 }
 
 impl Drop for Subscription {
@@ -183,6 +194,66 @@ impl Drop for Subscription {
 }
 
 impl Subscription {
+    pub(crate) fn notifier(&self) -> Arc<Notify> {
+        self.wake.clone()
+    }
+
+    /// Reload removes revoked memberships and their pending notifications, keeping
+    /// the order of notifications whose authority survives the replacement.
+    pub(crate) fn revalidate(&mut self, policy: &crate::security::ClientPolicy, username: &str) {
+        let hub = self.hub.clone();
+        let mut state = hub.state.lock().expect("mutex Pub/Sub envenenado");
+        let revoked: Vec<_> = state
+            .subscribers
+            .get(&self.id)
+            .into_iter()
+            .flat_map(|entry| &entry.channels)
+            .filter(|channel| {
+                policy
+                    .authorize(
+                        username,
+                        b"SUBSCRIBE",
+                        &Command::Subscribe {
+                            channels: vec![(*channel).clone()],
+                        },
+                    )
+                    .is_err()
+            })
+            .cloned()
+            .collect();
+        let mut retained = Vec::new();
+        while let Ok(message) = self.receiver.try_recv() {
+            if policy
+                .authorize(
+                    username,
+                    b"SUBSCRIBE",
+                    &Command::Subscribe {
+                        channels: vec![message.channel.clone()],
+                    },
+                )
+                .is_ok()
+            {
+                retained.push(message);
+            }
+        }
+        if !revoked.is_empty() {
+            let _ = self.unsubscribe_locked(&mut state, revoked, false);
+        }
+        if let Some(entry) = state.subscribers.get(&self.id) {
+            for message in retained {
+                // Publication remains excluded by the registry mutex; the drain
+                // made room for this exact subset in the same bounded queue.
+                if entry.messages.try_send(message).is_err() {
+                    break;
+                }
+                entry.wake.notify_one();
+            }
+        }
+    }
+    pub(crate) fn id(&self) -> i64 {
+        i64::try_from(self.id).unwrap_or(i64::MAX)
+    }
+
     pub(crate) fn metrics(&self) -> &Metrics {
         &self.hub.metrics
     }
@@ -208,6 +279,7 @@ impl Subscription {
         self.receiver.try_recv().ok()
     }
 
+    #[cfg(test)]
     pub(crate) async fn message(&mut self) -> Option<Message> {
         tokio::select! {
             biased;
@@ -326,21 +398,29 @@ impl Subscription {
             unreachable!("prepare_batch always produces an array")
         };
         let command_count = commands.len();
+        let protocol = if self.resp3 { 3 } else { 2 };
         let mut frames = Vec::new();
         for (command, reply) in commands.into_iter().zip(replies) {
+            let response_command = self.resp3.then(|| command.clone());
             match command {
                 Command::Info(sections) => {
                     frames.push(Frame::Bulk(Some(hub.metrics.render(sections))))
                 }
                 Command::Subscribe { channels } => {
                     match self.subscribe_locked(&mut state, channels, false) {
-                        Ok(acks) => frames.extend(acks),
+                        Ok(acks) => frames.extend(
+                            acks.into_iter()
+                                .map(|frame| crate::command::push(frame, protocol)),
+                        ),
                         Err(error) => frames.push(Frame::Error(Bytes::from(error.to_string()))),
                     }
                 }
                 Command::Unsubscribe { channels } => {
                     match self.unsubscribe_locked(&mut state, channels, false) {
-                        Ok(acks) => frames.extend(acks),
+                        Ok(acks) => frames.extend(
+                            acks.into_iter()
+                                .map(|frame| crate::command::push(frame, protocol)),
+                        ),
                         Err(error) => frames.push(Frame::Error(Bytes::from(error.to_string()))),
                     }
                 }
@@ -362,18 +442,30 @@ impl Subscription {
                     if state
                         .subscribers
                         .get(&self.id)
-                        .is_some_and(|entry| !entry.channels.is_empty()) =>
+                        .is_some_and(|entry| !entry.channels.is_empty())
+                        && !self.resp3 =>
                 {
                     frames.push(Frame::Array(Some(vec![
                         Frame::Bulk(Some(Bytes::from_static(b"pong"))),
                         Frame::Bulk(Some(payload.unwrap_or_default())),
                     ])));
                 }
-                _ => frames.push(reply.into()),
+                _ => frames.push(if self.resp3 {
+                    crate::command::command_resp3(
+                        reply.into(),
+                        response_command.as_ref().expect("RESP3 command context"),
+                    )
+                } else {
+                    reply.into()
+                }),
             }
         }
         // Redis delays notifications to the same connection until all EXEC replies.
-        frames.extend(drain(&mut self.receiver));
+        frames.extend(
+            drain(&mut self.receiver)
+                .into_iter()
+                .map(|frame| crate::command::push(frame, protocol)),
+        );
         drop(state);
         for frame in &frames {
             hub.metrics.response(frame);
@@ -382,7 +474,7 @@ impl Subscription {
     }
 }
 
-/// SUBSCRIBE can produce multiple frames for one command in Redis RESP2 EXEC.
+/// SUBSCRIBE can produce multiple frames for one command in Redis EXEC.
 /// First validates/allocates the whole physical aggregate; then replaces only the
 /// header with the logical command count. The new header is never larger.
 fn encode_exec(
@@ -428,6 +520,36 @@ mod tests {
             channel: Bytes::from_static(channel),
             payload: Bytes::from_static(payload),
         }
+    }
+
+    #[test]
+    fn security_pubsub_reload_discards_only_revoked_notifications_in_order() {
+        let hub = Hub::default();
+        let mut subscriber = hub.connect(2, 4).unwrap();
+        subscriber
+            .subscribe(vec![Bytes::from_static(b"a"), Bytes::from_static(b"b")])
+            .unwrap();
+        for message in [
+            message(b"a", b"first"),
+            message(b"b", b"revoked"),
+            message(b"a", b"second"),
+        ] {
+            assert_eq!(hub.publish(message), 1);
+        }
+        let scope = serde_json::json!({"exact":[],"prefix":[]});
+        let policy = serde_json::json!({"version":1,"users":[{
+            "name":"Reader","credentials":[{"verifier":"$argon2id$v=19$m=65536,t=3,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","not_before":"2020-01-01T00:00:00Z","expires_at":"2100-01-01T00:00:00Z"}],
+            "commands":["SUBSCRIBE"],"read_keys":scope,"write_keys":scope,"publish_channels":scope,
+            "subscribe_channels":{"exact":["YQ=="],"prefix":[]},"info_sections":[]
+        }]});
+        let policy =
+            crate::security::ClientPolicy::parse(&serde_json::to_vec(&policy).unwrap()).unwrap();
+        subscriber.revalidate(&policy, "Reader");
+        assert_eq!(subscriber.try_message(), Some(message(b"a", b"first")));
+        assert_eq!(subscriber.try_message(), Some(message(b"a", b"second")));
+        assert!(subscriber.try_message().is_none());
+        assert_eq!(hub.publish(message(b"b", b"revoked")), 0);
+        assert_eq!(hub.publish(message(b"a", b"third")), 1);
     }
 
     #[test]

@@ -477,6 +477,9 @@ async fn corruption_layout_and_quota_are_rejected_before_destination_creation() 
 
 fn run_cli(args: Vec<std::ffi::OsString>) -> std::process::Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_sider-backup"));
+    command
+        .env("SIDER_SECURITY_PROFILE", "legacy-loopback")
+        .env_remove("SIDER_SECURITY_DIR");
     command.args(args);
     process::OwnedChild::spawn(&mut command)
         .unwrap()

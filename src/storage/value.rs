@@ -12,6 +12,7 @@ pub enum Value {
     List(Arc<VecDeque<Bytes>>),
     Set(Arc<BTreeSet<Bytes>>),
     SortedSet(Arc<super::SortedSet>),
+    Memory(Arc<super::memory::Collection>),
 }
 
 impl From<Bytes> for Value {
@@ -24,13 +25,16 @@ impl Value {
     pub fn as_string(&self) -> Option<&Bytes> {
         match self {
             Self::String(value) => Some(value),
-            Self::Hash(_) | Self::List(_) | Self::Set(_) | Self::SortedSet(_) => None,
+            Self::Hash(_) | Self::List(_) | Self::Set(_) | Self::SortedSet(_) | Self::Memory(_) => {
+                None
+            }
         }
     }
 
     /// Logical payload bytes; the per-key charge belongs to the Store.
     pub fn logical_bytes(&self) -> Option<usize> {
         match self {
+            Self::Memory(collection) => Some(collection.logical_bytes()),
             Self::String(value) => Some(value.len()),
             Self::Hash(fields) if !fields.is_empty() => {
                 fields.iter().try_fold(0usize, |total, (field, value)| {

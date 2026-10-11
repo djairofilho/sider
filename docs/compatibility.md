@@ -12,8 +12,12 @@ not compatibility with every Redis command or client.
 
 R02 added strings, SET options, TTL, and quota. This extension is described below
 and in the [strings guide](strings.md). Internal milestones retained Cargo version
-`0.1.0`; the current checkout prepares `1.0.0`, with separate candidate build
-validation before any publication.
+`0.1.0`. The [published 1.0.1 release](https://github.com/djairofilho/sider/releases/tag/v1.0.1)
+has separate candidate build evidence. The [deployment profile](deployment-profile.md)
+defines the currently supported operating environment.
+The current checkout also implements a [post-1.0.1 RESP3 subset](resp3.md),
+which is not included in that published binary. The
+[client integration audit](client-integration.md) applies to 1.0.1 RESP2 only.
 
 ## Version 0.1 matrix
 
@@ -105,9 +109,13 @@ arrays have distinct representations.
 Fragmented frames and concatenated commands have been handled since R01-04.
 Each connection processes commands sequentially, with one request in flight.
 
-## Current limitations and differences
+## Published 1.0.1 limitations and differences
 
-| Area | Current development contract |
+The table below describes the published 1.0.1 binary. The development checkout
+adds the separately documented [RESP3 subset](resp3.md); neither that work nor a
+future security profile changes the published artifact.
+
+| Area | Published 1.0.1 contract |
 | --- | --- |
 | `SET` options | NX, XX, EX, PX, GET, and KEEPTTL; EXAT, PXAT, and value conditions are outside the subset |
 | Unknown command | Return `ERR unknown command`, with simplified text that does not repeat arguments |
@@ -120,7 +128,7 @@ Each connection processes commands sequentially, with one request in flight.
 | Expiration | Basic EXPIRE and PEXPIRE; no NX, XX, GT, or LT; monotonic during execution |
 | Persistence and replication | Custom binary AOF and global snapshots; asynchronous Sider → Sider replication with the same version/configuration, no Redis replication or Redis Cluster |
 | Dataset memory | Custom logical quota with atomic rejection, no eviction; does not reproduce Redis maxmemory/RSS |
-| Operational use | Prototype for local development and tests, with a loopback default address |
+| Operational use | Controlled single-host profile with a loopback client listener; see the [deployment profile](deployment-profile.md) for durability and recovery limits |
 
 Input limits and deadlines are in the [networking guide](network.md).
 They are Sider-specific limits, not reproductions of Redis defaults.

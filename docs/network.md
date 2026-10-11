@@ -4,6 +4,10 @@ This guide describes the `R01-04` implementation: RESP2/TCP server, owning worke
 configuration, deadlines, and readiness. R02 adds string commands, expiration, and
 logical quota to the same network path. See the [compatibility matrix](compatibility.md)
 to distinguish implemented support from equivalence already demonstrated against Redis.
+The current checkout also has a [negotiated RESP3 subset](resp3.md) and staged
+[security implementation](security-implementation.md), which were not part of
+the published 1.0.1 package. The plaintext examples below require explicit
+`SIDER_SECURITY_PROFILE=legacy-loopback` in the current checkout.
 
 ## Contents
 
@@ -24,15 +28,19 @@ From the repository root, with the toolchain in `rust-toolchain.toml`:
 ```sh
 cargo run --locked -- --help
 cargo run --locked -- --version
-cargo run --locked
+SIDER_SECURITY_PROFILE=legacy-loopback cargo run --locked
 ```
 
-Without arguments, the binary starts the server at `127.0.0.1:6379`. It runs in the
+With that explicit development profile, the binary starts the server at
+`127.0.0.1:6379`. It runs in the
 foreground; use `Ctrl+C` to request shutdown. `--help` and `--version` do not open
 the listener. Unknown arguments, invalid configuration, and bind failure terminate
 the program with an error exit code.
 
-The default address is local. This version has no authentication, ACL, or TLS.
+The published 1.0.1 package and the development `legacy-loopback` profile have
+no authentication, ACL, or TLS. The current checkout defaults to `protected`,
+which requires a validated security generation; protected Windows startup and
+protected internal replication remain unavailable in this stage.
 Configuring an IP outside loopback emits a warning but neither blocks the bind nor
 adds protection. Use only a controlled environment, without public exposure.
 Startup, failure, and shutdown logs go to `stderr`, without logging request keys
@@ -42,17 +50,19 @@ To choose another port in PowerShell:
 
 ```powershell
 $env:SIDER_ADDR = '127.0.0.1:6380'
+$env:SIDER_SECURITY_PROFILE = 'legacy-loopback'
 try {
     cargo run --locked
 } finally {
     Remove-Item Env:SIDER_ADDR
+    Remove-Item Env:SIDER_SECURITY_PROFILE
 }
 ```
 
 In a POSIX shell:
 
 ```sh
-SIDER_ADDR=127.0.0.1:6380 cargo run --locked
+SIDER_SECURITY_PROFILE=legacy-loopback SIDER_ADDR=127.0.0.1:6380 cargo run --locked
 ```
 
 ## Configuration

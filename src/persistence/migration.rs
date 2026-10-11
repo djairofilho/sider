@@ -176,6 +176,11 @@ pub fn migrate_offline(
     options: MigrationOptions,
     clock: Arc<dyn Clock>,
 ) -> Result<MigrationReport, AofError> {
+    if options.source.is_memory_profile() || options.destination.is_memory_profile() {
+        return Err(AofError::Migration(
+            "record-2 offline migration is not activated",
+        ));
+    }
     options.source.validate()?;
     options.destination.validate()?;
     options.source_store.validate()?;

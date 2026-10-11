@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 pub use archive::{VerifiedBackup, restore, verify};
-pub use client::{ExportOptions, export, export_stream};
+pub use client::{ExportOptions, export, export_secure, export_stream};
 pub use manifest::Manifest;
 
 use super::{DurableLayout, format};

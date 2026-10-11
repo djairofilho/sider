@@ -47,6 +47,33 @@ impl ShardRouter {
         (stable_hash(hash_tag(key)) % self.count as u64) as usize
     }
 
+    /// Discovers every owner before a transaction is admitted. The fixed bitmap
+    /// bounds temporary metadata to MAX_SHARDS, independent of key occurrences.
+    /// Watched keys participate even when no queued command mentions them.
+    /// The original commands and duplicate key occurrences are not modified.
+    pub fn transaction_participants<'a>(
+        &self,
+        commands: &[Command],
+        watched: impl IntoIterator<Item = &'a [u8]>,
+    ) -> Vec<usize> {
+        let mut participants = [false; MAX_SHARDS];
+        for key in watched {
+            participants[self.shard_for(key)] = true;
+        }
+        for command in commands {
+            command.visit_keys(|key| participants[self.shard_for(key)] = true);
+        }
+        let mut owners: Vec<_> = participants[..self.count]
+            .iter()
+            .enumerate()
+            .filter_map(|(owner, present)| present.then_some(owner))
+            .collect();
+        if owners.is_empty() {
+            owners.push(0);
+        }
+        owners
+    }
+
     /// Checks all keys before selecting the queue. Commands without a key use
     /// worker zero; duplicates remain intact in the original command.
     pub fn route(&self, command: &Command) -> Result<usize, ExecutionError> {
@@ -88,6 +115,39 @@ impl ShardRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
+
+    #[test]
+    fn transaction_discovery_includes_watches_and_preserves_binary_occurrences() {
+        let keys = vec![
+            Bytes::new(),
+            Bytes::from_static(b"{\0\xff}a"),
+            Bytes::from_static(b"{\0\xff}b"),
+            Bytes::from_static(b"other"),
+            Bytes::from_static(b"other"),
+        ];
+        let commands = vec![Command::MGet { keys: keys.clone() }];
+        for count in [1, 4, MAX_SHARDS] {
+            let router = ShardRouter::new(count).unwrap();
+            let mut expected: Vec<_> = keys
+                .iter()
+                .map(|key| router.shard_for(key))
+                .chain([router.shard_for(b"watched-only")])
+                .collect();
+            expected.sort_unstable();
+            expected.dedup();
+            assert_eq!(
+                router.transaction_participants(&commands, [b"watched-only".as_slice()]),
+                expected
+            );
+            assert_eq!(commands, vec![Command::MGet { keys: keys.clone() }]);
+            assert_eq!(router.transaction_participants(&[], []), vec![0]);
+            assert_eq!(
+                router.transaction_participants(&[Command::Ping(None)], []),
+                vec![0]
+            );
+        }
+    }
 
     #[test]
     fn fixed_hash_vectors_and_binary_tags() {

@@ -539,6 +539,27 @@ pub async fn read_with_frame(
     limits: Limits,
     deadline: Duration,
 ) -> Result<(Bytes, Message), Error> {
+    read_authorized(input, limits, deadline, |_| true).await
+}
+
+/// Receives only frame kinds permitted by the admitted operation's next phase.
+pub async fn read_in_phase(
+    input: &mut (impl AsyncRead + Unpin),
+    limits: Limits,
+    deadline: Duration,
+    phase: crate::security::InternalPhase,
+) -> Result<(Bytes, Message), Error> {
+    read_authorized(input, limits, deadline, |kind| phase.permits(kind)).await
+}
+
+/// Checks message kind and direction after the bounded header and before payload allocation.
+/// The caller derives authority from a verified certificate and exact internal policy.
+pub async fn read_authorized(
+    input: &mut (impl AsyncRead + Unpin),
+    limits: Limits,
+    deadline: Duration,
+    authorize_kind: impl FnOnce(u8) -> bool,
+) -> Result<(Bytes, Message), Error> {
     if deadline.is_zero() || tokio::time::Instant::now().checked_add(deadline).is_none() {
         return Err(Error::Limit);
     }
@@ -546,7 +567,10 @@ pub async fn read_with_frame(
     tokio::time::timeout(deadline, async {
         let mut prefix = [0; HEADER_BYTES];
         input.read_exact(&mut prefix).await?;
-        let (_, size) = header(&prefix, limits)?;
+        let (kind, size) = header(&prefix, limits)?;
+        if !authorize_kind(kind) {
+            return Err(Error::Invalid("permission denied"));
+        }
         let mut frame = vec![0; HEADER_BYTES + size];
         frame[..HEADER_BYTES].copy_from_slice(&prefix);
         input.read_exact(&mut frame[HEADER_BYTES..]).await?;
@@ -568,8 +592,11 @@ pub async fn write(
         return Err(Error::Limit);
     }
     let frame = encode(message, limits)?;
-    tokio::time::timeout(deadline, output.write_all(&frame))
-        .await
-        .map_err(|_| Error::Timeout)??;
+    tokio::time::timeout(deadline, async {
+        output.write_all(&frame).await?;
+        output.flush().await
+    })
+    .await
+    .map_err(|_| Error::Timeout)??;
     Ok(())
 }

@@ -75,6 +75,7 @@ impl Node {
             }
         }
         command
+            .env("SIDER_SECURITY_PROFILE", "legacy-loopback")
             .env("SIDER_ADDR", "127.0.0.1:0")
             .env("SIDER_READY_FILE", directory.join("resp.json"))
             .env(
@@ -119,7 +120,9 @@ impl Node {
         let read = |name| {
             let value: serde_json::Value =
                 serde_json::from_slice(&fs::read(directory.join(name)).unwrap()).unwrap();
-            assert_eq!(value.as_object().unwrap().len(), 3);
+            assert_eq!(value.as_object().unwrap().len(), 5);
+            assert_eq!(value["transport_mode"], "plaintext");
+            assert_eq!(value["authentication_required"], false);
             assert_eq!(value["pid"], child.id());
             let address: SocketAddr =
                 format!("{}:{}", value["host"].as_str().unwrap(), value["port"])
@@ -884,11 +887,10 @@ async fn delayed_promotion_case() -> serde_json::Value {
         Response::Bulk(None)
     );
     let output = process::run(
-        Command::new(env!("CARGO_BIN_EXE_sider-replica")).args([
-            "--addr",
-            &replica.internal.to_string(),
-            "--promote",
-        ]),
+        Command::new(env!("CARGO_BIN_EXE_sider-replica"))
+            .env("SIDER_SECURITY_PROFILE", "legacy-loopback")
+            .env_remove("SIDER_SECURITY_DIR")
+            .args(["--addr", &replica.internal.to_string(), "--promote"]),
         DEADLINE,
     )
     .unwrap();

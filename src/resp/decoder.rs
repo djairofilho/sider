@@ -16,7 +16,10 @@ enum Node {
     Error(Payload),
     Integer(i64),
     Bulk(Option<Payload>),
-    Array(Option<usize>),
+    Array(Option<usize>, u8),
+    Scalar(u8, Payload),
+    Null,
+    Boolean(bool),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -31,10 +34,14 @@ struct Line {
 enum State {
     Prefix,
     Line(Line),
-    Bulk { payload: Payload, saw_cr: bool },
+    Bulk {
+        payload: Payload,
+        saw_cr: bool,
+        kind: u8,
+    },
 }
 
-/// RESP2 decoder owned by one connection.
+/// RESP2/RESP3 decoder owned by one connection.
 ///
 /// While [`Self::decode`] returns `Ok(None)`, the caller may only append bytes to the
 /// same content. Do not remove or modify the prefix already supplied. `BytesMut`
@@ -132,10 +139,28 @@ impl Decoder {
                     let Some(&kind) = src.get(self.cursor) else {
                         return Ok(false);
                     };
-                    if !matches!(kind, b'+' | b'-' | b':' | b'$' | b'*') {
+                    if !matches!(
+                        kind,
+                        b'+' | b'-'
+                            | b':'
+                            | b'$'
+                            | b'*'
+                            | b'_'
+                            | b'#'
+                            | b','
+                            | b'('
+                            | b'!'
+                            | b'='
+                            | b'%'
+                            | b'~'
+                            | b'>'
+                            | b'|'
+                    ) {
                         return Err(ProtocolError::Malformed("unknown prefix"));
                     }
-                    if kind == b'*' && self.arrays.len() >= self.limits.max_depth {
+                    if matches!(kind, b'*' | b'%' | b'~' | b'>' | b'|')
+                        && self.arrays.len() >= self.limits.max_depth
+                    {
                         return Err(ProtocolError::LimitExceeded("max_depth"));
                     }
                     self.nodes_started = self
@@ -197,6 +222,7 @@ impl Decoder {
                 State::Bulk {
                     payload,
                     mut saw_cr,
+                    kind,
                 } => {
                     // The payload is binary: advance over new bytes without inspecting
                     // its content or recopying it for each fragment.
@@ -214,7 +240,17 @@ impl Decoder {
                         if byte != b'\n' {
                             return Err(ProtocolError::Malformed("invalid bulk terminator"));
                         }
-                        self.nodes.push(Node::Bulk(Some(payload)));
+                        if kind == b'$' {
+                            self.nodes.push(Node::Bulk(Some(payload)));
+                        } else {
+                            if kind == b'='
+                                && (payload.end - payload.start < 4
+                                    || src[payload.start + 3] != b':')
+                            {
+                                return Err(ProtocolError::Malformed("invalid verbatim format"));
+                            }
+                            self.nodes.push(Node::Scalar(kind, payload));
+                        }
                         if self.finish_node()? {
                             return Ok(true);
                         }
@@ -223,7 +259,11 @@ impl Decoder {
                             return Err(ProtocolError::Malformed("invalid bulk terminator"));
                         }
                         saw_cr = true;
-                        self.state = State::Bulk { payload, saw_cr };
+                        self.state = State::Bulk {
+                            payload,
+                            saw_cr,
+                            kind,
+                        };
                     }
                 }
             }
@@ -247,14 +287,43 @@ impl Decoder {
                 }
                 self.nodes.push(Node::Integer(parse_integer(bytes)?));
             }
-            b'$' | b'*' => {
+            b'_' => {
+                if payload.start != payload.end {
+                    return Err(ProtocolError::Malformed("invalid null"));
+                }
+                self.nodes.push(Node::Null);
+            }
+            b'#' => {
+                self.nodes
+                    .push(Node::Boolean(match payload_slice(src, payload)? {
+                        b"t" => true,
+                        b"f" => false,
+                        _ => return Err(ProtocolError::Malformed("invalid boolean")),
+                    }));
+            }
+            b',' | b'(' => {
+                validate_scalar(kind, payload_slice(src, payload)?)?;
+                self.nodes.push(Node::Scalar(kind, payload));
+            }
+            b'$' | b'*' | b'!' | b'=' | b'%' | b'~' | b'>' | b'|' => {
                 let bytes = payload_slice(src, payload)?;
                 #[cfg(test)]
                 {
                     self.work += bytes.len();
                 }
-                let length = parse_length(bytes)?;
-                if kind == b'$' {
+                let mut length = parse_length(bytes)?;
+                if kind != b'$' && kind != b'*' && length.is_none() {
+                    return Err(ProtocolError::Malformed("null RESP3 length"));
+                }
+                if matches!(kind, b'%' | b'|') {
+                    length = length
+                        .map(|n| {
+                            n.checked_mul(2)
+                                .ok_or(ProtocolError::LimitExceeded("max_nodes"))
+                        })
+                        .transpose()?;
+                }
+                if matches!(kind, b'$' | b'!' | b'=') {
                     if let Some(length) = length {
                         if length > self.limits.max_bulk_bytes {
                             return Err(ProtocolError::LimitExceeded("max_bulk_bytes"));
@@ -267,6 +336,7 @@ impl Decoder {
                                 end,
                             },
                             saw_cr: false,
+                            kind,
                         };
                         return Ok(false);
                     }
@@ -292,7 +362,7 @@ impl Decoder {
                             .ok_or(ProtocolError::LimitExceeded("max_frame_bytes"))?;
                         self.require_frame_end(checked_add(self.cursor, minimum_bytes)?)?;
                     }
-                    self.nodes.push(Node::Array(length));
+                    self.nodes.push(Node::Array(length, kind));
                     if let Some(length) = length.filter(|length| *length > 0) {
                         self.arrays.push(length);
                         self.state = State::Prefix;
@@ -346,8 +416,20 @@ impl Decoder {
                 Node::Integer(value) => Frame::Integer(value),
                 Node::Bulk(None) => Frame::Bulk(None),
                 Node::Bulk(Some(payload)) => Frame::Bulk(Some(copy_payload(src, payload)?)),
-                Node::Array(None) => Frame::Array(None),
-                Node::Array(Some(length)) => {
+                Node::Array(None, _) => Frame::Array(None),
+                Node::Null => Frame::Null,
+                Node::Boolean(value) => Frame::Boolean(value),
+                Node::Scalar(kind, payload) => {
+                    let value = copy_payload(src, payload)?;
+                    match kind {
+                        b',' => Frame::Double(value),
+                        b'(' => Frame::BigNumber(value),
+                        b'!' => Frame::BlobError(value),
+                        b'=' => Frame::Verbatim(value),
+                        _ => return Err(ProtocolError::Malformed("unknown scalar")),
+                    }
+                }
+                Node::Array(Some(length), kind) => {
                     let mut children = Vec::with_capacity(length);
                     for _ in 0..length {
                         children.push(
@@ -356,7 +438,13 @@ impl Decoder {
                                 .ok_or(ProtocolError::Malformed("incomplete array"))?,
                         );
                     }
-                    Frame::Array(Some(children))
+                    match kind {
+                        b'%' => Frame::Map(children),
+                        b'~' => Frame::Set(children),
+                        b'>' => Frame::Push(children),
+                        b'|' => Frame::Attribute(children),
+                        _ => Frame::Array(Some(children)),
+                    }
                 }
             };
             frames.push(frame);
@@ -368,6 +456,25 @@ impl Decoder {
             return Err(ProtocolError::Malformed("frame with multiple roots"));
         }
         Ok(result)
+    }
+}
+
+pub(super) fn validate_scalar(kind: u8, bytes: &[u8]) -> Result<(), ProtocolError> {
+    let valid = if kind == b'(' {
+        let digits = bytes.strip_prefix(b"-").unwrap_or(bytes);
+        !digits.is_empty() && digits.iter().all(u8::is_ascii_digit)
+    } else {
+        matches!(bytes, b"inf" | b"-inf" | b"nan")
+            || (std::str::from_utf8(bytes)
+                .ok()
+                .and_then(|s| s.parse::<f64>().ok())
+                .is_some_and(f64::is_finite)
+                && !bytes.iter().any(u8::is_ascii_whitespace))
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(ProtocolError::Malformed("invalid RESP3 scalar"))
     }
 }
 

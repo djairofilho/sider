@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "seed": 27688995,
+  "generator": "LCG64 multiplier 6364136223846793005 increment 1; emit the low 8 bits of the high 32-bit word",
+  "repetitions": 3,
+  "warmup_operations": 0,
+  "sample_interval_ms": 100,
+  "shards": [1, 4],
+  "aof_policies": ["off", "always", "everysec"],
+  "quota_bytes": 67108864,
+  "worker_queue_capacity": 8,
+  "saturation": {
+    "clients": 8,
+    "operations_per_client": 128,
+    "key_distribution": "shared_keyspace",
+    "key_count": 256,
+    "value_bytes": 128
+  },
+  "large_values": {
+    "value_bytes": 262144,
+    "round_trips": 16
+  },
+  "slow_client": {
+    "seed": 5311518,
+    "queue_capacity": 8,
+    "message_bytes": 65536,
+    "publications": 256
+  },
+  "expiration": {
+    "keys": 128,
+    "ttl_ms": 1000,
+    "settle_timeout_ms": 10000
+  },
+  "compaction": {
+    "after_bytes": 262144,
+    "value_bytes": 2048,
+    "writes": 256,
+    "observe_timeout_ms": 30000
+  }
+}

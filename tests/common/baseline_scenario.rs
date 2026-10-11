@@ -68,6 +68,7 @@ pub fn server_command(
         }
     }
     command
+        .env("SIDER_SECURITY_PROFILE", "legacy-loopback")
         .env("SIDER_ADDR", "127.0.0.1:0")
         .env("SIDER_READY_FILE", control.join("resp.json"))
         .env("SIDER_REPLICATION_ADDR", "127.0.0.1:0")
@@ -124,10 +125,15 @@ impl Node {
                 &fs::read(control.0.join(name)).map_err(|error| error.to_string())?,
             )
             .map_err(|error| error.to_string())?;
-            if value.as_object().is_none_or(|fields| fields.len() != 3)
-                || value["pid"] != child.id()
-                || value["host"] != "127.0.0.1"
-            {
+            // The frozen 1.0.1 baseline has three fields; current candidates also
+            // report explicit legacy transport state. Neither shape permits extras.
+            let valid_shape = value.as_object().is_some_and(|fields| {
+                fields.len() == 3
+                    || fields.len() == 5
+                        && value["transport_mode"] == "plaintext"
+                        && value["authentication_required"] == false
+            });
+            if !valid_shape || value["pid"] != child.id() || value["host"] != "127.0.0.1" {
                 return Err("readiness does not belong to the started child".into());
             }
             let port = value["port"]
@@ -164,11 +170,10 @@ impl Node {
     }
     pub fn status(&self, package: &Path) -> Result<Value> {
         let output = package::run(
-            Command::new(package.join(package::filename("sider-replica"))).args([
-                "--addr",
-                &self.internal.to_string(),
-                "--status",
-            ]),
+            Command::new(package.join(package::filename("sider-replica")))
+                .env("SIDER_SECURITY_PROFILE", "legacy-loopback")
+                .env_remove("SIDER_SECURITY_DIR")
+                .args(["--addr", &self.internal.to_string(), "--status"]),
         )?;
         serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
     }
@@ -400,6 +405,8 @@ pub fn check_state(node: &Node, tags: &[String]) -> Result<(u64, String)> {
 pub fn export(package: &Path, node: &Node, destination: &Path, sha: &str) -> Result<Value> {
     let output = package::run(
         Command::new(package.join(package::filename("sider-backup")))
+            .env("SIDER_SECURITY_PROFILE", "legacy-loopback")
+            .env_remove("SIDER_SECURITY_DIR")
             .arg("export")
             .arg("--source")
             .arg(node.internal.to_string())
@@ -426,6 +433,9 @@ pub fn backup_action(
     shards: u32,
 ) -> Result<Value> {
     let mut command = Command::new(package.join(package::filename("sider-backup")));
+    command
+        .env("SIDER_SECURITY_PROFILE", "legacy-loopback")
+        .env_remove("SIDER_SECURITY_DIR");
     command.arg(action).arg("--source").arg(source).args([
         "--shards",
         &shards.to_string(),

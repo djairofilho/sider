@@ -1,5 +1,11 @@
 # Sider → Sider replication
 
+This procedure describes the published 1.0.1 package. The current checkout's
+protected executable with an internal listener is unavailable until the
+[security implementation](security-implementation.md) completes internal
+revocation. Use its explicit `legacy-loopback` profile only in a controlled
+development environment.
+
 Sider asynchronously replicates strings, hashes, lists, sets, sorted sets,
 absolute deadlines, and resolved transactional batches. Instances require the
 same Sider version, record format, and shard configuration.
@@ -16,7 +22,8 @@ it cannot predict writes that have not yet been observed.
 
 Replication requires AOF on both instances. Each process uses its own data directory.
 The internal listener serves replication, snapshot export, and administration.
-It has no authentication or TLS; use loopback or a controlled private network.
+The published 1.0.1 listener has no authentication or TLS; use loopback or a
+controlled private network.
 The epoch identifies stream continuity without authenticating the operator or machine.
 
 Example primary on Linux with four shards:
@@ -83,11 +90,13 @@ preserves the previous state. The received snapshot stays in memory bounded by t
 advertised budget; the temporary AOF file is created during installation.
 
 Installation publishes a new AOF generation with data, sequence, role, and epoch.
-Only then does it replace all maps under the global barrier. An accepted read sees
-either the previous state or the complete new state. Canceling the connection does
-not abandon an already accepted installation midway through this switch. On restart,
-recovery selects the published generation and removes unpublished installation
-temporary files.
+Only then does it replace all maps under the global barrier. On successful
+installation, an accepted read sees either the previous state or the complete
+new state. A postpublication owner failure violated this guarantee in the
+1.0.1 source path; see the development repair note below. Canceling the
+connection does not abandon an already accepted installation midway through
+this switch. On restart, recovery selects the published generation and removes
+unpublished installation temporary files.
 
 After the snapshot, the primary sends batches of resolved postimages in sequence.
 The replica sends an ACK only after persisting, applying, and synchronizing the batch.
@@ -196,3 +205,10 @@ observed convergence and lag measurements before promotion. It issues a receipt 
 with valid release context at the exact SHA, according to the [release guide](releases.md).
 Local tests do not automatically approve candidate gates or replace tests on the
 distributed packages and image.
+
+The development checkout also has a fault test for failure of one owner after
+durable snapshot publication. Against the source at `0f0f232`, the test exposed
+a partial in-memory install: another owner could serve the new value while the
+applied cursor was still old. The admission repair closes new command admission
+after an incomplete publication and passed the fault test and local suite. It is
+unreleased; operators must not infer this repair is present in the 1.0.1 package.

@@ -4,7 +4,7 @@ use std::{
     fmt::Write,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::Instant,
 };
@@ -40,8 +40,10 @@ pub(crate) enum Counter {
     PubSubDeliveries,
     ExpirationBatches,
     ExpirationKeys,
+    AuthenticationFailures,
+    AuthorizationDenials,
 }
-const COUNTERS: usize = 15;
+const COUNTERS: usize = 17;
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct DatasetStats {
@@ -54,6 +56,7 @@ pub(crate) struct DatasetStats {
 #[derive(Clone)]
 pub(crate) struct Metrics(Arc<Inner>);
 struct Inner {
+    protected: AtomicBool,
     began: Instant,
     counters: [AtomicU64; COUNTERS],
     connections: AtomicU64,
@@ -79,6 +82,7 @@ impl Default for Metrics {
 impl Metrics {
     pub(crate) fn new(shards: usize, capacity: usize) -> Self {
         Self(Arc::new(Inner {
+            protected: AtomicBool::new(false),
             began: Instant::now(),
             counters: std::array::from_fn(|_| AtomicU64::new(0)),
             connections: AtomicU64::new(0),
@@ -122,6 +126,9 @@ impl Metrics {
             .lock()
             .expect("metrics configuration lock poisoned") = Some(config.clone());
         self.0.bound_port.store(u64::from(port), Ordering::Relaxed);
+    }
+    pub(crate) fn configure_security(&self, protected: bool) {
+        self.0.protected.store(protected, Ordering::Relaxed);
     }
     pub(crate) fn dataset(&self, shard: usize, value: DatasetStats) {
         *self.0.datasets[shard]
@@ -168,6 +175,18 @@ impl Metrics {
             text.push_str("# Server\r\n");
             number!("sider_version", env!("CARGO_PKG_VERSION"));
             number!("metrics_schema_version", 1);
+            number!(
+                "transport_mode",
+                if self.0.protected.load(Ordering::Relaxed) {
+                    "tls"
+                } else {
+                    "plaintext"
+                }
+            );
+            number!(
+                "authentication_required",
+                usize::from(self.0.protected.load(Ordering::Relaxed))
+            );
             number!("uptime_seconds", self.0.began.elapsed().as_secs());
             number!("tcp_port", self.0.bound_port.load(Ordering::Relaxed));
         }
@@ -206,6 +225,14 @@ impl Metrics {
                 self.count(Counter::ErrorReplies)
             );
             number!("protocol_errors_total", self.count(Counter::ProtocolErrors));
+            number!(
+                "authentication_failures_total",
+                self.count(Counter::AuthenticationFailures)
+            );
+            number!(
+                "authorization_denials_total",
+                self.count(Counter::AuthorizationDenials)
+            );
             number!(
                 "connection_failures_total",
                 self.count(Counter::ConnectionFailures)

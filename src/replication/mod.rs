@@ -27,6 +27,8 @@ pub fn new_epoch() -> Result<[u8; 16], std::io::Error> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("internal authentication or authorization failed")]
+    Security(#[from] crate::security::Error),
     #[error("replication I/O: {0}")]
     Io(#[from] std::io::Error),
     #[error("replication protocol: {0}")]

@@ -123,6 +123,7 @@ fn sider(binary: &Path) -> Command {
             command.env_remove(name);
         }
     }
+    command.env("SIDER_SECURITY_PROFILE", "legacy-loopback");
     command
 }
 
@@ -182,9 +183,12 @@ fn parse_readiness(bytes: &[u8], pid: u32) -> Result<SocketAddr, String> {
     }
     let value: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|e| format!("invalid readiness JSON: {e}"))?;
-    if value.as_object().is_none_or(|o| o.len() != 3)
-        || value["pid"].as_u64() != Some(u64::from(pid))
-    {
+    let valid_shape = value.as_object().is_some_and(|o| {
+        o.len() == 5
+            && value["transport_mode"] == "plaintext"
+            && value["authentication_required"] == false
+    });
+    if !valid_shape || value["pid"].as_u64() != Some(u64::from(pid)) {
         return Err("readiness does not uniquely identify the expected PID".into());
     }
     let ip: IpAddr = value["host"]
@@ -270,7 +274,7 @@ mod tests {
 
     #[test]
     fn readiness_rejects_wrong_pid_host_port_shape_and_partial_json() {
-        let valid = json!({"pid":123,"host":"127.0.0.1","port":23456});
+        let valid = json!({"pid":123,"host":"127.0.0.1","port":23456,"transport_mode":"plaintext","authentication_required":false});
         assert_eq!(
             parse_readiness(&serde_json::to_vec(&valid).unwrap(), 123).unwrap(),
             "127.0.0.1:23456".parse().unwrap()
@@ -283,6 +287,8 @@ mod tests {
             ("port", json!(65536)),
             ("port", json!("23456")),
             ("extra", json!(true)),
+            ("transport_mode", json!("tls")),
+            ("authentication_required", json!(true)),
         ] {
             let mut value = valid.clone();
             value[field] = wrong;

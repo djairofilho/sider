@@ -16,6 +16,8 @@ fn main() -> ExitCode {
                  --diagnose: validate configuration without starting the server or accessing the AOF.\n\
                  SIDER_ADDR: IP address and port (default: 127.0.0.1:6379).\n\
                  SIDER_READY_FILE: optional readiness JSON file.\n\
+                 SIDER_SECURITY_PROFILE: protected (default) or explicit legacy-loopback.\n\
+                 SIDER_SECURITY_DIR: absolute restricted directory with a complete protected generation.\n\
                  Limits: SIDER_MAX_CONNECTIONS, SIDER_WORKER_QUEUE_CAPACITY,\n\
                  SIDER_PUBSUB_MAX_CHANNELS, SIDER_PUBSUB_QUEUE_CAPACITY,\n\
                  SIDER_TRANSACTION_MAX_COMMANDS, SIDER_TRANSACTION_MAX_BYTES, SIDER_WATCH_MAX_KEYS,\n\
@@ -33,10 +35,16 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         [flag] if flag == "--diagnose" => match ServerConfig::from_env() {
-            Ok(config) => {
-                print!("{}", config.diagnostic());
-                ExitCode::SUCCESS
-            }
+            Ok(config) => match sider::security::StartupSecurity::from_env() {
+                Ok(security) => {
+                    print!("{}{}", config.diagnostic(), security.diagnostic());
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("invalid configuration: {error}");
+                    ExitCode::FAILURE
+                }
+            },
             Err(error) => {
                 // A malformed variable's value may contain sensitive data.
                 let reason = match &error {
@@ -94,15 +102,50 @@ fn start(config: ServerConfig) -> ExitCode {
 }
 
 async fn run(config: ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
+    let security = sider::security::StartupSecurity::from_env()?;
+    // Complete permission, manifest, policy, and TLS validation precedes recovery,
+    // listener binds, readiness, and any outgoing internal connection.
+    let generation = security.server(&config)?;
     // Register signals before publishing readiness to avoid missing an immediate shutdown.
     let shutdown = shutdown_signal()?;
     let prepared = server::prepare(&config).await?;
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
     let address = listener.local_addr()?;
-    if !address.ip().is_loopback() {
-        tracing::warn!("non-loopback address; server has no authentication or TLS");
+    if let Some(generation) = generation {
+        tracing::info!(
+            generation = generation.number,
+            "protected profile: TLS and authentication required"
+        );
+        let (client, internal, reload) = if generation.internal.is_none() {
+            let runtime = sider::security::ClientRuntime::new(generation)?;
+            let client = runtime.client().await;
+            let (stop, shutdown) = tokio::sync::watch::channel(false);
+            let directory = security
+                .directory()
+                .ok_or(sider::security::Error::Configuration)?;
+            let task = tokio::spawn(async move { runtime.poll(directory, shutdown).await });
+            (client, None, Some((stop, task)))
+        } else {
+            (
+                generation
+                    .client
+                    .ok_or(sider::security::Error::Configuration)?,
+                generation.internal,
+                None,
+            )
+        };
+        let result =
+            server::serve_secure_prepared(listener, config, shutdown, prepared, client, internal)
+                .await;
+        if let Some((stop, task)) = reload {
+            stop.send_replace(true);
+            task.await?;
+        }
+        result?;
+    } else {
+        tracing::warn!(%address, internal=?config.replication.as_ref().map(|r| r.listen), "legacy-loopback profile: plaintext and unauthenticated");
+        server::serve_prepared(listener, config, shutdown, prepared).await?;
     }
-    server::serve_prepared(listener, config, shutdown, prepared).await?;
     Ok(())
 }
 

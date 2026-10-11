@@ -13,7 +13,7 @@ use crate::metrics::{Counter, Metrics};
 use crate::pubsub::Subscription;
 use crate::resp::{EncodeError, Frame, RespLimits, encode};
 
-use super::{Store, WatchToken, routing::ShardRouter};
+use super::{Clock, Store, WatchToken, routing::ShardRouter};
 
 #[cfg(test)]
 #[path = "transaction_tests.rs"]
@@ -31,25 +31,38 @@ pub enum DbError {
     /// Shutdown started before accepting this request.
     #[error("server shutting down")]
     ShuttingDown,
+    /// Credential or transport expiry before queue acceptance has no effects.
+    #[error("security admission expired")]
+    SecurityExpired,
 }
 
 /// Internal envelope; the command enum remains independent of channels.
 pub(crate) enum Request {
+    Memory {
+        key: bytes::Bytes,
+        operation: super::memory::Operation,
+        reply: oneshot::Sender<Result<Reply, DbError>>,
+        _admission: OwnedRwLockReadGuard<()>,
+        _security: Option<crate::security::ClientLease>,
+    },
     Execute {
         command: Command,
         reply: oneshot::Sender<Result<Reply, DbError>>,
         _admission: OwnedRwLockReadGuard<()>,
+        _security: Option<crate::security::ClientLease>,
     },
     Batch {
         commands: Vec<Command>,
         watched: Vec<WatchToken>,
         reply: oneshot::Sender<Result<Reply, DbError>>,
         _admission: OwnedRwLockReadGuard<()>,
+        _security: Option<crate::security::ClientLease>,
     },
     Watch {
         keys: Vec<bytes::Bytes>,
         reply: oneshot::Sender<Result<(Reply, Vec<WatchToken>), DbError>>,
         _admission: OwnedRwLockReadGuard<()>,
+        _security: Option<crate::security::ClientLease>,
     },
     Transaction {
         commands: Vec<Command>,
@@ -58,6 +71,7 @@ pub(crate) enum Request {
         limits: RespLimits,
         reply: oneshot::Sender<Result<TransactionReply, DbError>>,
         _admission: OwnedRwLockReadGuard<()>,
+        _security: Option<crate::security::ClientLease>,
     },
 }
 
@@ -66,9 +80,22 @@ pub(crate) struct TransactionReply {
     pub output: Result<bytes::Bytes, EncodeError>,
 }
 
-fn encode_reply(reply: Reply, limits: RespLimits) -> Result<bytes::Bytes, EncodeError> {
+fn encode_reply(
+    reply: Reply,
+    limits: RespLimits,
+    resp3: bool,
+) -> Result<bytes::Bytes, EncodeError> {
     let mut bytes = bytes::BytesMut::new();
-    encode(&Frame::from(reply), &mut bytes, limits)?;
+    let frame = Frame::from(reply);
+    encode(
+        &if resp3 {
+            crate::command::resp3(frame)
+        } else {
+            frame
+        },
+        &mut bytes,
+        limits,
+    )?;
     Ok(bytes.freeze())
 }
 
@@ -77,10 +104,12 @@ fn encode_reply(reply: Reply, limits: RespLimits) -> Result<bytes::Bytes, Encode
 pub struct DbHandle {
     pub(crate) metrics: Metrics,
     requests: Vec<mpsc::Sender<Request>>,
+    security_lease: Option<crate::security::ClientLease>,
     router: ShardRouter,
     pub(super) request_timeout: Duration,
     pub(super) shutdown: watch::Receiver<bool>,
     pub(super) barrier: Arc<RwLock<()>>,
+    pub(super) admission: super::admission::Admission,
     pub(super) snapshots: Vec<mpsc::Sender<oneshot::Sender<Vec<super::Mutation>>>>,
     pub(super) controls: Vec<mpsc::Sender<super::replication::Control>>,
     replication: Option<crate::replication::state::Runtime>,
@@ -98,6 +127,7 @@ pub struct Worker {
     requests: mpsc::Receiver<Request>,
     shutdown: watch::Receiver<bool>,
     barrier: Arc<RwLock<()>>,
+    admission: super::admission::Admission,
     snapshots: mpsc::Receiver<oneshot::Sender<Vec<super::Mutation>>>,
     controls: mpsc::Receiver<super::replication::Control>,
     replication: Option<crate::replication::state::Runtime>,
@@ -161,6 +191,7 @@ pub fn channel_with_stores(
     let mut snapshots = Vec::with_capacity(stores.len());
     let mut controls = Vec::with_capacity(stores.len());
     let barrier = Arc::new(RwLock::new(()));
+    let admission = super::admission::Admission::default();
     let shard_count = stores.len();
     let metrics = Metrics::new(stores.len(), capacity);
     for (shard, store) in stores.into_iter().enumerate() {
@@ -182,6 +213,7 @@ pub fn channel_with_stores(
             requests: receiver,
             shutdown: shutdown.clone(),
             barrier: barrier.clone(),
+            admission: admission.clone(),
             snapshots: snapshot_receiver,
             controls: control_receiver,
             replication: None,
@@ -191,10 +223,12 @@ pub fn channel_with_stores(
         DbHandle {
             metrics,
             requests: senders,
+            security_lease: None,
             router,
             request_timeout,
             shutdown: shutdown.clone(),
             barrier,
+            admission,
             snapshots,
             controls,
             replication: None,
@@ -204,7 +238,43 @@ pub fn channel_with_stores(
 }
 
 impl DbHandle {
-    pub(crate) fn info(&self, sections: crate::command::InfoSections) -> bytes::Bytes {
+    pub(crate) fn authorized(&self, lease: Option<crate::security::ClientLease>) -> Self {
+        let mut handle = self.clone();
+        handle.security_lease = lease;
+        handle
+    }
+
+    /// Native and RESP2 lifecycle over the existing bounded owning-worker queue.
+    /// Legacy AOF workers refuse this API; record-2 requires explicit development opt-in.
+    /// MEM commands are not queueable in MULTI. Durable opt-in remains library-only.
+    pub async fn execute_memory(
+        &self,
+        key: bytes::Bytes,
+        operation: super::memory::Operation,
+    ) -> Result<Reply, DbError> {
+        let shard = self.router.shard_for(&key);
+        self.request(shard, |reply, _admission| Request::Memory {
+            key,
+            operation,
+            reply,
+            _admission,
+            _security: self.security_lease.clone(),
+        })
+        .await
+    }
+
+    pub(crate) fn check_admission(&self) -> Result<(), DbError> {
+        self.admission.check()
+    }
+
+    pub(crate) async fn info(
+        &self,
+        sections: crate::command::InfoSections,
+    ) -> Result<bytes::Bytes, DbError> {
+        let deadline = Instant::now()
+            .checked_add(self.request_timeout)
+            .ok_or(DbError::Timeout)?;
+        let _admission = self.read_admission(deadline).await?;
         for (shard, queue) in self.requests.iter().enumerate() {
             self.metrics.queue(
                 shard,
@@ -212,7 +282,7 @@ impl DbHandle {
                 queue.max_capacity(),
             );
         }
-        self.metrics.render(sections)
+        Ok(self.metrics.render(sections))
     }
 
     pub fn with_replication(mut self, replication: crate::replication::state::Runtime) -> Self {
@@ -244,6 +314,9 @@ impl DbHandle {
     /// [`DbError::Timeout`] never promises the absence of effects. Shutdown cancels
     /// only sends not yet accepted; accepted replies keep their original deadline.
     pub async fn execute(&self, command: Command) -> Result<Reply, DbError> {
+        if let Command::Memory { key, operation } = command {
+            return self.execute_memory(key, *operation).await;
+        }
         let shard = match self.router.route(&command) {
             Ok(shard) => shard,
             Err(error) => return Ok(Reply::Error(error)),
@@ -252,6 +325,7 @@ impl DbHandle {
             command,
             reply,
             _admission,
+            _security: self.security_lease.clone(),
         })
         .await
     }
@@ -276,6 +350,7 @@ impl DbHandle {
             watched,
             reply,
             _admission,
+            _security: self.security_lease.clone(),
         })
         .await
     }
@@ -285,14 +360,23 @@ impl DbHandle {
         commands: &[Command],
         watched: &[WatchToken],
     ) -> Result<usize, ExecutionError> {
-        let mut selected = None;
-        for token in watched {
-            self.router.select_key(token.key(), &mut selected)?;
+        if commands
+            .iter()
+            .any(|command| matches!(command, Command::Memory { .. }))
+        {
+            return Err(ExecutionError::Memory(
+                "ERR memory commands are not supported in MULTI",
+            ));
         }
-        for command in commands {
-            self.router.select_command(command, &mut selected)?;
+        let participants = self
+            .router
+            .transaction_participants(commands, watched.iter().map(|token| token.key().as_ref()));
+        // The public gate remains closed until mixed-owner durability and replay
+        // can publish one complete decision.
+        match participants.as_slice() {
+            [owner] => Ok(*owner),
+            _ => Err(ExecutionError::CrossShard),
         }
-        Ok(selected.unwrap_or(0))
     }
 
     pub(crate) async fn execute_transaction(
@@ -306,8 +390,8 @@ impl DbHandle {
             Ok(shard) => shard,
             Err(error) => {
                 return Ok(TransactionReply {
+                    output: encode_reply(Reply::Error(error), limits, subscription.resp3),
                     subscription,
-                    output: encode_reply(Reply::Error(error), limits),
                 });
             }
         };
@@ -318,6 +402,7 @@ impl DbHandle {
             limits,
             reply,
             _admission,
+            _security: self.security_lease.clone(),
         })
         .await
     }
@@ -335,6 +420,7 @@ impl DbHandle {
             keys,
             reply,
             _admission,
+            _security: self.security_lease.clone(),
         })
         .await
     }
@@ -361,13 +447,8 @@ impl DbHandle {
         let deadline = Instant::now()
             .checked_add(self.request_timeout)
             .ok_or(DbError::Timeout)?;
+        let admission = self.read_admission(deadline).await?;
         let mut shutdown = self.shutdown.clone();
-        let admission = tokio::select! {
-            biased;
-            () = sleep_until(deadline) => return Err(DbError::Timeout),
-            () = stopping(&mut shutdown) => return Err(DbError::ShuttingDown),
-            guard = self.barrier.clone().read_owned() => guard,
-        };
         let (reply, response) = oneshot::channel();
         let request = make(reply, admission);
 
@@ -375,8 +456,12 @@ impl DbHandle {
             biased;
             () = sleep_until(deadline) => return Err(DbError::Timeout),
             () = stopping(&mut shutdown) => return Err(DbError::ShuttingDown),
-            sent = self.requests[shard].send(request) => {
-                sent.map_err(|_| DbError::Unavailable)?;
+            reserved = self.requests[shard].reserve() => {
+                let permit = reserved.map_err(|_| DbError::Unavailable)?;
+                if self.security_lease.as_ref().is_some_and(|lease| !lease.admitted_now()) {
+                    return Err(DbError::SecurityExpired);
+                }
+                permit.send(request);
                 self.metrics.add(Counter::WorkerAccepted, 1);
                 let queue = &self.requests[shard];
                 self.metrics.queue(shard, queue.max_capacity() - queue.capacity(), queue.max_capacity());
@@ -390,6 +475,22 @@ impl DbHandle {
             () = sleep_until(deadline) => Err(DbError::Timeout),
             result = response => result.map_err(|_| DbError::Unavailable)?,
         }
+    }
+
+    async fn read_admission(&self, deadline: Instant) -> Result<OwnedRwLockReadGuard<()>, DbError> {
+        self.admission.check()?;
+        let mut shutdown = self.shutdown.clone();
+        let guard = tokio::select! {
+            biased;
+            () = sleep_until(deadline) => return Err(DbError::Timeout),
+            () = stopping(&mut shutdown) => return Err(DbError::ShuttingDown),
+            guard = self.barrier.clone().read_owned() => guard,
+        };
+        self.admission.check()?;
+        if *shutdown.borrow() {
+            return Err(DbError::ShuttingDown);
+        }
+        Ok(guard)
     }
 }
 
@@ -440,6 +541,7 @@ impl Worker {
                 _ = expiration.tick() => {
                     if self.readonly() { continue; }
                     let Ok(_admission) = self.barrier.clone().try_read_owned() else { continue; };
+                    if self.admission.check().is_err() { continue; }
                     if self.expire().await.is_err() { return; }
                     self.compact_if_due().await;
                 }
@@ -480,6 +582,52 @@ impl Worker {
             self.requests.max_capacity(),
         );
         match request {
+            Request::Memory {
+                key,
+                operation,
+                reply,
+                _admission,
+                _security,
+            } => {
+                if self.readonly() && operation.writes_dataset() {
+                    let _ = reply.send(Ok(Reply::Error(ExecutionError::ReadOnly)));
+                    return true;
+                }
+                if self
+                    .aof
+                    .as_ref()
+                    .is_some_and(|aof| !aof.is_memory_profile())
+                {
+                    let _ = reply.send(Err(DbError::Unavailable));
+                    return true;
+                }
+                let record_limit = self
+                    .aof
+                    .as_ref()
+                    .map_or(crate::persistence::format::MAX_RECORD_BYTES, |aof| {
+                        aof.record_limits().max_record_bytes
+                    });
+                let prepared = self
+                    .store
+                    .prepare_memory_with_limit(key, operation, record_limit);
+                let result = self.commit_memory(prepared).await;
+                let healthy = result.is_ok();
+                let response_ready = self
+                    .aof
+                    .as_ref()
+                    .is_none_or(|aof| aof.lifecycle_fault("memory_before_response").is_ok());
+                let _ = reply.send(if response_ready {
+                    result
+                } else {
+                    Err(DbError::Unavailable)
+                });
+                healthy
+                    && response_ready
+                    && self
+                        .aof
+                        .as_ref()
+                        .is_none_or(|aof| aof.lifecycle_fault("memory_after_response").is_ok())
+            }
             Request::Transaction {
                 commands,
                 watched,
@@ -487,18 +635,24 @@ impl Worker {
                 limits,
                 reply,
                 _admission,
+                _security,
             } => {
                 if self.readonly() && commands.iter().any(Command::writes_dataset) {
                     let _ = reply.send(Ok(TransactionReply {
+                        output: encode_reply(
+                            Reply::Error(ExecutionError::ReadOnly),
+                            limits,
+                            subscription.resp3,
+                        ),
                         subscription,
-                        output: encode_reply(Reply::Error(ExecutionError::ReadOnly), limits),
                     }));
                     return true;
                 }
-                let valid = self.store.watches_valid(&watched);
+                let time = self.store.transaction_time();
+                let valid = self.store.watches_valid_at(&watched, time.now());
                 drop(watched);
                 let output = if valid {
-                    let prepared = self.store.prepare_batch(commands.clone());
+                    let prepared = self.store.prepare_batch_at(commands.clone(), time);
                     let persisted = if self.readonly() {
                         Ok(None)
                     } else {
@@ -515,7 +669,7 @@ impl Worker {
                         }),
                         Ok(Some(rejection)) => {
                             self.metrics.response(&Frame::from(rejection.clone()));
-                            encode_reply(rejection, limits)
+                            encode_reply(rejection, limits, subscription.resp3)
                         }
                         Err(error) => {
                             let _ = reply.send(Err(error));
@@ -523,7 +677,7 @@ impl Worker {
                         }
                     }
                 } else {
-                    encode_reply(Reply::NullArray, limits)
+                    encode_reply(Reply::NullArray, limits, subscription.resp3)
                 };
                 let _ = reply.send(Ok(TransactionReply {
                     subscription,
@@ -535,6 +689,7 @@ impl Worker {
                 command,
                 reply,
                 _admission,
+                _security,
             } => {
                 if self.readonly() && command.writes_dataset() {
                     let _ = reply.send(Ok(Reply::Error(ExecutionError::ReadOnly)));
@@ -551,15 +706,17 @@ impl Worker {
                 watched,
                 reply,
                 _admission,
+                _security,
             } => {
                 if self.readonly() && commands.iter().any(Command::writes_dataset) {
                     let _ = reply.send(Ok(Reply::Error(ExecutionError::ReadOnly)));
                     return true;
                 }
-                let valid = self.store.watches_valid(&watched);
+                let time = self.store.transaction_time();
+                let valid = self.store.watches_valid_at(&watched, time.now());
                 drop(watched);
                 let result = if valid {
-                    let prepared = self.store.prepare_batch(commands);
+                    let prepared = self.store.prepare_batch_at(commands, time);
                     self.commit(prepared).await
                 } else {
                     Ok(Reply::NullArray)
@@ -572,6 +729,7 @@ impl Worker {
                 keys,
                 reply,
                 _admission,
+                _security,
             } => {
                 let prepared = self.store.prepare(Command::Exists { keys: keys.clone() });
                 let result = self.commit(prepared).await.map(|reply| match reply {
@@ -595,6 +753,39 @@ impl Worker {
         }
     }
 
+    async fn commit_memory(&mut self, prepared: super::PreparedMemory) -> Result<Reply, DbError> {
+        if self.readonly() {
+            return Ok(prepared.reply().clone());
+        }
+        if let Some(aof) = &self.aof {
+            if let Some(mutation) = prepared.resolved()
+                && let Err(error) = aof
+                    .append_memory(prepared.origin(), vec![mutation.clone()])
+                    .await
+            {
+                if matches!(
+                    error,
+                    crate::persistence::AofError::Format(
+                        crate::persistence::format::FormatError::Limit
+                    )
+                ) {
+                    return Ok(Reply::Error(ExecutionError::AofRecordLimit));
+                }
+                self.requests.close();
+                return Err(DbError::Unavailable);
+            }
+            aof.lifecycle_fault("memory_before_apply")
+                .map_err(|_| DbError::Unavailable)?;
+        }
+        let result = self.store.apply_memory(prepared);
+        self.metrics.dataset(self.shard, self.store.dataset_stats());
+        if let Some(aof) = &self.aof {
+            aof.lifecycle_fault("memory_after_apply")
+                .map_err(|_| DbError::Unavailable)?;
+        }
+        Ok(result)
+    }
+
     fn apply_prepared(&mut self, prepared: super::Prepared) -> Reply {
         let changed = !prepared.batch.mutations.is_empty();
         let expired = if prepared.batch.origin == super::MutationOrigin::Expiration {
@@ -616,19 +807,29 @@ impl Worker {
     async fn persist(&mut self, prepared: &super::Prepared) -> Result<Option<Reply>, DbError> {
         if let Some(aof) = &self.aof
             && !prepared.batch.mutations.is_empty()
-            && let Err(error) = aof.append(prepared.batch.clone()).await
         {
-            if matches!(
-                error,
-                crate::persistence::AofError::Format(
-                    crate::persistence::format::FormatError::Limit
+            let result = if aof.is_memory_profile() {
+                aof.append_memory(
+                    prepared.batch.origin,
+                    self.store.resolved_memory_mutations(prepared),
                 )
-            ) {
-                return Ok(Some(Reply::Error(ExecutionError::AofRecordLimit)));
+                .await
+            } else {
+                aof.append(prepared.batch.clone()).await
+            };
+            if let Err(error) = result {
+                if matches!(
+                    error,
+                    crate::persistence::AofError::Format(
+                        crate::persistence::format::FormatError::Limit
+                    )
+                ) {
+                    return Ok(Some(Reply::Error(ExecutionError::AofRecordLimit)));
+                }
+                tracing::error!(%error, "mutation not applied because AOF failed");
+                self.requests.close();
+                return Err(DbError::Unavailable);
             }
-            tracing::error!(%error, "mutation not applied because AOF failed");
-            self.requests.close();
-            return Err(DbError::Unavailable);
         }
         Ok(None)
     }
@@ -665,9 +866,22 @@ impl Worker {
                         .as_ref()
                         .ok_or(crate::replication::Error::Sequence)?
                         .clone();
-                    aof.append_expected(sequence, batch).await?;
+                    let publication = self.admission.publication();
+                    if let Err(error) = aof.append_expected(sequence, batch).await {
+                        if matches!(
+                            error,
+                            crate::persistence::AofError::Sequence
+                                | crate::persistence::AofError::Format(
+                                    crate::persistence::format::FormatError::Limit
+                                )
+                        ) {
+                            publication.complete();
+                        }
+                        return Err(error.into());
+                    }
                     self.apply_prepared(prepared);
                     aof.flush().await?;
+                    publication.complete();
                     Ok::<_, crate::replication::Error>(())
                 }
                 .await;
@@ -770,7 +984,8 @@ mod tests {
                 .try_send(Request::Execute {
                     command,
                     reply,
-                    _admission: handle.barrier.clone().try_read_owned().unwrap()
+                    _admission: handle.barrier.clone().try_read_owned().unwrap(),
+                    _security: None,
                 })
                 .is_ok()
         );
@@ -1007,6 +1222,126 @@ mod tests {
         let request = worker.requests.try_recv().unwrap();
         worker.apply(request).await;
         assert_eq!(ping.await.unwrap(), Ok(Reply::Pong));
+        assert!(matches!(
+            worker.requests.try_recv(),
+            Err(TryRecvError::Empty)
+        ));
+        assert_eq!(worker.store.execute(get(b"key")), Reply::Bulk(None));
+    }
+
+    async fn assert_security_accepted_request_retains_policy_lease(memory: bool) {
+        use crate::security::{ClientRuntime, Generation};
+        let certified = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+        let generation = |number| {
+            Generation::client_files(
+                number,
+                br#"{"version":1,"users":[]}"#,
+                certified.cert.pem().as_bytes(),
+                certified.key_pair.serialize_pem().as_bytes(),
+            )
+            .unwrap()
+        };
+        let runtime = ClientRuntime::new(generation(1)).unwrap();
+        let client = runtime.client().await;
+        let lease = client.lease().await;
+        let (_stop, handle, mut worker) = setup(1);
+        let authorized = handle.authorized(Some(lease.clone()));
+        let mut request = Box::pin(async {
+            if memory {
+                authorized
+                    .execute_memory(
+                        Bytes::from_static(b"key"),
+                        super::super::memory::Operation::Create(super::super::memory::Descriptor {
+                            dimension: 1,
+                            provider: Bytes::from_static(b"p"),
+                            model: Bytes::from_static(b"m"),
+                            revision: Bytes::from_static(b"r"),
+                            transform: Bytes::from_static(b"t"),
+                        }),
+                    )
+                    .await
+            } else {
+                authorized.execute(set(b"key", b"accepted")).await
+            }
+        });
+        assert_pending(request.as_mut()).await;
+        assert_eq!(worker.requests.len(), 1);
+        advance(Duration::from_secs(5)).await;
+        assert_eq!(request.await, Err(DbError::Timeout));
+        drop(authorized);
+        drop(lease);
+        let mut activation = Box::pin(runtime.activate(generation(2)));
+        assert_pending(activation.as_mut()).await;
+        let request = worker.requests.try_recv().unwrap();
+        assert!(
+            matches!(&request, Request::Execute { reply, .. } | Request::Memory { reply, .. } if reply.is_closed())
+        );
+        assert_pending(activation.as_mut()).await;
+        assert!(worker.apply(request).await);
+        assert!(activation.await.unwrap());
+        if memory {
+            assert!(matches!(
+                &worker.store.snapshot()[0],
+                super::super::Mutation::Put {
+                    value: super::super::Value::Memory(_),
+                    ..
+                }
+            ));
+        } else {
+            assert_eq!(worker.store.execute(get(b"key")), bulk(b"accepted"));
+        }
+        // Abandoning the public activation future cannot interrupt a started swap.
+        let lease = client.lease().await;
+        let mut abandoned = Box::pin(runtime.activate(generation(3)));
+        assert_pending(abandoned.as_mut()).await;
+        drop(abandoned);
+        drop(lease);
+        assert!(!runtime.activate(generation(3)).await.unwrap());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn security_accepted_request_retains_policy_lease_after_caller_timeout() {
+        assert_security_accepted_request_retains_policy_lease(false).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn security_accepted_memory_request_retains_policy_lease_after_caller_timeout() {
+        assert_security_accepted_request_retains_policy_lease(true).await;
+    }
+
+    #[tokio::test]
+    async fn security_credential_expiry_while_waiting_for_capacity_prevents_acceptance() {
+        use crate::security::{ClientRuntime, CredentialProof, Generation};
+        let certified = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+        let verifier = "$argon2id$v=19$m=65536,t=3,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let expiry = time::OffsetDateTime::now_utc() + time::Duration::seconds(2);
+        let scope = serde_json::json!({"exact":[],"prefix":[],"all":true});
+        let policy = serde_json::json!({"version":1,"users":[{
+            "name":"Reader","credentials":[{"verifier":verifier,"not_before":"2020-01-01T00:00:00Z","expires_at":expiry.format(&time::format_description::well_known::Rfc3339).unwrap()}],
+            "commands":["SET"],"read_keys":scope,"write_keys":scope,"publish_channels":scope,"subscribe_channels":scope,"info_sections":[]
+        }]});
+        let generation = Generation::client_files(
+            1,
+            &serde_json::to_vec(&policy).unwrap(),
+            certified.cert.pem().as_bytes(),
+            certified.key_pair.serialize_pem().as_bytes(),
+        )
+        .unwrap();
+        let runtime = ClientRuntime::new(generation).unwrap();
+        let proof = CredentialProof::for_test("Reader", verifier);
+        let lease = runtime.client().await.lease().await.authenticated(proof);
+        assert!(lease.admitted_now());
+        let (_stop, handle, mut worker) = setup(1);
+        let first = enqueue(&handle, Command::Ping(None));
+        let authorized = handle.authorized(Some(lease));
+        let mut request = Box::pin(authorized.execute(set(b"key", b"must-not-apply")));
+        assert_pending(request.as_mut()).await;
+        tokio::time::sleep(Duration::from_millis(2100)).await;
+        assert_pending(request.as_mut()).await;
+        let first_request = worker.requests.try_recv().unwrap();
+        assert!(worker.apply(first_request).await);
+        assert_eq!(first.await.unwrap(), Ok(Reply::Pong));
+        assert_eq!(request.await, Err(DbError::SecurityExpired));
         assert!(matches!(
             worker.requests.try_recv(),
             Err(TryRecvError::Empty)

@@ -197,7 +197,7 @@ pub fn read_header_with_layout(mut input: impl Read) -> Result<Header, FormatErr
     })
 }
 
-fn mutation_size(mutation: &Mutation) -> Result<usize, FormatError> {
+pub(super) fn mutation_size(mutation: &Mutation) -> Result<usize, FormatError> {
     let extra = match mutation {
         Mutation::Put { value, .. } => value_size(value)?.checked_add(9),
         Mutation::Delete { .. } => Some(0),
@@ -222,6 +222,7 @@ fn blob_size(value: &Bytes) -> Result<usize, FormatError> {
 
 fn value_size(value: &Value) -> Result<usize, FormatError> {
     match value {
+        Value::Memory(_) => Err(FormatError::Version(2)),
         Value::String(value) => blob_size(value),
         Value::SortedSet(members) => {
             if members.is_empty() || members.len() > u32::MAX as usize {
@@ -291,7 +292,7 @@ pub fn encode(record: &Record, limits: Limits) -> Result<Vec<u8>, FormatError> {
     match record {
         Record::Snapshot(mutation) => {
             output.push(1);
-            encode_mutation(&mut output, mutation);
+            encode_mutation(&mut output, mutation)?;
         }
         Record::Seal {
             sequence,
@@ -312,7 +313,7 @@ pub fn encode(record: &Record, limits: Limits) -> Result<Vec<u8>, FormatError> {
             });
             output.extend_from_slice(&(batch.mutations.len() as u32).to_le_bytes());
             for mutation in &batch.mutations {
-                encode_mutation(&mut output, mutation);
+                encode_mutation(&mut output, mutation)?;
             }
         }
     }
@@ -321,7 +322,10 @@ pub fn encode(record: &Record, limits: Limits) -> Result<Vec<u8>, FormatError> {
     Ok(output)
 }
 
-fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
+pub(super) fn encode_mutation(
+    output: &mut Vec<u8>,
+    mutation: &Mutation,
+) -> Result<(), FormatError> {
     output.push(match mutation {
         Mutation::Put {
             value: Value::String(_),
@@ -344,6 +348,10 @@ fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
             value: Value::SortedSet(_),
             ..
         } => 6,
+        Mutation::Put {
+            value: Value::Memory(_),
+            ..
+        } => return Err(FormatError::Version(2)),
     });
     output.extend_from_slice(&(mutation.key().len() as u32).to_le_bytes());
     output.extend_from_slice(mutation.key());
@@ -354,6 +362,7 @@ fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
     } = mutation
     {
         match value {
+            Value::Memory(_) => return Err(FormatError::Version(2)),
             Value::String(value) => encode_blob(output, value),
             Value::SortedSet(members) => {
                 output.extend_from_slice(&(members.len() as u32).to_le_bytes());
@@ -385,6 +394,7 @@ fn encode_mutation(output: &mut Vec<u8>, mutation: &Mutation) {
         output.push(u8::from(expires_at_unix_ms.is_some()));
         output.extend_from_slice(&expires_at_unix_ms.unwrap_or(0).to_le_bytes());
     }
+    Ok(())
 }
 
 fn encode_blob(output: &mut Vec<u8>, value: &Bytes) {
@@ -432,9 +442,9 @@ pub fn read_record(mut input: impl Read, limits: Limits) -> Result<Next, FormatE
     decode(Bytes::from(body), limits).map(Next::Record)
 }
 
-struct Cursor {
-    bytes: Bytes,
-    offset: usize,
+pub(super) struct Cursor {
+    pub(super) bytes: Bytes,
+    pub(super) offset: usize,
 }
 impl Cursor {
     fn take(&mut self, count: usize) -> Result<Bytes, FormatError> {
@@ -464,7 +474,7 @@ impl Cursor {
         let size = self.u32()? as usize;
         self.take(size)
     }
-    fn mutation(&mut self) -> Result<Mutation, FormatError> {
+    pub(super) fn mutation(&mut self) -> Result<Mutation, FormatError> {
         let tag = self.byte()?;
         let key = self.blob()?;
         match tag {

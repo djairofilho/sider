@@ -32,6 +32,7 @@ struct Queue {
     bytes: usize,
     shard: Option<usize>,
     dirty: bool,
+    permission_denied: bool,
 }
 
 fn error(message: &'static [u8]) -> Action {
@@ -42,6 +43,40 @@ fn ok() -> Action {
 }
 
 impl Transaction {
+    pub(super) fn revalidate(&mut self, policy: &crate::security::ClientPolicy, username: &str) {
+        if let Some(queue) = &mut self.queue
+            && queue.commands.iter().any(|command| {
+                policy
+                    .authorize(
+                        username,
+                        crate::security::command_name(command).as_bytes(),
+                        command,
+                    )
+                    .is_err()
+            })
+        {
+            queue.commands.clear();
+            queue.bytes = 0;
+            queue.permission_denied = true;
+        }
+        if !self.watched.is_empty()
+            && policy
+                .authorize(
+                    username,
+                    b"WATCH",
+                    &Command::Watch {
+                        keys: self.watched.keys().cloned().collect(),
+                    },
+                )
+                .is_err()
+        {
+            self.watched.clear();
+            self.watch_shard = None;
+        }
+    }
+    pub(super) fn active(&self) -> bool {
+        self.queue.is_some()
+    }
     pub(super) fn poison(&mut self) {
         if let Some(queue) = &mut self.queue {
             queue.dirty = true;
@@ -60,6 +95,10 @@ impl Transaction {
     ) -> Result<Action, DbError> {
         if subscribed {
             return Ok(Action::Execute(command));
+        }
+        if self.queue.is_some() && matches!(command, Command::Memory { .. }) {
+            self.poison();
+            return Ok(error(b"ERR memory commands are not supported in MULTI"));
         }
         if database.readonly() && command.writes_dataset() {
             self.poison();
@@ -94,7 +133,10 @@ impl Transaction {
                 };
                 let watched = std::mem::take(&mut self.watched).into_values().collect();
                 self.watch_shard = None;
-                if queue.dirty {
+                if queue.permission_denied {
+                    drop(watched);
+                    error(b"NOPERM Permission denied")
+                } else if queue.dirty {
                     drop(watched);
                     error(b"EXECABORT Transaction discarded because of previous errors.")
                 } else {
@@ -143,7 +185,7 @@ impl Transaction {
                 let Some(queue) = &mut self.queue else {
                     return Ok(Action::Execute(command));
                 };
-                if queue.dirty {
+                if queue.dirty || queue.permission_denied {
                     return Ok(Action::Reply(Frame::Simple(Bytes::from_static(b"QUEUED"))));
                 }
                 let mut shard = queue.shard;

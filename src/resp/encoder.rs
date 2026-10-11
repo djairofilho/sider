@@ -1,4 +1,4 @@
-//! Two-pass RESP2 encoder: validate the entire frame, then write it.
+//! Two-pass RESP2/RESP3 encoder: validate the entire frame, then write it.
 
 use bytes::BytesMut;
 
@@ -21,6 +21,38 @@ pub fn encode(frame: &Frame, dst: &mut BytesMut, limits: RespLimits) -> Result<(
         match frame {
             Frame::Simple(value) => line(b'+', value, dst),
             Frame::Error(value) => line(b'-', value, dst),
+            Frame::Null => dst.extend_from_slice(b"_\r\n"),
+            Frame::Boolean(value) => {
+                dst.extend_from_slice(if *value { b"#t\r\n" } else { b"#f\r\n" })
+            }
+            Frame::Double(value) => line(b',', value, dst),
+            Frame::BigNumber(value) => line(b'(', value, dst),
+            Frame::BlobError(value) | Frame::Verbatim(value) => {
+                line(
+                    if matches!(frame, Frame::BlobError(_)) {
+                        b'!'
+                    } else {
+                        b'='
+                    },
+                    value.len().to_string().as_bytes(),
+                    dst,
+                );
+                dst.extend_from_slice(value);
+                dst.extend_from_slice(b"\r\n");
+            }
+            Frame::Map(values)
+            | Frame::Set(values)
+            | Frame::Push(values)
+            | Frame::Attribute(values) => {
+                let (prefix, count) = match frame {
+                    Frame::Map(_) => (b'%', values.len() / 2),
+                    Frame::Attribute(_) => (b'|', values.len() / 2),
+                    Frame::Set(_) => (b'~', values.len()),
+                    _ => (b'>', values.len()),
+                };
+                line(prefix, count.to_string().as_bytes(), dst);
+                pending.extend(values.iter().rev());
+            }
             Frame::Integer(value) => line(b':', value.to_string().as_bytes(), dst),
             Frame::Bulk(None) => dst.extend_from_slice(b"$-1\r\n"),
             Frame::Bulk(Some(value)) => {
@@ -70,6 +102,60 @@ fn encoded_size(frame: &Frame, limits: RespLimits) -> Result<usize, EncodeError>
                     return Err(EncodeError::InvalidFrame("simple/error contains CR or LF"));
                 }
                 size
+            }
+            Frame::Null => line_size(0, limits)?,
+            Frame::Boolean(_) => line_size(1, limits)?,
+            Frame::Double(value) | Frame::BigNumber(value) => {
+                let size = line_size(value.len(), limits)?;
+                let prefix = if matches!(frame, Frame::Double(_)) {
+                    b','
+                } else {
+                    b'('
+                };
+                super::decoder::validate_scalar(prefix, value)
+                    .map_err(|_| EncodeError::InvalidFrame("invalid RESP3 scalar"))?;
+                size
+            }
+            Frame::BlobError(value) | Frame::Verbatim(value) => {
+                if matches!(frame, Frame::Verbatim(_)) && (value.len() < 4 || value[3] != b':') {
+                    return Err(EncodeError::InvalidFrame("invalid verbatim format"));
+                }
+                if value.len() > limits.max_bulk_bytes {
+                    return Err(EncodeError::LimitExceeded("max_bulk_bytes"));
+                }
+                line_size(value.len().to_string().len(), limits)?
+                    .checked_add(value.len())
+                    .and_then(|n| n.checked_add(2))
+                    .ok_or(EncodeError::LimitExceeded("max_frame_bytes"))?
+            }
+            Frame::Map(values)
+            | Frame::Set(values)
+            | Frame::Push(values)
+            | Frame::Attribute(values) => {
+                let paired = matches!(frame, Frame::Map(_) | Frame::Attribute(_));
+                if paired && !values.len().is_multiple_of(2) {
+                    return Err(EncodeError::InvalidFrame("odd map element count"));
+                }
+                let depth = depth
+                    .checked_add(1)
+                    .filter(|n| *n <= limits.max_depth)
+                    .ok_or(EncodeError::LimitExceeded("max_depth"))?;
+                nodes
+                    .checked_add(pending.len())
+                    .and_then(|n| n.checked_add(values.len()))
+                    .filter(|n| *n <= limits.max_nodes)
+                    .ok_or(EncodeError::LimitExceeded("max_nodes"))?;
+                pending.extend(values.iter().rev().map(|f| (f, depth)));
+                line_size(
+                    (if paired {
+                        values.len() / 2
+                    } else {
+                        values.len()
+                    })
+                    .to_string()
+                    .len(),
+                    limits,
+                )?
             }
             Frame::Integer(value) => line_size(value.to_string().len(), limits)?,
             Frame::Bulk(None) => line_size(2, limits)?,

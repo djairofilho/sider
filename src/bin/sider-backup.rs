@@ -23,12 +23,26 @@ fn main() -> ExitCode {
         let clock = Arc::new(SystemClock);
         match action {
             Action::Export(options) => {
+                let security = sider::security::StartupSecurity::from_env()
+                    .and_then(|profile| profile.tool(options.source))
+                    .map_err(|_| backup::Error::Invalid("security configuration unavailable"))?;
                 let runtime = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()?;
-                runtime
-                    .block_on(backup::export(options, clock))
-                    .map(|manifest| manifest.json())
+                let result = if let Some(generation) = security {
+                    runtime.block_on(backup::export_secure(
+                        options,
+                        clock,
+                        &generation
+                            .internal
+                            .ok_or(backup::Error::Invalid("security configuration unavailable"))?
+                            .transport,
+                    ))
+                } else {
+                    eprintln!("legacy-loopback profile: plaintext and unauthenticated");
+                    runtime.block_on(backup::export(options, clock))
+                };
+                result.map(|manifest| manifest.json())
             }
             Action::Verify {
                 source,

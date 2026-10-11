@@ -75,11 +75,21 @@ impl DbHandle {
 
     /// The barrier also waits for an accepted application whose session disconnected.
     pub async fn replication_position(&self, runtime: &Runtime) -> Result<Cursor, Error> {
+        Ok(self.replication_status(runtime).await?.applied)
+    }
+
+    /// Captures the role and complete applied position under database exclusion.
+    pub async fn replication_status(
+        &self,
+        runtime: &Runtime,
+    ) -> Result<crate::replication::state::Status, Error> {
+        self.admission.check()?;
         let _guard = self.barrier.clone().write_owned().await;
+        self.admission.check()?;
         if *self.shutdown.borrow() {
             return Err(DbError::ShuttingDown.into());
         }
-        Ok(runtime.status().applied)
+        Ok(runtime.status())
     }
 
     /// The task owns the barrier until the last worker swaps the map, even if the
@@ -117,6 +127,7 @@ impl DbHandle {
                     .replay(std::slice::from_ref(mutation))?;
             }
             let _guard = database.barrier.clone().write_owned().await;
+            database.admission.check()?;
             if *database.shutdown.borrow() {
                 return Err(DbError::ShuttingDown.into());
             }
@@ -126,7 +137,8 @@ impl DbHandle {
             if database.controls.len() != stores.len() {
                 return Err(Error::Sequence);
             }
-            context
+            let publication = database.admission.publication();
+            let decision = context
                 .aof
                 .install_snapshot(
                     mutations,
@@ -136,7 +148,13 @@ impl DbHandle {
                         epoch: cursor.epoch,
                     },
                 )
-                .await?;
+                .await;
+            if let Err(error) = decision {
+                if !matches!(error, crate::persistence::AofError::Unavailable) {
+                    publication.complete();
+                }
+                return Err(error.into());
+            }
             // After rename, any failure requires stopping: disk already selects the new snapshot.
             for (control, store) in database.controls.iter().zip(stores) {
                 let (reply, response) = oneshot::channel();
@@ -147,6 +165,7 @@ impl DbHandle {
                 response.await.map_err(|_| DbError::Unavailable)?;
             }
             context.runtime.applied(cursor);
+            publication.complete();
             Ok(())
         })
         .await?
@@ -162,6 +181,7 @@ impl DbHandle {
         let database = self.clone();
         tokio::spawn(async move {
             let _guard = database.barrier.clone().write_owned().await;
+            database.admission.check()?;
             if *database.shutdown.borrow() {
                 return Err(DbError::ShuttingDown.into());
             }
@@ -183,6 +203,7 @@ impl DbHandle {
                 shard = Some(next);
             }
             let shard = shard.ok_or(Error::Sequence)?;
+            let publication = database.admission.publication();
             let (reply, response) = oneshot::channel();
             database.controls[shard]
                 .send(Control::Apply {
@@ -192,8 +213,25 @@ impl DbHandle {
                 })
                 .await
                 .map_err(|_| DbError::Unavailable)?;
-            response.await.map_err(|_| DbError::Unavailable)??;
+            if let Err(error) = response.await.map_err(|_| DbError::Unavailable)? {
+                if matches!(
+                    &error,
+                    Error::Replay(_) | Error::Sequence | Error::Config(_)
+                ) || matches!(
+                    &error,
+                    Error::Persistence(
+                        crate::persistence::AofError::Sequence
+                            | crate::persistence::AofError::Format(
+                                crate::persistence::format::FormatError::Limit
+                            )
+                    )
+                ) {
+                    publication.complete();
+                }
+                return Err(error);
+            }
             context.runtime.applied(cursor);
+            publication.complete();
             Ok(())
         })
         .await?
@@ -211,7 +249,8 @@ impl DbHandle {
             let sequence = context.aof.flush().await?;
             let cursor = Cursor { epoch, sequence };
             let journal = Journal::new(cursor, context.journal_limits)?;
-            context
+            let publication = database.admission.publication();
+            let decision = context
                 .aof
                 .install_snapshot(
                     snapshot,
@@ -221,9 +260,16 @@ impl DbHandle {
                         epoch,
                     },
                 )
-                .await?;
+                .await;
+            if let Err(error) = decision {
+                if !matches!(error, crate::persistence::AofError::Unavailable) {
+                    publication.complete();
+                }
+                return Err(error.into());
+            }
             context.aof.attach_journal(journal.clone()).await?;
             context.runtime.primary(cursor, journal);
+            publication.complete();
             Ok(cursor)
         })
         .await?

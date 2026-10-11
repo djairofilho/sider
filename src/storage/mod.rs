@@ -1,7 +1,11 @@
 //! Synchronous storage for binary keys and values, without protocol access.
 
+mod admission;
 mod clock;
 mod collections;
+pub mod memory;
+mod memory_lifecycle;
+pub use memory_lifecycle::PreparedMemory;
 mod mutation;
 pub mod replication;
 pub mod routing;
@@ -11,6 +15,7 @@ mod transaction;
 mod value;
 mod watch;
 pub use sorted_set::SortedSet;
+pub use transaction::TransactionTime;
 pub mod worker;
 pub use clock::{Clock, SystemClock};
 pub use mutation::{Mutation, MutationOrigin, Prepared, ReplayError, ResolvedBatch};
@@ -64,6 +69,7 @@ pub struct Entry {
     pub expires_at: Option<Instant>,
     pub expires_at_unix_ms: Option<i64>,
     pub generation: u64,
+    pub(crate) member_deadlines: std::collections::BTreeMap<Bytes, Instant>,
 }
 
 /// In-memory map with a single owner and sequential command execution.
@@ -72,6 +78,7 @@ pub struct Entry {
 pub struct Store {
     values: HashMap<Bytes, Entry>,
     expirations: BTreeSet<(Instant, u64, Bytes)>,
+    member_expirations: BTreeSet<(Instant, Bytes, Bytes)>,
     generation: u64,
     clock: Arc<dyn Clock>,
     config: StoreConfig,
@@ -108,6 +115,7 @@ impl Store {
         Ok(Self {
             values: HashMap::new(),
             expirations: BTreeSet::new(),
+            member_expirations: BTreeSet::new(),
             generation: 0,
             clock,
             config,
@@ -159,6 +167,10 @@ impl Store {
     /// `GET` shares immutable `Bytes` content with the reply. Changing or removing
     /// the key later does not alter a reply already returned.
     pub fn execute(&mut self, command: Command) -> Reply {
+        if let Command::Memory { key, operation } = command {
+            let prepared = self.prepare_memory(key, *operation);
+            return self.apply_memory(prepared);
+        }
         let prepared = self.prepare(command);
         self.apply(prepared)
     }
@@ -166,6 +178,9 @@ impl Store {
     fn execute_inner(&mut self, command: Command) -> Reply {
         let now = self.clock.now();
         match command {
+            Command::Memory { .. } => Reply::Error(ExecutionError::Memory(
+                "ERR memory commands require native preparation",
+            )),
             Command::Info(_) => Reply::Error(ExecutionError::ConnectionOnly),
             Command::Hash { key, operation } => self.hash(key, operation, now),
             Command::List { key, operation } => self.list(key, operation, now),
@@ -404,25 +419,41 @@ impl Store {
             self.expirations
                 .remove(&(deadline, entry.generation, key.clone()));
         }
+        for (id, deadline) in &entry.member_deadlines {
+            self.member_expirations
+                .remove(&(*deadline, key.clone(), id.clone()));
+        }
         Some(entry)
     }
 
     fn insert(&mut self, key: Bytes, value: impl Into<Value>, expiry: Option<(Instant, i64)>) {
         let value = value.into();
-        self.watches.invalidate(&key);
-        self.remove(&key);
-        self.used_bytes += Self::entry_bytes(&key, &value).expect("prevalidated mutation");
-        // There is at most one event per key; the previous one was removed before generation advanced.
-        self.generation = self.generation.wrapping_add(1);
+        let member_deadlines = self
+            .resolve_member_deadlines(&key, &value)
+            .expect("prevalidated memory deadlines");
         let entry = Entry {
             value,
             expires_at: expiry.map(|value| value.0),
             expires_at_unix_ms: expiry.map(|value| value.1),
-            generation: self.generation,
+            generation: 0,
+            member_deadlines,
         };
+        self.install_entry(key, entry);
+    }
+
+    fn install_entry(&mut self, key: Bytes, mut entry: Entry) {
+        self.watches.invalidate(&key);
+        self.remove(&key);
+        self.used_bytes += Self::entry_bytes(&key, &entry.value).expect("prevalidated mutation");
+        self.generation = self.generation.wrapping_add(1);
+        entry.generation = self.generation;
         if let Some(deadline) = entry.expires_at {
             self.expirations
                 .insert((deadline, entry.generation, key.clone()));
+        }
+        for (id, deadline) in &entry.member_deadlines {
+            self.member_expirations
+                .insert((*deadline, key.clone(), id.clone()));
         }
         self.values.insert(key, entry);
     }
