@@ -22,6 +22,13 @@ That discrepancy, dependency/startup security review, native Ubuntu, and product
 delegation requirements remain pending.
 These results do not enable scripting or satisfy #95's acceptance criteria.
 
+An [isolated pure Rust interpreter experiment](../spikes/lua-pure-rust/README.md)
+also passed focused Windows and WSL2 tests for missing host globals, binary
+strings, instruction and memory trips, and malformed source. Its memory budget
+is sampled GC accounting rather than a hard process ceiling. It remains an
+alternative under evaluation, not a replacement for the proposed helper or
+the unresolved Windows containment gate.
+
 The proposed switch is `SIDER_LUA_ENABLED`, accepting only `true` or `false` and
 defaulting to `false`. Disabled instances return `LUAERR disabled` for the whole
 scripting surface. Enabled startup validates the helper and OS containment before
