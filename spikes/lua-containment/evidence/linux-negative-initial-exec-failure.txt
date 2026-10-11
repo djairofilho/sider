@@ -1,0 +1,7 @@
+NEGATIVE permission: nobody has no delegation at hierarchy root
+runuser: failed to execute /tmp/sider-lua-containment-delegated-20261010/debug/sider-lua-containment-spike: No such file or directory
+PASS permission denial exits 1 with GO withheld
+NEGATIVE controller: readable root without required controller
+runuser: failed to execute /tmp/sider-lua-containment-delegated-20261010/debug/sider-lua-containment-spike: No such file or directory
+PASS missing controller exits 1 with GO withheld
+PASS no live helper executable remains

@@ -1,0 +1,33 @@
+SPIKE platform=linux architecture=x86_64 mlua=0.12.2 Lua=5.4 vm_limit=8388608
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=binary result=OK binary instructions=0 max_depth=1 tails=0 vm_bytes=13877 elapsed_us=73 version=Lua 5.4 status=exit status: 0 elapsed_us=42242 cpu_us=Some(970) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=sandbox result=OK sandbox instructions=0 max_depth=2 tails=0 vm_bytes=16278 elapsed_us=174 version=Lua 5.4 status=exit status: 0 elapsed_us=9485 cpu_us=Some(1164) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=fresh-env result=OK fresh-env instructions=0 max_depth=2 tails=0 vm_bytes=14460 elapsed_us=107 version=Lua 5.4 status=exit status: 0 elapsed_us=9012 cpu_us=Some(1080) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=fresh-env result=OK fresh-env instructions=0 max_depth=2 tails=0 vm_bytes=14460 elapsed_us=140 version=Lua 5.4 status=exit status: 0 elapsed_us=9708 cpu_us=Some(1037) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=syntax result=ERROR syntax status=exit status: 0 elapsed_us=10396 cpu_us=Some(986) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=bytecode result=ERROR syntax status=exit status: 0 elapsed_us=8250 cpu_us=Some(990) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=loop result=ERROR instructions status=exit status: 0 elapsed_us=29569 cpu_us=Some(24788) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=depth result=ERROR depth status=exit status: 0 elapsed_us=45793 cpu_us=Some(1040) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=tail result=OK tail instructions=4000 max_depth=1 tails=1001 vm_bytes=14403 elapsed_us=844 version=Lua 5.4 status=exit status: 0 elapsed_us=9010 cpu_us=Some(1822) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=allocation result=ERROR memory status=exit status: 0 elapsed_us=8792 cpu_us=Some(3881) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=compiler-stress result=ERROR runtime fixture_detail=RuntimeError("C stack overflow\nstack traceback:\n\t[C]: in ?\n\t[C]: in ?") status=exit status: 0 elapsed_us=11232 cpu_us=Some(1230) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=hook-cancel result=ERROR cancelled status=exit status: 0 elapsed_us=18763 cpu_us=Some(10787) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=os-cancel result=CANCELLED status=signal: 9 (SIGKILL) elapsed_us=30720 cpu_us=Some(105) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+PASS case=os-cpu result=CPU_KILLED status=signal: 9 (SIGKILL) elapsed_us=113042 cpu_us=Some(106123) memory_events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;
+BOUNDARY linux memory.max=67108864 memory.swap.max=0 pids.max=1 cpu.stat=available
+FAIL case=os-memory result=CPU_KILLED status=signal: 9 (SIGKILL) elapsed_us=233185 cpu_us=Some(205510) memory_events=low 0;high 0;max 35;oom 1;oom_kill 1;oom_group_kill 0;
+SUMMARY failures=1 full_contract_proven=false
+Error: "fixture failure"

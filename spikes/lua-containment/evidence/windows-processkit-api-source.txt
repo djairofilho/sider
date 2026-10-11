@@ -1,0 +1,170 @@
+﻿processkit 3.3.4 published dependency source; source excerpts, not a security audit.
+Memory/process setup: windows.rs lines 476-516
+        if handle.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let job = Job {
+            handle,
+            suspend_lock: std::sync::Mutex::new(()),
+            skip_drop_kill: super::SkipDropKill::new(),
+            ctrl_break_leaders: std::sync::Mutex::new(Vec::new()),
+        };
+
+        // Kill every process in the job once the last handle closes — i.e. when
+        // this struct drops or the owning process dies. This is the Windows
+        // analogue of `cgroup.kill` / `killpg`. The memory and process-count caps
+        // ride along on the same extended-limit struct.
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        #[cfg(feature = "limits")]
+        {
+            if let Some(bytes) = limits.max_memory {
+                info.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
+                // `JobMemoryLimit` is SIZE_T; saturate rather than wrap on a 32-bit host.
+                info.JobMemoryLimit = usize::try_from(bytes).unwrap_or(usize::MAX);
+            }
+            if let Some(n) = limits.max_processes {
+                info.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+                info.BasicLimitInformation.ActiveProcessLimit = n;
+            }
+        }
+        // On failure `job` drops here, closing the handle — no leak.
+        set_information_job_object(
+            job.handle,
+            JobObjectExtendedLimitInformation,
+            &info,
+            EXTENDED_LIMIT_AXIS,
+        )?;
+
+        // CPU quota is a separate info class. The hard cap is expressed in 1/100 of
+        // a percent of *total* system CPU (1..=10000), so convert our per-core
+        // fraction using the host's processor count.
+        #[cfg(feature = "limits")]
+        if let Some(cores) = limits.cpu_quota {
+Startup caveat: windows.rs lines 108-119
+    /// kill-on-parent-death guarantee (documented on
+    /// `Command::kill_on_parent_death`) breaks if a refactor ever duplicates
+    /// or inherits this handle.
+    ///
+    /// One inherent gap (C10): a child is spawned `CREATE_SUSPENDED` and only then
+    /// assigned to the job. If the **parent dies abruptly in that spawn→assign
+    /// window** — after `CreateProcess` returns but before `AssignProcessToJobObject`
+    /// — the child is not yet a job member, so kill-on-close can't reach it and it
+    /// leaks as a permanently-*suspended* orphan (it never ran). The window is a
+    /// few instructions wide and the orphan is inert (suspended), but it is not
+    /// covered by the "kernel kills the tree even on abrupt parent death" headline.
+    handle: HANDLE,
+Suspended spawn: windows.rs lines 618-698
+    pub(crate) fn spawn(
+        &self,
+        cmd: &mut Command,
+        opts: &crate::sys::SpawnOptions,
+    ) -> io::Result<Child> {
+        // Race-free containment: start the child's primary thread SUSPENDED so no
+        // user code runs (and nothing can fork) before the process is in the job;
+        // assign it, then resume. This closes the old spawn→assign window in
+        // which a fast-forking child could have escaped the job. Win32 exposes
+        // no flag getter, so this overwrite is also where the Command-carried
+        // extras (e.g. CREATE_NO_WINDOW) are OR'd back in.
+        //
+        // Opt-in graceful CTRL path: OR in CREATE_NEW_PROCESS_GROUP so the direct
+        // child becomes its own console process group, addressable by its pid via
+        // `GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid)` at graceful teardown.
+        // A side effect is that CTRL_C is disabled for the new group by default —
+        // CTRL_BREAK, which the teardown sends, is unaffected.
+        use std::os::windows::process::CommandExt;
+        let mut flags = CREATE_SUSPENDED | opts.creation_flags;
+        if opts.windows_new_process_group {
+            flags |= CREATE_NEW_PROCESS_GROUP;
+        }
+        cmd.as_std_mut().creation_flags(flags);
+
+        // Arm a reaper for the window between spawn and containment: the child is
+        // suspended and not yet in the job, so until `AssignProcessToJobObject`
+        // succeeds nothing would reap it — an early return or panic here would
+        // leak a suspended orphan. Disarmed once contained, restoring the normal
+        // "the job owns teardown" semantics. (A permanent `kill_on_drop` would
+        // instead fight `graceful_shutdown(escalate=false)` survivor-sparing, and
+        // tokio can't toggle it off after spawn.) Arm it *before* reading the
+        // fallible `id()`/`raw_handle()` so even their `?` early-returns reap.
+        let child = {
+            // Headless ConPTY temporarily changes process-global std handles;
+            // use its shared spawn lock so this ordinary child cannot observe
+            // those null slots while std resolves inherited stdio.
+            let _spawn_guard = crate::sys::process_spawn_lock();
+            cmd.spawn()?
+        };
+        let guard = UncontainedChildGuard::arm(child);
+        let pid = guard.child().id().ok_or_else(|| {
+            io::Error::other("child exited before it could be assigned to the job")
+        })?;
+        let handle = guard.child().raw_handle().ok_or_else(|| {
+            io::Error::other("child exited before it could be assigned to the job")
+        })?;
+        // Hold the suspend lock across assign → resume: once assigned, the pid
+        // is visible to a concurrent suspend()/resume() member walk, which
+        // would otherwise skew the still-suspended primary thread's count
+        // (suspend counts nest) and strand or prematurely release the child.
+        // Poisoning is impossible to act on here — recover the guard.
+        let _suspend_guard = self
+            .suspend_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // SAFETY: the raw handle is valid until the child is dropped; `guard`
+        // owns the child for the rest of this scope, well past this call.
+        //
+        // Nested jobs: if THIS process is itself inside a Job Object that forbids
+        // breakaway, the assign can fail with `ERROR_ACCESS_DENIED`. On Windows 8+
+        // jobs nest (the child joins our job *and* the outer one), so the common
+        // case works; we do not set a breakaway flag (that would let children
+        // escape our containment). On failure the suspended child is reaped (the
+        // guard) and the error surfaced — we never leak an uncontained child.
+        let ok = unsafe { AssignProcessToJobObject(self.handle, handle as HANDLE) };
+        if ok == 0 {
+            // The reaper kills the still-suspended child as `guard` drops.
+            return Err(io::Error::last_os_error());
+        }
+        if let Some(mask) = opts.cpu_affinity
+            && unsafe { SetProcessAffinityMask(handle as HANDLE, mask) } == 0
+        {
+            // Still suspended and owned by `guard`; a rejected mask cannot leak
+            // or briefly run with the inherited affinity.
+            return Err(io::Error::last_os_error());
+        }
+        // Contained — release the primary thread. A failure here would strand a
+        // suspended-but-contained process; the reaper kills it as `guard` drops.
+        resume_process_threads(pid, handle as HANDLE)?;
+        // Re-arm the kill-on-drop backstop now the child is contained: a prior
+        // graceful_shutdown(escalate=false) latched skip_drop_kill to spare
+Accounting: windows.rs lines 1306-1336
+                self.handle,
+                JobObjectExtendedLimitInformation,
+                std::ptr::from_mut(&mut ext).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        // Job accounting times are in 100-ns units.
+        let cpu_100ns = (acct.TotalUserTime as u64).saturating_add(acct.TotalKernelTime as u64);
+        Ok(ProcessGroupStats {
+            active_process_count: acct.ActiveProcesses as usize,
+            total_cpu_time: Some(Duration::from_nanos(cpu_100ns.saturating_mul(100))),
+            peak_memory_bytes: Some(ext.PeakJobMemoryUsed as u64),
+            // Bytes moved by the job's read/write operations against any target —
+            // file, pipe or device — not storage traffic alone.
+            io_read_bytes: Some(io_counters.ReadTransferCount),
+            io_write_bytes: Some(io_counters.WriteTransferCount),
+            // No Job Object counter answers this — see the doc above for what was
+            // examined and why a sampled stand-in is refused.
+            peak_process_count: None,
+        })
+    }
+
+    pub(crate) fn mechanism(&self) -> Mechanism {
+        Mechanism::JobObject
+    }
+}

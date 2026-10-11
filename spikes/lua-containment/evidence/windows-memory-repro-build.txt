@@ -1,0 +1,9 @@
+cargo :    Compiling sider-lua-containment-spike v0.0.0 
+(C:\Users\Usuario\Documents\Coding\sider-wt-lua-containment\spikes\lua-containment)
+No linha:2 caractere:80
++ ... y-repro.rs; cargo build --locked --manifest-path spikes/lua-containme ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling si...ua-containment):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.05s

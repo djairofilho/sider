@@ -1,0 +1,9 @@
+cargo :     Checking sider-lua-containment-spike v0.0.0 
+(C:\Users\Usuario\Documents\Coding\sider-wt-lua-containment\spikes\lua-containment)
+No linha:2 caractere:533
++ ...  failed' }; cargo clippy --locked --manifest-path spikes/lua-containm ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Checking si...ua-containment):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.36s

@@ -1,0 +1,18 @@
+BOUNDARY suspended_spawn=true before_GO pid=23256 configured_memory=67108864 max_processes=1 stats=ProcessGroupStats { active_process_count: 1, total_cpu_time: Some(0ns), peak_memory_bytes: Some(630784), io_read_bytes: Some(0), io_write_bytes: Some(6), peak_process_count: None }
+PASS case=os-cpu result=CPU_KILLED status=exit code: 1 elapsed_us=376227 peak_within_limit=true after_reap=ProcessGroupStats { active_process_count: 0, total_cpu_time: Some(109.375ms), peak_memory_bytes: Some(643072), io_read_bytes: Some(3), io_write_bytes: Some(6), peak_process_count: None }
+BOUNDARY suspended_spawn=true before_GO pid=30688 configured_memory=67108864 max_processes=1 stats=ProcessGroupStats { active_process_count: 1, total_cpu_time: Some(0ns), peak_memory_bytes: Some(638976), io_read_bytes: Some(0), io_write_bytes: Some(6), peak_process_count: None }
+PASS case=os-kernel-cpu result=CPU_KILLED status=exit code: 1 elapsed_us=193232 peak_within_limit=true after_reap=ProcessGroupStats { active_process_count: 0, total_cpu_time: Some(125ms), peak_memory_bytes: Some(638976), io_read_bytes: Some(3), io_write_bytes: Some(6), peak_process_count: None }
+BOUNDARY suspended_spawn=true before_GO pid=1724 configured_memory=67108864 max_processes=1 stats=ProcessGroupStats { active_process_count: 1, total_cpu_time: Some(0ns), peak_memory_bytes: Some(626688), io_read_bytes: Some(0), io_write_bytes: Some(6), peak_process_count: None }
+FAIL case=os-memory result=MEMORY_DENIED allocated_mib=62 status=exit code: 0 elapsed_us=439671 peak_within_limit=false after_reap=ProcessGroupStats { active_process_count: 0, total_cpu_time: Some(390.625ms), peak_memory_bytes: Some(67129344), io_read_bytes: Some(3), io_write_bytes: Some(37), peak_process_count: None }
+BOUNDARY suspended_spawn=true before_GO pid=6952 configured_memory=67108864 max_processes=1 stats=ProcessGroupStats { active_process_count: 1, total_cpu_time: Some(0ns), peak_memory_bytes: Some(638976), io_read_bytes: Some(0), io_write_bytes: Some(6), peak_process_count: None }
+PASS case=os-pids result=OK os-pids denied status=exit code: 0 elapsed_us=24221 peak_within_limit=true after_reap=ProcessGroupStats { active_process_count: 0, total_cpu_time: Some(15.625ms), peak_memory_bytes: Some(749568), io_read_bytes: Some(3), io_write_bytes: Some(24), peak_process_count: None }
+BOUNDARY suspended_spawn=true before_GO pid=24688 configured_memory=67108864 max_processes=1 stats=ProcessGroupStats { active_process_count: 1, total_cpu_time: Some(15.625ms), peak_memory_bytes: Some(634880), io_read_bytes: Some(0), io_write_bytes: Some(6), peak_process_count: None }
+PASS case=native-call result=WALL_KILLED status=exit code: 1 elapsed_us=505266 peak_within_limit=true after_reap=ProcessGroupStats { active_process_count: 0, total_cpu_time: Some(15.625ms), peak_memory_bytes: Some(696320), io_read_bytes: Some(3), io_write_bytes: Some(6), peak_process_count: None }
+SUMMARY failures=1 strict_peak_gate=false full_contract_proven=false
+windows-job-gate.exe : Error: "Windows resource gate failed"
+No linha:2 caractere:813
++ ...  failed' }; & spikes/lua-containment/target/debug/windows-job-gate.ex ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Error: "Windows resource gate failed":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

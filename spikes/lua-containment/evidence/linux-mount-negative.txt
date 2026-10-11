@@ -1,0 +1,15 @@
+NEGATIVE permission: nobody has no delegation at hierarchy root
+SPIKE platform=linux architecture=x86_64 mlua=0.12.2 Lua=5.4 vm_limit=8388608
+PASS case=boundary-denied source_gate=closed killed_reaped=true error=No such file or directory (os error 2)
+Error: "containment unavailable; source gate remained closed: Permission denied (os error 13)"
+PASS permission denial exits 1 with GO withheld
+NEGATIVE controller: real cgroup without enabled controllers
+Error: "containment unavailable; no helper spawned: delegated controller unavailable: memory"
+PASS missing controller exits 1 before helper spawn
+NEGATIVE ordinary directory: fake controller files
+Error: "containment unavailable; no helper spawned: delegated root is outside real cgroup2 mount"
+PASS fake or escaped mount rejected before helper spawn
+NEGATIVE symlink: resolves outside expected cgroup2 mount
+Error: "containment unavailable; no helper spawned: delegated root is outside real cgroup2 mount"
+PASS fake or escaped mount rejected before helper spawn
+PASS no live helper executable remains

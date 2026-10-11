@@ -1,0 +1,2 @@
+    Checking sider-lua-containment-spike v0.0.0 (/mnt/c/Users/Usuario/Documents/Coding/sider-wt-lua-containment/spikes/lua-containment)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.67s

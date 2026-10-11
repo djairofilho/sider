@@ -1,0 +1,11 @@
+cargo :  Documenting sider-lua-containment-spike v0.0.0 
+(C:\Users\Usuario\Documents\Coding\sider-wt-lua-containment\spikes\lua-containment)
+No linha:2 caractere:1
++ cargo doc --locked --manifest-path spikes/lua-containment/Cargo.toml  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Documenting si...ua-containment):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.61s
+   Generated C:\Users\Usuario\Documents\Coding\sider-wt-lua-containment\spikes\lua-containment\target\doc\sider_lua_con
+tainment_spike\index.html and 2 other files
