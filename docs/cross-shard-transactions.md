@@ -1,12 +1,12 @@
 # Proposed cross-shard transaction contract
 
-**Status: explicit local header-7/record-1 server mode implemented; replication
-and release validation remain open.** This design addresses
+**Status: explicit header-7/record-1 server mode and loopback replication
+implemented; failure and release validation remain open.** This design addresses
 [issue #92](https://github.com/djairofilho/sider/issues/92). The default
 [transactions](transactions.md) and [routing](sharding.md) contracts still require
 one shard. `SIDER_AOF_COMPOSED=1` with a record-1 AOF directory selects the
-mixed-owner profile for local RESP `MULTI`/`EXEC`; configuration rejects any
-replication setting. A mixed-owner EXEC uses sorted participant discovery, owner
+mixed-owner profile for RESP `MULTI`/`EXEC`. Both replication peers must select
+the same profile. A mixed-owner EXEC uses sorted participant discovery, owner
 preparation under global exclusion, one durable batch decision, and complete
 application before visibility. Unsupported cross-shard commands invalidate the
 queue before participant preparation. In this profile, one `WATCH` call can
@@ -18,12 +18,14 @@ cover compaction, torn records, last-owner quota failure, writer uncertainty,
 partial live application, cancellation, and nine process-kill boundaries. The
 TCP test covers mixed-owner EXEC, ordered binary `MGET`, multi-owner WATCH conflict, unsupported
 command rejection, restart, and wrong-profile startup refusal. These tests do not
-simulate power loss or cover network replication boundaries. The transport-3
+simulate power loss. The transport-3
 codec, schema-3 backup library, live source export, loopback-only backup CLI,
 one-frame journal publication, and library TCP follower path exist. A focused
 library test covers FULL, a mixed batch, disconnect, CONTINUE, and persisted
-replica cursor. No executable replication configuration or release gate selects
-that follower. The issue remains open.
+replica cursor. A real process test now exercises mixed-owner EXEC through the
+transport-3 primary and follower, full sync, resumed follower, source restart,
+manual promotion, and recovery. Crash injection at each network/apply boundary
+and a release gate remain outstanding. The issue remains open.
 
 ## Contents
 
@@ -78,7 +80,8 @@ Empty and keyless batches use worker zero where owner state is needed.
 
 The local enabled mode allows queued supported commands to span workers. No new
 RESP command is required. `SIDER_AOF_COMPOSED=1` is disabled by default and
-requires record version 1, an AOF directory, and no replication configuration.
+requires record version 1 and an AOF directory. A replication peer must select
+the same composed profile explicitly.
 Ordinary multi-key commands outside EXEC retain their current restriction.
 
 Inside enabled EXEC, DEL, EXISTS, MGET, and MSET can discover several participants.
@@ -209,7 +212,8 @@ capability numbering and migration must account for both features, including fil
 that eventually contain memory mutations and multi-shard batches.
 The [proposed durable format registry](durable-format-registry.md) defines a
 composable profile for review. Its record-1 mixed-owner reader and writer are
-selectable only through the explicit local server option; no replica is enabled.
+selectable only through the explicit server option; a matching composed replica
+uses transport 3.
 Its explicit profile allowlist permits a complete record-1 mixed-owner release
 before memory record-2 support, provided every record-2 profile is rejected
 before scanning or repairing a file. Combined memory and mixed-owner data needs
@@ -302,19 +306,18 @@ transaction history. These names and metrics are proposed, not currently availab
 
 ## Proof obligations and implementation stages
 
-The remaining work extends the local implementation across network and release boundaries:
+The implementation now spans the local and loopback network paths. Remaining
+proof is concentrated at failure boundaries and release integration:
 
-| Current boundary | Required proof/change |
+| Implemented boundary | Remaining proof/change |
 | --- | --- |
-| [Connection transaction state](../src/connection/transaction.rs) and [router](../src/storage/routing.rs) select one shard | Discover all participants and reject unsupported cases before controls |
-| [Worker](../src/storage/worker.rs) prepares/applies one Store and appends locally | Owner overlays, atomic per-command candidate acceptance, centralized single append, no-append apply controls |
-| [Snapshot barrier](../src/storage/snapshot.rs) excludes capture but ordinary EXEC holds shared admission | Exclusive supervised transaction path, no shared-to-exclusive upgrade, all dataset observers covered |
-| [AOF recovery](../src/persistence/writer.rs) batch_shard rejects mixed mutations | Version gating, validation/staging for every shard, correct per-shard quota accounting |
-| [Replica storage](../src/storage/replication.rs) rejects mixed participants and Control::Apply persists locally | One replica append/flush and atomic global application/cursor advancement |
-| Current prepared application and dropped guards | Reservation/application failure analysis and supervisor fail-closed behavior after decision |
+| [Connection transaction state](../src/connection/transaction.rs) and [router](../src/storage/routing.rs) discover several owners in the composed profile | Broader command and WATCH fault cases |
+| [Coordinator](../src/storage/coordinator.rs) prepares owners and appends one durable batch under exclusive admission | Boundary fault injection through publication and ACK |
+| [AOF recovery](../src/persistence/writer.rs) stages mixed records before applying any owner | Exact candidate and migration compatibility evidence |
+| [Replica storage](../src/storage/replication.rs) installs snapshots and applies one mixed batch before cursor advancement | Network disconnect and crash cases at each append/apply/flush boundary |
+| [Transport-3 session](../src/replication/session.rs) performs FULL, CONTINUE, ACK, and loopback process recovery | Protected network test and complete failure matrix |
 
-Implement in independently reviewable stages, with cross-shard enablement gated
-until all required paths pass:
+The staged implementation plan is:
 
 1. Introduce bounded participant discovery, coordinator ownership/state machine,
    explicit enablement, and rejection tests while preserving current execution.
@@ -331,11 +334,11 @@ until all required paths pass:
    Record exact SHAs and actual evidence; update public capability documentation
    only after passing results. Release requirements remain in [releases](releases.md).
 
-Issue #92 remains open until implementation and crash/network evidence satisfy all
-four acceptance criteria. Focused tests exercise coordinated mixed-owner RESP EXEC,
-actual writer/recovery, nine process-kill boundaries, and an isolated backup library
-path. They do not exercise network replication failure, power loss, or a native
-release configuration.
+Issue #92 remains open until crash/network evidence satisfies all four acceptance
+criteria. Focused tests exercise coordinated mixed-owner RESP EXEC, actual
+writer/recovery, nine process-kill boundaries, a schema-3 backup path, and a
+loopback process follower with source restart. They do not cover every network
+commit boundary, power loss, protected transport, or a native release candidate.
 
 ## Required deterministic tests
 

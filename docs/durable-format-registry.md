@@ -221,11 +221,12 @@ apply failure, and caller cancellation. It still refuses record 2 and the missin
 mixed bit before record scan. The explicit reader also accepts a persisted primary
 role, and the composed writer can publish one transport-3 journal frame for a
 mixed-owner batch after promotion. The executable refuses a persisted composed
-role without an explicit replication configuration, and its current composed
-configuration still rejects replication. The library replication session now
-selects transport 3 for this profile. A loopback TCP test covers FULL, one mixed
-batch, disconnect, and CONTINUE with the same durable cursor; it rejects a
-transport-1 Hello. The executable does not enable a composed follower yet.
+role without an explicit replication configuration. The replication session
+selects transport 3 for this profile. A loopback library TCP test covers FULL,
+one mixed batch, disconnect, and CONTINUE with the same durable cursor; it
+rejects a transport-1 Hello. A real process test covers mixed-owner EXEC on a
+primary, full and partial synchronization, source restart, manual promotion,
+and recovery on the composed follower.
 An isolated transport-3 codec now frames record-1 snapshot and batch records and
 requires an exact header-7/mixed-bit Hello. Its bounded reader rejects transport
 1/2 frames before payload allocation. Its isolated Export codec carries the same
@@ -240,8 +241,9 @@ mixed snapshots. A live library source negotiates transport 3 before capture.
 The server selects local header-7 storage and EXEC, while the default reader
 still rejects version 7 before inspecting records and preserves source bytes.
 An explicit loopback-only composed export listener and backup CLI select schema 3;
-the composed replication session remains a library path without an executable
-configuration or protected network integration test. Coordinate
+the composed replication session is enabled in the executable only when both
+peers explicitly select the profile. Protected network integration and release
+validation are still pending. Coordinate
 acceptance of allocations 7, transport 3, and backup schema 3 with the memory
 contract owner before a production release.
 

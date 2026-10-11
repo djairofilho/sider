@@ -1,10 +1,10 @@
 # Sider → Sider replication
 
-This procedure describes the published 1.0.1 package. The current checkout's
-protected executable with an internal listener is unavailable until the
-[security implementation](security-implementation.md) completes internal
-revocation. Use its explicit `legacy-loopback` profile only in a controlled
-development environment.
+The base procedure describes the published 1.0.1 package. The current checkout
+also has a protected POSIX development path; protected Windows startup and
+broader deployment evidence remain pending in the
+[security implementation](security-implementation.md). Use the explicit
+`legacy-loopback` profile only in a controlled development environment.
 
 Sider asynchronously replicates strings, hashes, lists, sets, sorted sets,
 absolute deadlines, and resolved transactional batches. Instances require the
@@ -50,6 +50,26 @@ SIDER_REPLICA_OF=127.0.0.1:7380 \
 In PowerShell, set these same variables with `$env:NAME = 'value'` in each process's
 terminal and run `sider.exe`. `SIDER_REPLICA_OF` must be unset on the initial primary.
 The upstream address requires a literal IP address and a nonzero port.
+
+### Development composed profile
+
+The current checkout can replicate a record-1, header-7 mixed-owner dataset.
+Set `SIDER_AOF_COMPOSED=1` on both the primary and replica in addition to the
+settings above; use separate AOF directories and matching shard and limit
+configuration. A mixed-owner `EXEC` is one AOF record and one transport-3
+replication batch. The follower installs a full snapshot or resumes retained
+history, flushes the complete batch before ACK, and remains read-only until
+manual promotion. Use `sider-replica --addr IP:PORT --profile composed --status`
+or `--promote` against its internal listener. Fence the old primary before
+promotion. The default `sider-replica` command uses transport 1 and cannot
+administer a composed node.
+
+For plaintext development, explicitly choose `SIDER_SECURITY_PROFILE=legacy-loopback`;
+the client listener, internal listener, and upstream must be literal loopback
+addresses. Protected internal transport requires a validated security generation.
+The process test covers loopback full sync, mixed-owner batches, partial resume,
+source restart, promotion, and recovery. It does not establish protected-network
+deployment, every crash/network boundary, or release approval.
 
 | Variable | Default | Contract |
 | --- | --- | --- |

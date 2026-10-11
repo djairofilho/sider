@@ -113,7 +113,7 @@ described in the [persistence guide](docs/persistence.md).
 | `SIDER_SHARDS` | `1` | Between 1 and 256 workers, with divided quota and fixed configuration |
 | `SIDER_AOF_DIR` | Unset | Exclusive data directory; enables AOF |
 | `SIDER_AOF_RECORD_VERSION` | `1` | Set `2` with `SIDER_AOF_DIR` to enable durable `MEM.*`; an internal listener can export live backups, while replica following remains unavailable |
-| `SIDER_AOF_COMPOSED` | `0` | Set `1` with record version 1 and `SIDER_AOF_DIR` for local header-7 mixed-owner `EXEC`; replication is refused |
+| `SIDER_AOF_COMPOSED` | `0` | Set `1` with record version 1 and `SIDER_AOF_DIR` on both nodes for header-7 mixed-owner `EXEC` and transport-3 replication in the development checkout |
 | `SIDER_AOF_SYNC` | `always` | `always` waits for sync per batch; `everysec` synchronizes periodically |
 | `SIDER_REPLICATION_ADDR` | Unset | Internal replication, backup, and administration listener; requires AOF |
 | `SIDER_REPLICA_OF` | Unset | Upstream IP and port; configures the instance as a replica |
