@@ -1,5 +1,9 @@
 //! An explicit captured snapshot can be exported only after profile negotiation.
 
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -224,4 +228,59 @@ async fn next_result(
     input: &mut tokio::io::DuplexStream,
 ) -> Result<(Bytes, Message), protocol::Error> {
     protocol::read_composed_authorized(input, Limits::default(), DEADLINE, |_| true).await
+}
+
+#[tokio::test]
+async fn negotiation_rejects_before_capture() {
+    let captured = Arc::new(AtomicUsize::new(0));
+    let tracked = captured.clone();
+    let (mut producer, mut consumer) = duplex(64);
+    let task = tokio::spawn(async move {
+        let mut profile = source();
+        profile.base.cursor = None;
+        if composed::negotiate_export(&mut producer, profile, Limits::default(), DEADLINE)
+            .await
+            .unwrap()
+            .is_some()
+        {
+            tracked.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+    let mut wrong = request();
+    if let Message::ComposedExport { sider_version, .. } = &mut wrong {
+        *sider_version = Bytes::from_static(b"0.0.0");
+    }
+    protocol::write_composed(&mut consumer, &wrong, Limits::default(), DEADLINE)
+        .await
+        .unwrap();
+    assert_eq!(
+        next(&mut consumer).await.1,
+        Message::Reject(Reject::IncompatibleVersion)
+    );
+    task.await.unwrap();
+    assert_eq!(captured.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn admission_binds_capture_to_exact_profile() {
+    let (mut producer, mut consumer) = duplex(64);
+    let task = tokio::spawn(async move {
+        let mut profile = source();
+        profile.base.cursor = None;
+        let admission =
+            composed::negotiate_export(&mut producer, profile, Limits::default(), DEADLINE)
+                .await
+                .unwrap()
+                .unwrap();
+        let mut changed = source();
+        changed.base.shard_count += 1;
+        admission
+            .send_snapshot(&mut producer, changed, CURSOR, &[put(b"a", b"value")])
+            .await
+    });
+    protocol::write_composed(&mut consumer, &request(), Limits::default(), DEADLINE)
+        .await
+        .unwrap();
+    assert!(next_result(&mut consumer).await.is_err());
+    assert!(task.await.unwrap().is_err());
 }
