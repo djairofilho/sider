@@ -2,8 +2,9 @@
 
 The development library has an explicit schema-3 path for header-7, record-1
 mixed-owner snapshots. It is not selected by the Sider executable or backup CLI.
-The default AOF reader still rejects header 7, so a restored directory cannot yet
-be started through public server configuration.
+The default AOF reader still rejects header 7. A library caller can explicitly
+open a restored directory with `persistence::recover_composed`; the Sider server
+configuration still cannot select this profile.
 
 Transport 3 sends a standalone `ComposedExport` request with exact record version
 `1`, header version `7`, and the `MIXED_OWNER_BATCH` capability bit. A source can
@@ -23,12 +24,15 @@ The archive also contains `backup-manifest.json` and `SHA256SUMS`.
 
 `verify_composed` checks the manifest, hashes, header profile, records, quotas,
 seal, and transport digest. `restore_composed` copies only a verified archive into
-a new directory and revalidates the copy before publication. It does not enable
-normal startup of the restored directory yet. The schema-1 and schema-2 APIs
-reject a schema-3 archive and retain their existing wire and manifest formats.
+a new directory and revalidates the copy before publication. The caller must
+set the restored layout on `AofConfig` and call `persistence::recover_composed`
+to replay header 7. Every owner must use its returned writer handle for
+atomic mixed-owner batches. This does not enable normal server startup. The
+schema-1 and schema-2 APIs reject a schema-3 archive and retain their existing
+wire and manifest formats.
 
 Focused tests run with `cargo test --locked --test replication_composed_backup`.
-They cover a complete export/verify/restore cycle, refusal before archive
+They cover a complete export/verify/restore/recover cycle, refusal before archive
 creation, cleanup after a truncated stream, and semantic profile mismatches after
-recomputing checksums. Production use still needs a selectable header-7 source,
-replica and recovery paths, the backup CLI, and native release evidence.
+recomputing checksums. Production use still needs a selectable header-7 server
+source and replica path, the backup CLI, and native release evidence.

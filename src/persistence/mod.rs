@@ -17,5 +17,5 @@ pub use role::{ReplicationMetadata, Role};
 pub(crate) use writer::recover_composed_legacy_mixed;
 pub use writer::{
     AofConfig, AofDiagnosticsHandle, AofError, AofHandle, FaultInjector, NoFaults, Recovered,
-    RecoveryMetadata, SyncPolicy, recover, recover_with_faults,
+    RecoveryMetadata, SyncPolicy, recover, recover_composed, recover_with_faults,
 };

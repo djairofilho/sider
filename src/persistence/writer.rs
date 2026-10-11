@@ -556,6 +556,24 @@ pub fn recover_with_faults(
     load(config, store_config, clock, faults, false)
 }
 
+/// Opens the explicit header-7/record-1 mixed-owner profile in a library caller.
+/// The server configuration does not select this profile. All owners using the
+/// recovered store must share the returned writer handle for atomic batches.
+pub fn recover_composed(
+    config: AofConfig,
+    store_config: StoreConfig,
+    clock: Arc<dyn Clock>,
+) -> Result<Recovered, AofError> {
+    load_profile(
+        config,
+        store_config,
+        clock,
+        Arc::new(NoFaults),
+        false,
+        Profile::ComposedLegacyMixed,
+    )
+}
+
 /// Development-only local profile; no server, backup, or replica configuration
 /// can select it. The caller must bind every owner to the same writer handle.
 #[cfg(test)]
