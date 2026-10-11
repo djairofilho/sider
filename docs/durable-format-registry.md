@@ -213,6 +213,8 @@ An internal test-only coordinator also appends one combined owner record before
 application. It verifies restart with both owners, record-limit rejection without
 an append, and fail-closed admission when the writer result is uncertain or the
 second owner is lost after the append.
+Process-kill tests cover nine boundaries from before append through owner
+application and verify that restart never replays only one owner.
 It refuses record 2, the missing mixed bit, and replica roles before record scan.
 No public AOF configuration selects that profile; default recovery still rejects
 version 7 before inspecting records, including every torn first-record prefix,
