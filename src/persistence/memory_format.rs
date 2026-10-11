@@ -2,7 +2,8 @@
 //!
 //! Default recovery, append, backup, and transport still use record 1. They
 //! continue refusing headers 4/5; an explicit development AOF profile exercises
-//! record-2 recovery, append, and compaction without activating transport or backup.
+//! record-2 recovery, append, and compaction. Separate explicit library backup APIs
+//! export/verify/restore schema 2; default backup and all live transport remain legacy.
 //! This module intentionally has no directory-opening or tail-repair API.
 
 use super::{DurableLayout, ReplicationMetadata, Role, format};

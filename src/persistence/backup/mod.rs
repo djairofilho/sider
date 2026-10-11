@@ -4,13 +4,19 @@ mod archive;
 pub mod cli;
 mod client;
 mod manifest;
+mod memory;
 
 use std::path::PathBuf;
 use std::time::Duration;
 
-pub use archive::{VerifiedBackup, restore, verify};
+pub use archive::{
+    VerifiedBackup, restore, restore_memory, restore_memory_with_faults, verify, verify_memory,
+};
 pub use client::{ExportOptions, export, export_secure, export_stream};
 pub use manifest::Manifest;
+pub use memory::{
+    OfflineMemoryExportOptions, export_memory_offline, export_memory_offline_with_faults,
+};
 
 use super::{DurableLayout, format};
 
@@ -18,6 +24,26 @@ pub const MAX_BACKUP_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const SNAPSHOT: &str = "snapshot.aof";
 pub const MANIFEST: &str = "backup-manifest.json";
 pub const CHECKSUMS: &str = "SHA256SUMS";
+
+/// Explicit archive allowlist; legacy APIs never infer a memory profile from bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Profile {
+    Legacy,
+    Memory,
+}
+
+impl Profile {
+    pub(super) fn versions(self) -> (u32, u32, u32) {
+        match self {
+            Self::Legacy => (1, format::LAYOUT_VERSION, format::VERSION),
+            Self::Memory => (
+                2,
+                super::memory_format::HEADER_VERSION,
+                super::memory_format::RECORD_VERSION,
+            ),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {

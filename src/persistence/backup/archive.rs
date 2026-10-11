@@ -5,9 +5,10 @@ use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
-use super::{CHECKSUMS, Error, Limits, MANIFEST, Manifest, RestoreOptions, SNAPSHOT};
+use super::{CHECKSUMS, Error, Limits, MANIFEST, Manifest, Profile, RestoreOptions, SNAPSHOT};
 use crate::persistence::DurableLayout;
-use crate::persistence::format::{self, Next, Record};
+use crate::persistence::format;
+use crate::persistence::memory_format::{Next, Record};
 use crate::persistence::writer::{DirectoryLock, sync_directory};
 use crate::storage::{Clock, Mutation, Store, StoreConfig};
 
@@ -126,11 +127,13 @@ pub(super) struct Quotas {
     total: usize,
     pub usage: Vec<usize>,
     pub live_entries: u64,
+    unix_ms: i64,
 }
 
 impl Quotas {
     pub fn new(layout: DurableLayout, total: usize, clock: Arc<dyn Clock>) -> Result<Self, Error> {
         layout.quota(total, 0)?;
+        let unix_ms = clock.unix_millis();
         Ok(Self {
             store: Store::with_config(
                 StoreConfig {
@@ -142,6 +145,7 @@ impl Quotas {
             total,
             usage: vec![0; layout.shard_count as usize],
             live_entries: 0,
+            unix_ms,
         })
     }
     pub fn add(&mut self, mutation: &Mutation) -> Result<(), Error> {
@@ -155,7 +159,13 @@ impl Quotas {
         if self.usage[shard] > self.layout.quota(self.total, shard)? {
             return Err(Error::Invalid("snapshot exceeds one shard's quota"));
         }
-        self.live_entries += u64::from(!self.store.is_empty());
+        let live = match mutation {
+            Mutation::Put {
+                expires_at_unix_ms, ..
+            } => expires_at_unix_ms.is_none_or(|deadline| deadline > self.unix_ms),
+            Mutation::Delete { .. } => false,
+        };
+        self.live_entries += u64::from(live && !self.store.is_empty());
         self.store
             .replay(&[Mutation::Delete {
                 key: mutation.key().clone(),
@@ -190,51 +200,64 @@ pub(super) fn validate_file(
     limits: Limits,
     clock: Arc<dyn Clock>,
 ) -> Result<(Vec<usize>, u64), Error> {
-    if hash_file(file)? != (manifest.snapshot_sha256.clone(), manifest.snapshot_bytes) {
-        return Err(Error::Invalid("snapshot checksum or size"));
-    }
     file.seek(SeekFrom::Start(0))?;
-    let header = format::read_header_with_layout(&mut *file)?;
-    if header.format_version != format::LAYOUT_VERSION
+    let codec = crate::persistence::profile::Profile(manifest.profile == Profile::Memory);
+    let header = codec.read_header(&mut *file)?;
+    if header.format_version != manifest.profile.versions().1
+        || header.replication.is_some()
         || header.sequence != manifest.cursor.sequence
         || header.layout != manifest.layout
     {
         return Err(Error::Invalid("snapshot header identity"));
     }
+    if hash_file(file)? != (manifest.snapshot_sha256.clone(), manifest.snapshot_bytes) {
+        return Err(Error::Invalid("snapshot checksum or size"));
+    }
+    file.seek(SeekFrom::Start(header.bytes as u64))?;
     let mut previous = None;
     let mut digest = 0;
     let mut transport_digest = 0;
     let mut quotas = Quotas::new(manifest.layout, limits.max_dataset_bytes, freeze(clock))?;
+    let mut transfer_bytes = 0u64;
     for _ in 0..manifest.entries {
-        let Next::Record(Record::Snapshot(mutation @ Mutation::Put { .. })) =
-            format::read_record(&mut *file, limits.record())?
-        else {
+        let Next::Record(record) = codec.read_record(&mut *file, limits.record())? else {
             return Err(Error::Invalid("missing snapshot entry"));
         };
+        let Record::Snapshot(image) = *record else {
+            return Err(Error::Invalid("missing snapshot entry"));
+        };
+        let mutation = super::memory::storage_image(&image)?;
         if previous.as_ref().is_some_and(|key| key >= mutation.key()) {
             return Err(Error::Invalid("key order or duplicate"));
         }
         previous = Some(mutation.key().clone());
         quotas.add(&mutation)?;
-        transport_digest = format::snapshot_digest(
-            transport_digest,
-            &crate::replication::protocol::encode(
+        let encoded = codec.encode(&Record::Snapshot(image), limits.record())?;
+        let framed = if manifest.profile == Profile::Memory {
+            super::memory::snapshot_frame(&encoded, limits)?
+        } else {
+            crate::replication::protocol::encode(
                 &crate::replication::protocol::Message::SnapshotEntry(mutation.clone()),
                 limits.transport(),
-            )?,
-        );
-        digest = format::snapshot_digest(
-            digest,
-            &format::encode(&Record::Snapshot(mutation), limits.record())?,
-        );
+            )?
+            .to_vec()
+        };
+        transfer_bytes = transfer_bytes
+            .checked_add(framed.len() as u64)
+            .ok_or(Error::Invalid("snapshot transfer size overflow"))?;
+        if manifest.profile == Profile::Memory && transfer_bytes > limits.max_snapshot_bytes {
+            return Err(Error::Invalid("snapshot exceeds transfer budget"));
+        }
+        transport_digest = format::snapshot_digest(transport_digest, &framed);
+        digest = format::snapshot_digest(digest, &encoded);
     }
-    if format::read_record(&mut *file, limits.record())?
-        != Next::Record(Record::Seal {
+    if codec.read_record(&mut *file, limits.record())?
+        != Next::Record(Box::new(Record::Seal {
             sequence: manifest.cursor.sequence,
             entries: manifest.entries,
             digest,
-        })
-        || format::read_record(&mut *file, limits.record())? != Next::End
+        }))
+        || codec.read_record(&mut *file, limits.record())? != Next::End
         || transport_digest != manifest.transport_digest
         || hash_file(file)? != (manifest.snapshot_sha256.clone(), manifest.snapshot_bytes)
     {
@@ -250,6 +273,26 @@ pub fn verify(
     limits: Limits,
     clock: Arc<dyn Clock>,
 ) -> Result<VerifiedBackup, Error> {
+    verify_profile(source, layout, limits, clock, Profile::Legacy)
+}
+
+/// Verifies only the frozen schema-2/header-4/record-2 archive profile.
+pub fn verify_memory(
+    source: &Path,
+    layout: DurableLayout,
+    limits: Limits,
+    clock: Arc<dyn Clock>,
+) -> Result<VerifiedBackup, Error> {
+    verify_profile(source, layout, limits, clock, Profile::Memory)
+}
+
+fn verify_profile(
+    source: &Path,
+    layout: DurableLayout,
+    limits: Limits,
+    clock: Arc<dyn Clock>,
+    profile: Profile,
+) -> Result<VerifiedBackup, Error> {
     limits.validate()?;
     layout.validate()?;
     let metadata = fs::symlink_metadata(source)?;
@@ -263,7 +306,7 @@ pub fn verify(
     if bytes.len() as u64 > MAX_MANIFEST_BYTES {
         return Err(Error::Invalid("manifest exceeds limit"));
     }
-    let manifest = Manifest::parse(&bytes, limits)?;
+    let manifest = Manifest::parse(&bytes, limits, profile)?;
     if manifest.layout != layout {
         return Err(Error::Invalid("requested layout differs from backup"));
     }
@@ -285,11 +328,44 @@ pub fn verify(
 
 /// Rejects an existing destination. Publishes only after checking the complete copy and sync.
 pub fn restore(options: RestoreOptions, clock: Arc<dyn Clock>) -> Result<VerifiedBackup, Error> {
-    let verified = verify(
+    restore_profile(
+        options,
+        clock,
+        Profile::Legacy,
+        Arc::new(crate::persistence::NoFaults),
+    )
+}
+
+/// Restores only schema 2 into a new header-4 directory; never upgrades legacy bytes.
+pub fn restore_memory(
+    options: RestoreOptions,
+    clock: Arc<dyn Clock>,
+) -> Result<VerifiedBackup, Error> {
+    restore_memory_with_faults(options, clock, Arc::new(crate::persistence::NoFaults))
+}
+
+/// Deterministic copy/publication failure boundaries for the memory restore path.
+pub fn restore_memory_with_faults(
+    options: RestoreOptions,
+    clock: Arc<dyn Clock>,
+    faults: Arc<dyn crate::persistence::FaultInjector>,
+) -> Result<VerifiedBackup, Error> {
+    restore_profile(options, clock, Profile::Memory, faults)
+}
+
+fn restore_profile(
+    options: RestoreOptions,
+    clock: Arc<dyn Clock>,
+    profile: Profile,
+    faults: Arc<dyn crate::persistence::FaultInjector>,
+) -> Result<VerifiedBackup, Error> {
+    let clock = freeze(clock);
+    let verified = verify_profile(
         &options.source,
         options.layout,
         options.limits,
         clock.clone(),
+        profile,
     )?;
     let source = options.source.canonicalize()?;
     if destination(&options.destination)?.starts_with(&source) {
@@ -304,15 +380,22 @@ pub fn restore(options: RestoreOptions, clock: Arc<dyn Clock>) -> Result<Verifie
         .write(true)
         .create_new(true)
         .open(&temporary)?;
-    std::io::copy(
-        &mut input.take(options.limits.max_snapshot_bytes + 1),
-        &mut copied,
-    )?;
+    let mut input = input.take(options.limits.max_snapshot_bytes + 1);
+    let mut buffer = [0; 8192];
+    loop {
+        let count = input.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        faults.write_append(&mut copied, &buffer[..count])?;
+    }
     copied.sync_all()?;
+    faults.hit("backup_restore_after_copy_sync")?;
     let (shard_usage, live_entries) =
         validate_file(&mut copied, &verified.manifest, options.limits, clock)?;
     drop(copied);
     fs::rename(&temporary, owned.path.join(GENERATION))?;
+    faults.hit("backup_restore_after_generation_publish")?;
     owned.finish()?;
     Ok(VerifiedBackup {
         manifest: verified.manifest,

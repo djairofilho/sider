@@ -1,5 +1,10 @@
 # Consistent backup and restoration
 
+The development branch additionally has explicit library-only
+[schema-2 memory backup APIs](agent-memory-backup.md). Its offline export and
+memory verification/restoration do not change the schema-1 CLI procedure below.
+Live transport-2 export remains pending.
+
 This procedure describes the published 1.0.1 package. The current checkout's
 protected executable with an internal listener is unavailable until the
 [security implementation](security-implementation.md) completes internal

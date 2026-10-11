@@ -14,16 +14,19 @@ use std::{
     time::Duration,
 };
 
+static NEXT_DIRECTORY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 struct Directory(PathBuf);
 impl Directory {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
-            "sider-memory-aof-{}-{}",
+            "sider-memory-aof-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT_DIRECTORY.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir(&path).unwrap();
         Self(path)
