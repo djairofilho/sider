@@ -59,11 +59,6 @@ impl StartupSecurity {
             }
             Ok(None)
         } else {
-            // Live embedding APIs do not establish executable deployment evidence.
-            // Keep this gate until material permissions and lifecycle are proven.
-            if config.replication.is_some() {
-                return Err(Error::InternalRuntimeUnavailable);
-            }
             Generation::server(
                 self.directory.as_deref().ok_or(Error::Configuration)?,
                 config.replication.is_some(),

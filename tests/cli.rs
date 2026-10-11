@@ -59,7 +59,7 @@ fn security_cli_windows_protected_profile_is_unavailable_before_listener_start()
 }
 
 #[test]
-fn security_cli_protected_internal_requires_revocation_before_recovery_or_bind() {
+fn security_cli_protected_internal_requires_material_before_recovery_or_bind() {
     let directory = TestDirectory::new();
     let occupied = TcpListener::bind("127.0.0.1:0").unwrap();
     let missing_aof = directory.file("must-not-create-aof");
@@ -79,11 +79,10 @@ fn security_cli_protected_internal_requires_revocation_before_recovery_or_bind()
     let result = process.wait();
     assert!(!result.status.success());
     let stderr = String::from_utf8(result.stderr).unwrap();
-    assert!(
-        stderr.contains(
-            "protected internal profile unavailable pending generation revocation support"
-        )
-    );
+    #[cfg(windows)]
+    assert!(stderr.contains("protected Windows profile unavailable"));
+    #[cfg(unix)]
+    assert!(stderr.contains("security configuration unavailable"));
     assert!(!stderr.contains("must-not-read-security-canary"));
     assert!(!process.directory.file("ready.json").exists());
     assert!(!missing_aof.exists());
