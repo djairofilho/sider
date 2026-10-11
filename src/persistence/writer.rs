@@ -57,8 +57,8 @@ impl AofConfig {
         }
     }
     /// Selects the record-2/header-4-or-5 development profile explicitly.
-    /// Live backup/replication transport and offline migration remain gated.
-    /// Explicit offline memory backup APIs can export/verify/restore this profile.
+    /// Live backup/replication transport remains gated.
+    /// Explicit offline memory backup and migration APIs handle this profile.
     pub fn with_memory_profile(mut self) -> Self {
         self.memory_profile = true;
         self
@@ -364,6 +364,11 @@ pub struct RecoveryMetadata {
     pub replication: Option<ReplicationMetadata>,
 }
 impl Recovered {
+    /// Identifies the generation actually selected and held open by recovery.
+    pub(super) fn generation_path(&self) -> PathBuf {
+        generation_path(&self.writer.config.directory, self.writer.generation)
+    }
+
     /// Starts only after complete replay; the JoinHandle supervises sync, append, and close.
     pub fn start(
         self,

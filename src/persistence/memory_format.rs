@@ -4,6 +4,7 @@
 //! continue refusing headers 4/5; an explicit development AOF profile exercises
 //! record-2 recovery, append, and compaction. Separate explicit library backup APIs
 //! export/verify/restore schema 2; default backup and all live transport remain legacy.
+//! Explicit offline migration writes header 4; the default migration CLI remains legacy.
 //! This module intentionally has no directory-opening or tail-repair API.
 
 use super::{DurableLayout, ReplicationMetadata, Role, format};
