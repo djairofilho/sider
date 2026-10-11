@@ -9,14 +9,14 @@ mixed-owner profile for local RESP `MULTI`/`EXEC`; configuration rejects any
 replication setting. A mixed-owner EXEC uses sorted participant discovery, owner
 preparation under global exclusion, one durable batch decision, and complete
 application before visibility. Unsupported cross-shard commands invalidate the
-queue before participant preparation. A single `WATCH` command still requires
-one shard, but its observed keys may belong to another owner than later queued
-commands.
+queue before participant preparation. In this profile, one `WATCH` call can
+observe several owners under global exclusion; pending expirations use one AOF
+batch before all tokens are installed.
 
 The header-7 reader stages and validates each touched shard before replay. Tests
 cover compaction, torn records, last-owner quota failure, writer uncertainty,
 partial live application, cancellation, and nine process-kill boundaries. The
-TCP test covers mixed-owner EXEC, ordered binary `MGET`, WATCH conflict, unsupported
+TCP test covers mixed-owner EXEC, ordered binary `MGET`, multi-owner WATCH conflict, unsupported
 command rejection, restart, and wrong-profile startup refusal. These tests do not
 simulate power loss or cover network replication boundaries. The transport-3
 codec, schema-3 backup library, live source export library, and local replica
