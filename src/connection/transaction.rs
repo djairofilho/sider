@@ -31,6 +31,7 @@ struct Queue {
     commands: Vec<Command>,
     bytes: usize,
     shard: Option<usize>,
+    crossed: bool,
     dirty: bool,
     permission_denied: bool,
 }
@@ -40,6 +41,21 @@ fn error(message: &'static [u8]) -> Action {
 }
 fn ok() -> Action {
     Action::Reply(Frame::Simple(Bytes::from_static(b"OK")))
+}
+
+fn coordinated_command(command: &Command) -> bool {
+    !matches!(
+        command,
+        Command::Info(_)
+            | Command::Subscribe { .. }
+            | Command::Unsubscribe { .. }
+            | Command::Publish { .. }
+            | Command::Multi
+            | Command::Exec
+            | Command::Discard
+            | Command::Watch { .. }
+            | Command::Memory { .. }
+    )
 }
 
 impl Transaction {
@@ -189,9 +205,27 @@ impl Transaction {
                     return Ok(Action::Reply(Frame::Simple(Bytes::from_static(b"QUEUED"))));
                 }
                 let mut shard = queue.shard;
-                if let Err(error) = database.router().select_command(&command, &mut shard) {
+                let crossing = database.router().select_command(&command, &mut shard).err();
+                if let Some(error) = crossing.as_ref()
+                    && !config.composed_aof
+                {
                     self.poison();
                     return Ok(Action::Reply(Frame::Error(Bytes::from(error.to_string()))));
+                }
+                if config.composed_aof
+                    && (queue.crossed || crossing.is_some())
+                    && (!coordinated_command(&command)
+                        || queue
+                            .commands
+                            .iter()
+                            .any(|queued| !coordinated_command(queued))
+                        || database
+                            .router()
+                            .plan_transaction_command(command.clone())
+                            .is_err())
+                {
+                    self.poison();
+                    return Ok(error(b"ERR unsupported cross-shard transaction command"));
                 }
                 if queue.commands.len() >= config.transaction_max_commands
                     || queue
@@ -202,7 +236,10 @@ impl Transaction {
                     self.poison();
                     return Ok(error(b"ERR transaction queue limit exceeded"));
                 }
-                queue.shard = shard;
+                queue.crossed |= crossing.is_some();
+                if !queue.crossed {
+                    queue.shard = shard;
+                }
                 queue.bytes += bytes;
                 queue.commands.push(command);
                 Action::Reply(Frame::Simple(Bytes::from_static(b"QUEUED")))
@@ -241,6 +278,74 @@ mod tests {
             Action::Reply(frame) => frame,
             _ => panic!("expected immediate reply"),
         }
+    }
+
+    #[tokio::test]
+    async fn composed_queue_accepts_two_owners_and_aborts_unsupported_crossing() {
+        let config = ServerConfig {
+            composed_aof: true,
+            ..ServerConfig::default()
+        };
+        let (_stop, shutdown) = tokio::sync::watch::channel(false);
+        let (db, _owners) = worker::channel_with_stores(
+            2,
+            config.request_timeout,
+            shutdown,
+            vec![Store::new(), Store::new()],
+        )
+        .unwrap();
+        let set = |key| Command::Set {
+            key: Bytes::from_static(key),
+            value: Bytes::from_static(b"value"),
+        };
+        let mut tx = Transaction::default();
+        assert_eq!(
+            reply(
+                tx.handle(Command::Multi, 1, &config, &db, false)
+                    .await
+                    .unwrap()
+            ),
+            Frame::Simple(Bytes::from_static(b"OK"))
+        );
+        assert_eq!(
+            reply(tx.handle(set(b"a"), 1, &config, &db, false).await.unwrap()),
+            Frame::Simple(Bytes::from_static(b"QUEUED"))
+        );
+        assert_eq!(
+            reply(tx.handle(set(b"b"), 1, &config, &db, false).await.unwrap()),
+            Frame::Simple(Bytes::from_static(b"QUEUED"))
+        );
+        assert!(matches!(
+            tx.handle(Command::Exec, 1, &config, &db, false).await.unwrap(),
+            Action::Exec { commands, .. } if commands.len() == 2
+        ));
+
+        tx.handle(Command::Multi, 1, &config, &db, false)
+            .await
+            .unwrap();
+        tx.handle(
+            Command::Publish {
+                channel: Bytes::from_static(b"channel"),
+                message: Bytes::from_static(b"message"),
+            },
+            1,
+            &config,
+            &db,
+            false,
+        )
+        .await
+        .unwrap();
+        tx.handle(set(b"a"), 1, &config, &db, false).await.unwrap();
+        assert_eq!(
+            reply(tx.handle(set(b"b"), 1, &config, &db, false).await.unwrap()),
+            Frame::Error(Bytes::from_static(
+                b"ERR unsupported cross-shard transaction command"
+            ))
+        );
+        assert!(matches!(
+            reply(tx.handle(Command::Exec, 1, &config, &db, false).await.unwrap()),
+            Frame::Error(message) if message.starts_with(b"EXECABORT")
+        ));
     }
 
     #[tokio::test]

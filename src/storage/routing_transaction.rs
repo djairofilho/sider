@@ -1,4 +1,4 @@
-//! Pure command planning for a future supervised multi-owner EXEC coordinator.
+//! Pure command planning for the explicit supervised multi-owner EXEC coordinator.
 //!
 //! This does not admit or execute a transaction. The public database path still
 //! rejects mixed-owner batches before enqueueing any worker request.
