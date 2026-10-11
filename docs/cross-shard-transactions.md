@@ -1,6 +1,6 @@
 # Proposed cross-shard transaction contract
 
-**Status: protocol proposed; preparation and isolated replay foundations integrated.**
+**Status: protocol proposed; command planning, preparation, and isolated replay foundations integrated.**
 This design addresses
 [issue #92](https://github.com/djairofilho/sider/issues/92) against source baseline
 `0f0f232`. It supplies a written contract and an implementation plan; it does not
@@ -19,6 +19,11 @@ the helper's local all-or-none application, without enabling a durable profile.
 An internal, unselectable header-7/record-1 profile now exercises one mixed batch
 through an actual AOF append, restart, replay, compaction, and every torn-record
 prefix. It rejects an over-quota owner and unsupported profiles without repair.
+The router can now split mixed-owner MGET, EXISTS, DEL, and MSET into sorted owner
+fragments and reconstruct their replies. MGET keeps binary key order and duplicate
+occurrences; MSET keeps each owner's original pair order and marks the command
+for joint candidate acceptance. This planner does not enqueue fragments, prepare
+owners, append a record, or enable mixed-owner EXEC.
 The public server and tools still cannot select header 7; transport 3, backup 3,
 replica application, and coordinated EXEC remain unimplemented.
 
