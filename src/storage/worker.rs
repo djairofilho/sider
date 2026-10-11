@@ -610,7 +610,17 @@ impl Worker {
                 let prepared = self
                     .store
                     .prepare_memory_with_limit(key, operation, record_limit);
+                let search_stats = prepared.search_stats();
                 let result = self.commit_memory(prepared).await;
+                if let Ok(Reply::Array(_)) = &result
+                    && let Some(stats) = search_stats
+                {
+                    self.metrics.add(Counter::MemorySearches, 1);
+                    self.metrics
+                        .add(Counter::MemorySearchRecordVisits, stats.visits);
+                    self.metrics
+                        .add(Counter::MemorySearchComponents, stats.components);
+                }
                 let healthy = result.is_ok();
                 let response_ready = self
                     .aof
@@ -777,7 +787,21 @@ impl Worker {
             aof.lifecycle_fault("memory_before_apply")
                 .map_err(|_| DbError::Unavailable)?;
         }
+        let expired_members = if prepared.origin() == super::MutationOrigin::Expiration {
+            match prepared.resolved() {
+                Some(crate::persistence::memory_format::Mutation::Delta { edits, .. }) => edits
+                    .iter()
+                    .filter(|edit| matches!(edit, super::memory::Edit::Remove(_)))
+                    .count()
+                    as u64,
+                _ => 0,
+            }
+        } else {
+            0
+        };
         let result = self.store.apply_memory(prepared);
+        self.metrics
+            .add(Counter::MemoryExpiredMembers, expired_members);
         self.metrics.dataset(self.shard, self.store.dataset_stats());
         if let Some(aof) = &self.aof {
             aof.lifecycle_fault("memory_after_apply")
@@ -793,6 +817,7 @@ impl Worker {
         } else {
             0
         };
+        let expired_members = self.store.expired_memory_members(&prepared);
         let reply = self.store.apply(prepared);
         if changed {
             self.metrics.dataset(self.shard, self.store.dataset_stats());
@@ -800,6 +825,8 @@ impl Worker {
         if expired != 0 {
             self.metrics.add(Counter::ExpirationBatches, 1);
             self.metrics.add(Counter::ExpirationKeys, expired as u64);
+            self.metrics
+                .add(Counter::MemoryExpiredMembers, expired_members);
         }
         reply
     }

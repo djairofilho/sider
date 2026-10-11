@@ -1,7 +1,7 @@
 //! Owning-store lifecycle for native and RESP2 commands.
 //! The record-2 durable profile remains an explicit library-only development opt-in.
 
-use super::memory::{Collection, Descriptor, Edit, MemoryError, Operation, Ttl};
+use super::memory::{Collection, Descriptor, Edit, MemoryError, Operation, SearchStats, Ttl};
 use super::*;
 use crate::persistence::memory_format;
 use std::collections::BTreeMap;
@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 pub struct PreparedMemory {
     prepared: Prepared,
     resolved: Option<memory_format::Mutation>,
+    search_stats: Option<SearchStats>,
 }
 
 impl PreparedMemory {
@@ -21,6 +22,9 @@ impl PreparedMemory {
     }
     pub fn origin(&self) -> MutationOrigin {
         self.prepared.batch.origin
+    }
+    pub(crate) fn search_stats(&self) -> Option<SearchStats> {
+        self.search_stats
     }
 }
 
@@ -79,7 +83,8 @@ impl Store {
                     .insert((*deadline, key.clone(), id.clone()));
             }
         }
-        let (reply, mut resolved) = shadow.memory_inner(&key, operation);
+        let mut search_stats = None;
+        let (reply, mut resolved) = shadow.memory_inner(&key, operation, &mut search_stats);
         let before = self.values.get(&key);
         let after = shadow.values.get(&key);
         let changed = before.map(|entry| entry.generation) != after.map(|entry| entry.generation);
@@ -114,12 +119,14 @@ impl Store {
                         origin,
                     ),
                     resolved: None,
+                    search_stats: None,
                 };
             }
         }
         PreparedMemory {
             prepared: self.prepared(reply, entries, origin),
             resolved,
+            search_stats,
         }
     }
 
@@ -286,12 +293,48 @@ impl Store {
             .collect()
     }
 
+    pub(crate) fn expired_memory_members(&self, prepared: &Prepared) -> u64 {
+        if prepared.batch.origin != MutationOrigin::Expiration {
+            return 0;
+        }
+        prepared
+            .batch
+            .mutations
+            .iter()
+            .filter_map(|mutation| {
+                let Mutation::Put {
+                    key,
+                    value: Value::Memory(after),
+                    ..
+                } = mutation
+                else {
+                    return None;
+                };
+                let Some(Entry {
+                    value: Value::Memory(before),
+                    ..
+                }) = self.values.get(key)
+                else {
+                    return None;
+                };
+                Some(
+                    before
+                        .members()
+                        .keys()
+                        .filter(|id| !after.members().contains_key(*id))
+                        .count() as u64,
+                )
+            })
+            .sum()
+    }
+
     fn memory_inner(
         &mut self,
         key: &Bytes,
         operation: Operation,
+        search_stats: &mut Option<SearchStats>,
     ) -> (Reply, Option<memory_format::Mutation>) {
-        match self.try_memory_inner(key, operation) {
+        match self.try_memory_inner(key, operation, search_stats) {
             Ok(result) => result,
             Err(error) => (Reply::Error(error), None),
         }
@@ -301,6 +344,7 @@ impl Store {
         &mut self,
         key: &Bytes,
         operation: Operation,
+        search_stats: &mut Option<SearchStats>,
     ) -> Result<(Reply, Option<memory_format::Mutation>), ExecutionError> {
         if key.is_empty() || key.len() > 256 {
             return Err(ExecutionError::Memory("ERR memory limit exceeded"));
@@ -386,7 +430,10 @@ impl Store {
                     "ERR memory collection does not exist",
                 )),
                 Operation::Info | Operation::Get { .. } => Ok((Reply::Bulk(None), None)),
-                Operation::Search { .. } => Ok((Reply::Array(Vec::new()), None)),
+                Operation::Search { .. } => {
+                    *search_stats = Some(SearchStats::default());
+                    Ok((Reply::Array(Vec::new()), None))
+                }
                 Operation::Pttl { .. } => Ok((Reply::Integer(-2), None)),
                 _ => Ok((Reply::Integer(0), None)),
             };
@@ -414,8 +461,8 @@ impl Store {
                 return Err(ExecutionError::Memory("ERR memory vector length mismatch"));
             }
             let entry = self.values.get(key).expect("existing memory entry");
-            let hits = collection
-                .search_with_visibility(
+            let (hits, stats) = collection
+                .search_with_visibility_stats(
                     vector,
                     *k,
                     namespace,
@@ -434,6 +481,7 @@ impl Store {
                     }
                     other => memory_error(other),
                 })?;
+            *search_stats = Some(stats);
             return Ok((
                 Reply::Array(
                     hits.into_iter()

@@ -174,6 +174,26 @@ async fn memory_tcp_search_filters_before_top_k_and_returns_binary_distances() {
             owned_command(&mut client, &args).bytes,
             b"-ERR invalid memory argument\r\n"
         );
+        let stats = command(&mut client, &[b"INFO", b"stats"]).bytes;
+        for line in [
+            b"memory_searches_total:2\r\n".as_slice(),
+            b"memory_search_record_visits_total:2\r\n",
+            b"memory_search_components_total:2\r\n",
+            b"memory_rejections_total:5\r\n",
+        ] {
+            assert!(stats.windows(line.len()).any(|window| window == line));
+        }
+        let config = command(&mut client, &[b"INFO", b"config"]).bytes;
+        assert!(
+            config
+                .windows(b"memory_contract_version:1\r\n".len())
+                .any(|window| window == b"memory_contract_version:1\r\n")
+        );
+        assert!(
+            config
+                .windows(b"memory_max_search_components:1048576\r\n".len())
+                .any(|window| window == b"memory_max_search_components:1048576\r\n")
+        );
         assert_eq!(command(&mut client, &[b"PING"]).bytes, b"+PONG\r\n");
     })
     .await;
