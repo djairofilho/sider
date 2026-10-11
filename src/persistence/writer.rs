@@ -210,6 +210,14 @@ impl AofDiagnosticsHandle {
 }
 
 impl AofHandle {
+    pub(crate) fn is_composed_legacy_mixed(&self) -> bool {
+        self.composed_profile
+    }
+
+    pub(crate) fn same_writer(&self, other: &Self) -> bool {
+        self.requests.same_channel(&other.requests)
+    }
+
     pub fn is_memory_profile(&self) -> bool {
         self.memory_profile
     }
@@ -539,6 +547,25 @@ pub fn recover_with_faults(
     faults: Arc<dyn FaultInjector>,
 ) -> Result<Recovered, AofError> {
     load(config, store_config, clock, faults, false)
+}
+
+/// Development-only local profile; no server, backup, or replica configuration
+/// can select it. The caller must bind every owner to the same writer handle.
+#[cfg(test)]
+pub(crate) fn recover_composed_legacy_mixed(
+    config: AofConfig,
+    store_config: StoreConfig,
+    clock: Arc<dyn Clock>,
+    faults: Arc<dyn FaultInjector>,
+) -> Result<Recovered, AofError> {
+    load_profile(
+        config,
+        store_config,
+        clock,
+        faults,
+        false,
+        Profile::ComposedLegacyMixed,
+    )
 }
 
 pub(super) fn recover_read_only(

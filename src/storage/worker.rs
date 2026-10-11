@@ -106,6 +106,7 @@ pub struct DbHandle {
     requests: Vec<mpsc::Sender<Request>>,
     pub(super) coordination: Vec<mpsc::Sender<super::coordinator::Control>>,
     mixed_unpersisted: bool,
+    pub(super) composed_aof: Option<crate::persistence::AofHandle>,
     pub(super) security_lease: Option<crate::security::ClientLease>,
     pub(super) internal_lease: Option<crate::security::InternalLease>,
     pub(super) router: ShardRouter,
@@ -235,6 +236,7 @@ pub fn channel_with_stores(
             requests: senders,
             coordination,
             mixed_unpersisted: false,
+            composed_aof: None,
             security_lease: None,
             internal_lease: None,
             router,
@@ -256,6 +258,15 @@ impl DbHandle {
     /// RESP MULTI/EXEC and regular handles retain the single-owner restriction.
     pub fn with_unpersisted_multi_owner(mut self) -> Self {
         self.mixed_unpersisted = true;
+        self.composed_aof = None;
+        self
+    }
+
+    /// Internal record-1 mixed profile. The executable cannot select this path.
+    #[cfg(test)]
+    pub(crate) fn with_composed_aof(mut self, aof: crate::persistence::AofHandle) -> Self {
+        self.mixed_unpersisted = false;
+        self.composed_aof = Some(aof);
         self
     }
 
@@ -395,10 +406,10 @@ impl DbHandle {
     ) -> Result<Reply, DbError> {
         let shard = match self.batch_shard(&commands, &watched) {
             Ok(shard) => shard,
-            Err(ExecutionError::CrossShard) if self.mixed_unpersisted => {
-                return self
-                    .execute_coordinated_unpersisted(commands, watched)
-                    .await;
+            Err(ExecutionError::CrossShard)
+                if self.mixed_unpersisted || self.composed_aof.is_some() =>
+            {
+                return self.execute_coordinated(commands, watched).await;
             }
             Err(error) => return Ok(Reply::Error(error)),
         };

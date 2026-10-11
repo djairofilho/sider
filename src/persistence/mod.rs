@@ -13,6 +13,8 @@ mod writer;
 pub use diagnostics::AofDiagnostics;
 pub use layout::{DurableLayout, ROUTING_VERSION};
 pub use role::{ReplicationMetadata, Role};
+#[cfg(test)]
+pub(crate) use writer::recover_composed_legacy_mixed;
 pub use writer::{
     AofConfig, AofDiagnosticsHandle, AofError, AofHandle, FaultInjector, NoFaults, Recovered,
     RecoveryMetadata, SyncPolicy, recover, recover_with_faults,
