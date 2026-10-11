@@ -241,11 +241,14 @@ impl Generation {
 
 #[cfg(unix)]
 fn restricted_files(directory: &Path, names: &[&str]) -> Result<BTreeMap<String, Vec<u8>>, Error> {
-    use std::{
-        fs::{self, File},
-        io::Read,
-        os::unix::fs::{MetadataExt, OpenOptionsExt},
-    };
+    let directory = open_restricted_directory(directory)?;
+    restricted_files_at(&directory, names)
+}
+
+#[cfg(unix)]
+fn open_restricted_directory(directory: &Path) -> Result<std::fs::File, Error> {
+    use rustix::fs::{Mode, OFlags};
+    use std::{fs, os::unix::fs::MetadataExt};
     let uid = rustix::process::geteuid().as_raw();
     for path in directory.ancestors() {
         let metadata = fs::symlink_metadata(path).map_err(|_| Error::Configuration)?;
@@ -260,12 +263,40 @@ fn restricted_files(directory: &Path, names: &[&str]) -> Result<BTreeMap<String,
             return Err(Error::Configuration);
         }
     }
+    // Pin the validated directory while loading the manifest and fixed file names.
+    let directory = std::fs::File::from(
+        rustix::fs::open(
+            directory,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| Error::Configuration)?,
+    );
+    let metadata = directory.metadata().map_err(|_| Error::Configuration)?;
+    if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o777 != 0o700 {
+        return Err(Error::Configuration);
+    }
+    Ok(directory)
+}
+
+#[cfg(unix)]
+fn restricted_files_at(
+    directory: &std::fs::File,
+    names: &[&str],
+) -> Result<BTreeMap<String, Vec<u8>>, Error> {
+    use rustix::fs::{Mode, OFlags};
+    use std::{fs::File, io::Read, os::unix::fs::MetadataExt};
+    let uid = rustix::process::geteuid().as_raw();
     let read = |name: &str| -> Result<Vec<u8>, Error> {
-        let mut file = File::options()
-            .read(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
-            .open(directory.join(name))
-            .map_err(|_| Error::Configuration)?;
+        let mut file = File::from(
+            rustix::fs::openat(
+                directory,
+                name,
+                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .map_err(|_| Error::Configuration)?,
+        );
         let metadata = file.metadata().map_err(|_| Error::Configuration)?;
         if !metadata.is_file()
             || metadata.uid() != uid
@@ -553,6 +584,25 @@ mod tests {
         let alias = directory.0.join("alias");
         symlink("nested", &alias).unwrap();
         assert!(Generation::server(&alias, false, false).is_err());
+
+        let opened = open_restricted_directory(&nested).unwrap();
+        let replacement = directory.0.join("replacement");
+        fs::create_dir(&replacement).unwrap();
+        fs::set_permissions(&replacement, fs::Permissions::from_mode(0o700)).unwrap();
+        for name in CLIENT.iter().copied().chain(std::iter::once(MANIFEST)) {
+            let path = replacement.join(name);
+            fs::copy(nested.join(name), &path).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        fs::write(replacement.join("client-policy.json"), b"alternate").unwrap();
+        fs::rename(&nested, directory.0.join("moved")).unwrap();
+        symlink("replacement", &nested).unwrap();
+        let anchored = restricted_files_at(&opened, CLIENT).unwrap();
+        assert_eq!(
+            anchored.get("client-policy.json"),
+            files.get("client-policy.json")
+        );
+        assert!(Generation::server(&nested, false, false).is_err());
     }
 
     #[cfg(windows)]
