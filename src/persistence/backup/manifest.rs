@@ -15,6 +15,8 @@ pub struct Manifest {
     pub source_max_record_bytes: u32,
     pub source_max_mutations: u32,
     pub source_max_snapshot_bytes: u64,
+    /// Mandatory in schema 3; omitted from the frozen schema 1 and 2 manifests.
+    pub required_capabilities: Option<u32>,
     pub validation_max_dataset_bytes: u64,
     pub entries: u64,
     pub snapshot_bytes: u64,
@@ -37,7 +39,7 @@ pub(super) fn require_hex(text: &str, size: usize) -> Result<(), Error> {
 impl Manifest {
     pub fn json(&self) -> Value {
         let (schema, header, record) = self.profile.versions();
-        json!({
+        let mut value = json!({
             "schema_version": schema, "sider_version": self.sider_version,
             "source_sha_declared": self.source_sha,
             "cursor": {"epoch": self.cursor.epoch.iter().map(|byte| format!("{byte:02x}")).collect::<String>(), "sequence": self.cursor.sequence},
@@ -47,13 +49,17 @@ impl Manifest {
             "validation_max_dataset_bytes":self.validation_max_dataset_bytes,
             "snapshot":{"file":super::SNAPSHOT,"bytes":self.snapshot_bytes,"sha256":self.snapshot_sha256,"entries":self.entries},
             "transport_digest_crc32": self.transport_digest, "received_at_unix_ms":self.received_at_unix_ms,
-        })
+        });
+        if let Some(capabilities) = self.required_capabilities {
+            value["required_capabilities"] = json!(capabilities);
+        }
+        value
     }
 
     pub(super) fn parse(bytes: &[u8], limits: Limits, profile: Profile) -> Result<Self, Error> {
         let value: Value = serde_json::from_slice(bytes)?;
         let (schema, header, record) = profile.versions();
-        let allowed = [
+        let mut allowed = vec![
             "schema_version",
             "sider_version",
             "source_sha_declared",
@@ -67,6 +73,9 @@ impl Manifest {
             "transport_digest_crc32",
             "received_at_unix_ms",
         ];
+        if profile == Profile::Composed {
+            allowed.push("required_capabilities");
+        }
         if value.as_object().is_none_or(|map| {
             map.len() != allowed.len() || map.keys().any(|key| !allowed.contains(&key.as_str()))
         }) || value["schema_version"] != schema
@@ -106,6 +115,11 @@ impl Manifest {
             source_max_record_bytes: small(&value["source_limits"]["max_record_bytes"])?,
             source_max_mutations: small(&value["source_limits"]["max_mutations"])?,
             source_max_snapshot_bytes: number(&value["source_limits"]["max_snapshot_bytes"])?,
+            required_capabilities: if profile == Profile::Composed {
+                Some(small(&value["required_capabilities"])?)
+            } else {
+                None
+            },
             validation_max_dataset_bytes: number(&value["validation_max_dataset_bytes"])?,
             entries: number(&value["snapshot"]["entries"])?,
             snapshot_bytes: number(&value["snapshot"]["bytes"])?,
@@ -131,11 +145,18 @@ impl Manifest {
             || self.source_max_mutations as usize > limits.max_mutations
             || self.source_max_snapshot_bytes == 0
             || self.source_max_snapshot_bytes > limits.max_snapshot_bytes
+            || self.required_capabilities
+                != match self.profile {
+                    Profile::Composed => {
+                        Some(crate::persistence::composed_format::MIXED_OWNER_BATCH)
+                    }
+                    Profile::Legacy | Profile::Memory => None,
+                }
             || self.snapshot_bytes
-                < if self.profile == Profile::Memory {
-                    super::super::memory_format::HEADER_BYTES as u64
-                } else {
-                    format::LAYOUT_HEADER_BYTES as u64
+                < match self.profile {
+                    Profile::Legacy => format::LAYOUT_HEADER_BYTES as u64,
+                    Profile::Memory => super::super::memory_format::HEADER_BYTES as u64,
+                    Profile::Composed => super::super::composed_format::HEADER_BYTES as u64,
                 }
             || self.snapshot_bytes > limits.max_snapshot_bytes
             || self.entries > self.snapshot_bytes / 12

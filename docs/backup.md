@@ -5,6 +5,9 @@ The development branch additionally has explicit
 transport-2 source and `sider-backup --record-version 2`. Without this flag,
 the CLI retains the schema-1 procedure below. These development capabilities
 are absent from the published 1.0.1 package.
+An [isolated schema-3 library path](composed-backup.md) now handles the proposed
+header-7/record-1 mixed-owner archive. The executable and default AOF recovery
+still reject that profile.
 
 This procedure describes the published 1.0.1 package. The current checkout's
 protected executable with an internal listener is unavailable until the
