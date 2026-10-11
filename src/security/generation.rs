@@ -319,46 +319,74 @@ fn restricted_files_at(
     directory: &std::fs::File,
     names: &[&str],
 ) -> Result<BTreeMap<String, Vec<u8>>, Error> {
-    use rustix::fs::{Mode, OFlags};
-    use std::{fs::File, io::Read, os::unix::fs::MetadataExt};
     let uid = rustix::process::geteuid().as_raw();
-    let read = |name: &str| -> Result<Vec<u8>, Error> {
-        validate_restricted_directory(directory, uid, true)?;
-        let mut file = File::from(
-            rustix::fs::openat(
-                directory,
-                name,
-                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                Mode::empty(),
-            )
-            .map_err(|_| Error::Configuration)?,
-        );
-        let metadata = file.metadata().map_err(|_| Error::Configuration)?;
-        if !metadata.is_file()
-            || metadata.uid() != uid
-            || metadata.mode() & 0o777 != 0o600
-            || metadata.len() > 4 * 1024 * 1024
-        {
-            return Err(Error::Configuration);
-        }
-        let mut bytes = Vec::new();
-        file.by_ref()
-            .take(4 * 1024 * 1024 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| Error::Configuration)?;
-        if bytes.len() > 4 * 1024 * 1024 || bytes.is_empty() {
-            return Err(Error::Configuration);
-        }
-        validate_restricted_directory(directory, uid, true)?;
-        Ok(bytes)
-    };
     let mut files = BTreeMap::new();
-    files.insert(MANIFEST.to_owned(), read(MANIFEST)?);
+    files.insert(
+        MANIFEST.to_owned(),
+        read_restricted_file(directory, MANIFEST, uid, || {})?,
+    );
     for name in names {
-        files.insert((*name).to_owned(), read(name)?);
+        files.insert(
+            (*name).to_owned(),
+            read_restricted_file(directory, name, uid, || {})?,
+        );
     }
-    files.insert("manifest-after".to_owned(), read(MANIFEST)?);
+    files.insert(
+        "manifest-after".to_owned(),
+        read_restricted_file(directory, MANIFEST, uid, || {})?,
+    );
     Ok(files)
+}
+
+#[cfg(unix)]
+fn read_restricted_file(
+    directory: &std::fs::File,
+    name: &str,
+    uid: u32,
+    after_read: impl FnOnce(),
+) -> Result<Vec<u8>, Error> {
+    use rustix::fs::{Mode, OFlags};
+    use std::{fs::File, io::Read};
+    validate_restricted_directory(directory, uid, true)?;
+    let mut file = File::from(
+        rustix::fs::openat(
+            directory,
+            name,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| Error::Configuration)?,
+    );
+    let original_len = validate_restricted_file(&file, uid)?;
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| Error::Configuration)?;
+    after_read();
+    if bytes.len() > 4 * 1024 * 1024 || bytes.is_empty() {
+        return Err(Error::Configuration);
+    }
+    let final_len = validate_restricted_file(&file, uid)?;
+    if final_len != original_len || final_len != bytes.len() as u64 {
+        return Err(Error::Configuration);
+    }
+    validate_restricted_directory(directory, uid, true)?;
+    Ok(bytes)
+}
+
+#[cfg(unix)]
+fn validate_restricted_file(file: &std::fs::File, uid: u32) -> Result<u64, Error> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata().map_err(|_| Error::Configuration)?;
+    if !metadata.is_file()
+        || metadata.uid() != uid
+        || metadata.mode() & 0o777 != 0o600
+        || metadata.len() > 4 * 1024 * 1024
+    {
+        return Err(Error::Configuration);
+    }
+    Ok(metadata.len())
 }
 
 #[cfg(windows)]
@@ -658,6 +686,34 @@ mod tests {
         fs::set_permissions(&moved, fs::Permissions::from_mode(0o770)).unwrap();
         assert!(restricted_files_at(&opened, CLIENT).is_err());
         fs::set_permissions(&moved, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(restricted_files_at(&opened, CLIENT).is_ok());
+        let moved_policy = moved.join("client-policy.json");
+        assert!(
+            read_restricted_file(
+                &opened,
+                "client-policy.json",
+                rustix::process::geteuid().as_raw(),
+                || {
+                    fs::set_permissions(&moved_policy, fs::Permissions::from_mode(0o640)).unwrap();
+                },
+            )
+            .is_err()
+        );
+        fs::set_permissions(&moved_policy, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(restricted_files_at(&opened, CLIENT).is_ok());
+        let original_policy = files.get("client-policy.json").unwrap();
+        let mut extended_policy = original_policy.clone();
+        extended_policy.push(b'x');
+        assert!(
+            read_restricted_file(
+                &opened,
+                "client-policy.json",
+                rustix::process::geteuid().as_raw(),
+                || fs::write(&moved_policy, &extended_policy).unwrap(),
+            )
+            .is_err()
+        );
+        fs::write(&moved_policy, original_policy).unwrap();
         assert!(restricted_files_at(&opened, CLIENT).is_ok());
         assert!(Generation::server(&nested, false, false).is_err());
     }
