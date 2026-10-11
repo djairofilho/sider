@@ -1034,6 +1034,46 @@ impl Worker {
                 let _ = reply.send(result);
                 !fatal
             }
+            Control::PrepareComposed {
+                expected,
+                mutations,
+                origin,
+                reply,
+                _security,
+            } => {
+                let result = if self.readonly()
+                    && self.coordinated.is_none()
+                    && self.aof.as_ref().is_some_and(|actual| {
+                        actual.is_composed_legacy_mixed() && actual.same_writer(&expected)
+                    }) {
+                    self.store
+                        .prepare_replay(&mutations, origin)
+                        .map_err(Into::into)
+                } else {
+                    Err(crate::replication::Error::Sequence)
+                };
+                let _ = reply.send(result);
+                true
+            }
+            Control::ApplyComposed {
+                expected,
+                prepared,
+                reply,
+                _security,
+            } => {
+                let result = if self.readonly()
+                    && self.coordinated.is_none()
+                    && self.aof.as_ref().is_some_and(|actual| {
+                        actual.is_composed_legacy_mixed() && actual.same_writer(&expected)
+                    }) {
+                    self.apply_prepared(prepared);
+                    Ok(())
+                } else {
+                    Err(crate::replication::Error::Sequence)
+                };
+                let _ = reply.send(result);
+                true
+            }
         }
     }
 
