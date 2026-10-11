@@ -1188,9 +1188,6 @@ async fn composed_replica_refuses_partial_frames_bad_full_and_sequence_errors() 
         ..base
     };
     let batch = composed_batch(b"persisted-left", b"persisted-right");
-    let mut socket = offer_composed(&listener, Some(base), base).await;
-    send_composed(&mut socket, Message::Continue(base)).await;
-    assert_eq!(read_composed(&mut socket).await, Message::Ack(base));
     let frame = protocol::encode_composed(
         &Message::Batch {
             sequence: next.sequence,
@@ -1199,10 +1196,30 @@ async fn composed_replica_refuses_partial_frames_bad_full_and_sequence_errors() 
         Limits::default(),
     )
     .unwrap();
-    tokio::io::AsyncWriteExt::write_all(&mut socket, &frame[..frame.len() / 2])
+    for prefix in 0..frame.len() {
+        let mut socket = offer_composed(&listener, Some(base), base).await;
+        send_composed(&mut socket, Message::Continue(base)).await;
+        assert_eq!(read_composed(&mut socket).await, Message::Ack(base));
+        tokio::io::AsyncWriteExt::write_all(&mut socket, &frame[..prefix])
+            .await
+            .unwrap();
+        tokio::io::AsyncWriteExt::shutdown(&mut socket)
+            .await
+            .unwrap();
+        composed_connection_closes(&mut socket).await;
+    }
+    assert_eq!(composed_admin(&replica, "--status")["sequence"], 10);
+    assert_composed_pair(&replica, b"original-left", b"original-right");
+
+    let mut socket = offer_composed(&listener, Some(base), base).await;
+    send_composed(&mut socket, Message::Continue(base)).await;
+    assert_eq!(read_composed(&mut socket).await, Message::Ack(base));
+    let mut corrupted = frame.to_vec();
+    *corrupted.last_mut().unwrap() ^= 1;
+    tokio::io::AsyncWriteExt::write_all(&mut socket, &corrupted)
         .await
         .unwrap();
-    drop(socket);
+    composed_connection_closes(&mut socket).await;
     assert_eq!(composed_admin(&replica, "--status")["sequence"], 10);
     assert_composed_pair(&replica, b"original-left", b"original-right");
 
