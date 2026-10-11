@@ -33,10 +33,13 @@ MSET discards all its candidates while other commands retain their queue order.
 This explicit library opt-in refuses AOF-backed workers and either replication
 role before preparation; connection-context commands are also refused before
 effects. Normal handles and RESP MULTI/EXEC continue to reject mixed owners.
-The stage has focused worker tests for WATCH conflict, quota rejection, frozen
-TTL, concurrent opposite owner orders, and AOF/replication refusal. It does not
-prove the durable decision, replica path, cancellation boundaries, or release
-gates.
+Focused worker tests cover WATCH conflict, quota rejection, frozen TTL,
+concurrent opposite owner orders, and AOF/replication refusal. Phase-controlled
+tests also show that predecision rejection aborts overlays without closing
+admission; after the first owner applies, client cancellation cannot expose a
+partial read or snapshot; losing the second owner closes global admission.
+The durable decision, replica path, remaining fault boundaries, and release gates
+are still unproven.
 The public server and tools still cannot select header 7; transport 3, backup 3,
 replica application, and RESP coordinated EXEC remain unimplemented.
 

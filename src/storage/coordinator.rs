@@ -370,7 +370,9 @@ async fn prepare(
 
 #[cfg(test)]
 mod tests {
+    use std::future::{Future, poll_fn};
     use std::sync::Arc;
+    use std::task::Poll;
     use std::time::Duration;
 
     use tokio::sync::watch;
@@ -595,6 +597,151 @@ mod tests {
             matches!(a, Reply::Bulk(Some(value)) if value == b"first".as_slice() || value == b"second".as_slice())
         );
         stop(stop_signal, handle, tasks).await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_client_cannot_expose_first_owner_before_second_apply() {
+        let (stop_signal, shutdown) = watch::channel(false);
+        let (handle, mut owners) = worker::channel_with_stores(
+            2,
+            Duration::from_secs(5),
+            shutdown,
+            vec![Store::new(), Store::new()],
+        )
+        .unwrap();
+        let first = tokio::spawn(owners.remove(0).run());
+        let (reached, at_second_apply) = tokio::sync::oneshot::channel();
+        let (resume, resumed) = tokio::sync::oneshot::channel();
+        let second = tokio::spawn(async move {
+            let mut worker = owners.remove(0);
+            loop {
+                let control = worker.coordination.recv().await.unwrap();
+                if matches!(control, Control::Apply { .. }) {
+                    reached.send(()).unwrap();
+                    resumed.await.unwrap();
+                    worker.coordination_control(control);
+                    worker.run().await;
+                    break;
+                }
+                worker.coordination_control(control);
+            }
+        });
+        let client = {
+            let handle = handle.clone().with_unpersisted_multi_owner();
+            tokio::spawn(async move {
+                handle
+                    .execute_batch(vec![set(b"a", b"left"), set(b"b", b"right")], Vec::new())
+                    .await
+            })
+        };
+        at_second_apply.await.unwrap();
+        client.abort();
+        assert!(client.await.unwrap_err().is_cancelled());
+
+        let mut read = Box::pin(handle.execute(get(b"a")));
+        let mut snapshot = Box::pin(handle.snapshot(None));
+        poll_fn(|cx| {
+            assert!(read.as_mut().poll(cx).is_pending());
+            assert!(snapshot.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        resume.send(()).unwrap();
+        assert_eq!(
+            read.await.unwrap(),
+            Reply::Bulk(Some(Bytes::from_static(b"left")))
+        );
+        let snapshot = snapshot.await.unwrap();
+        assert_eq!(snapshot.mutations.len(), 2);
+        assert_eq!(
+            handle.execute(get(b"b")).await.unwrap(),
+            Reply::Bulk(Some(Bytes::from_static(b"right")))
+        );
+        stop(stop_signal, handle, vec![first, second]).await;
+    }
+
+    #[tokio::test]
+    async fn lost_second_owner_after_first_apply_closes_all_admission() {
+        let (stop_signal, shutdown) = watch::channel(false);
+        let (handle, mut owners) = worker::channel_with_stores(
+            2,
+            Duration::from_secs(5),
+            shutdown,
+            vec![Store::new(), Store::new()],
+        )
+        .unwrap();
+        let first = tokio::spawn(owners.remove(0).run());
+        let second = tokio::spawn(async move {
+            let mut worker = owners.remove(0);
+            loop {
+                let control = worker.coordination.recv().await.unwrap();
+                if matches!(control, Control::Apply { .. }) {
+                    // The channel and tentative state disappear without an ACK.
+                    drop(control);
+                    return;
+                }
+                worker.coordination_control(control);
+            }
+        });
+        assert_eq!(
+            handle
+                .clone()
+                .with_unpersisted_multi_owner()
+                .execute_batch(vec![set(b"a", b"left"), set(b"b", b"right")], Vec::new())
+                .await,
+            Err(DbError::Unavailable)
+        );
+        second.await.unwrap();
+        assert_eq!(handle.execute(get(b"a")).await, Err(DbError::Unavailable));
+        assert!(matches!(
+            handle.snapshot(None).await,
+            Err(crate::storage::snapshot::SnapshotError::Database(
+                DbError::Unavailable
+            ))
+        ));
+        stop(stop_signal, handle, vec![first]).await;
+    }
+
+    #[tokio::test]
+    async fn failed_preparation_aborts_overlays_and_keeps_admission_open() {
+        let (stop_signal, shutdown) = watch::channel(false);
+        let (handle, mut owners) = worker::channel_with_stores(
+            2,
+            Duration::from_secs(5),
+            shutdown,
+            vec![Store::new(), Store::new()],
+        )
+        .unwrap();
+        let first = tokio::spawn(owners.remove(0).run());
+        let second = tokio::spawn(async move {
+            let mut worker = owners.remove(0);
+            let mut rejected = false;
+            loop {
+                let control = worker.coordination.recv().await.unwrap();
+                match control {
+                    Control::Candidate { reply, .. } if !rejected => {
+                        rejected = true;
+                        let _ = reply.send(Err(DbError::Unavailable));
+                    }
+                    control => worker.coordination_control(control),
+                }
+                if rejected && worker.coordinated.is_none() {
+                    worker.run().await;
+                    break;
+                }
+            }
+        });
+        assert_eq!(
+            handle
+                .clone()
+                .with_unpersisted_multi_owner()
+                .execute_batch(vec![set(b"a", b"left"), set(b"b", b"right")], Vec::new())
+                .await,
+            Err(DbError::Unavailable)
+        );
+        assert_eq!(handle.execute(get(b"a")).await.unwrap(), Reply::Bulk(None));
+        assert_eq!(handle.execute(get(b"b")).await.unwrap(), Reply::Bulk(None));
+        stop(stop_signal, handle, vec![first, second]).await;
     }
 
     #[tokio::test(start_paused = true)]
