@@ -585,6 +585,79 @@ async fn memory_tcp_default_record1_aof_refuses_memory_without_dataset_or_durabl
     std::fs::remove_dir_all(directory).unwrap();
 }
 
+#[tokio::test]
+async fn memory_tcp_explicit_record2_survives_restart_and_refuses_legacy_reader() {
+    let directory = std::env::temp_dir().join(format!(
+        "sider-memory-tcp-record2-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = ServerConfig::from_lookup(|name| match name {
+        "SIDER_AOF_DIR" => Some(directory.as_os_str().to_owned()),
+        "SIDER_AOF_RECORD_VERSION" => Some("2".into()),
+        _ => None,
+    })
+    .unwrap();
+    tcp(config.clone(), |address| {
+        let mut client = connect(address);
+        create(&mut client, b"c");
+        assert_eq!(
+            owned_command(&mut client, &put(b"c", b"\xff\0")).bytes,
+            b":1\r\n"
+        );
+        assert!(matches!(
+            command(&mut client, &[b"MEM.GET", b"c", b"\xff\0"]).value,
+            Response::Array(Some(_))
+        ));
+    })
+    .await;
+    let generation = directory.join("generation-00000000000000000000.aof");
+    let before = std::fs::read(&generation).unwrap();
+    assert_eq!(&before[..8], b"SIDERAOF");
+    assert_eq!(u32::from_le_bytes(before[8..12].try_into().unwrap()), 4);
+    assert!(
+        sider::persistence::recover(
+            sider::persistence::AofConfig::new(directory.clone()),
+            sider::storage::StoreConfig::default(),
+            std::sync::Arc::new(sider::storage::SystemClock),
+        )
+        .is_err()
+    );
+    assert_eq!(std::fs::read(&generation).unwrap(), before);
+    tcp(config.clone(), |address| {
+        let mut client = connect(address);
+        let recovered = command(&mut client, &[b"MEM.GET", b"c", b"\xff\0"]);
+        assert!(matches!(
+            recovered.value,
+            Response::Array(Some(ref values))
+                if values[0] == bulk(b"\0\xff")
+                    && values[1] == bulk(b"content\0\r\n\xff")
+                    && values[2] == bulk(&vector())
+        ));
+        assert_eq!(
+            command(&mut client, &[b"MEM.DEL", b"c", b"\xff\0"]).bytes,
+            b":1\r\n"
+        );
+    })
+    .await;
+    tcp(config, |address| {
+        let mut client = connect(address);
+        assert_eq!(
+            command(&mut client, &[b"MEM.GET", b"c", b"\xff\0"]).bytes,
+            b"$-1\r\n"
+        );
+    })
+    .await;
+    assert_eq!(
+        directory.canonicalize().unwrap().parent(),
+        Some(std::env::temp_dir().canonicalize().unwrap().as_path())
+    );
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
 #[test]
 fn memory_tcp_typed_command_name_and_routing_visit_only_collection_key() {
     use bytes::Bytes;

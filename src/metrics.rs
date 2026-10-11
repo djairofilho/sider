@@ -529,6 +529,12 @@ memory_max_lifecycle_scratch_bytes:16777216\r\n",
     if let Some(aof) = &config.aof {
         writeln!(
             text,
+            "aof_record_version:{}\r",
+            if aof.is_memory_profile() { 2 } else { 1 }
+        )
+        .unwrap();
+        writeln!(
+            text,
             "aof_queue_capacity_configured:{}\r\naof_max_mutations:{}\r",
             aof.queue_capacity, aof.limits.max_mutations
         )
