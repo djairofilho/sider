@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 use bytes::Bytes;
+use proptest::prelude::*;
 use sider::storage::memory::{Collection, Descriptor, Edit, Member, Scalar};
 use sider::storage::{Clock, Store};
 use std::collections::BTreeMap;
@@ -125,6 +126,48 @@ fn exact_search_matches_independent_oracle_with_ties_binary_ids_filters_and_expi
             .as_ref(),
         b"a".as_slice()
     );
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+    #[test]
+    fn exact_search_matches_oracle_across_insertion_orders(
+        rows in proptest::collection::vec((-100i16..100, -100i16..100, any::<bool>(), any::<bool>()), 0..64),
+        k in 1usize..=128,
+    ) {
+        let make = |reverse: bool| {
+            let mut collection = Collection::new(descriptor()).unwrap();
+            let indices: Vec<_> = if reverse {
+                (0..rows.len()).rev().collect()
+            } else {
+                (0..rows.len()).collect()
+            };
+            for index in indices {
+                let (x, y, eligible, elapsed) = rows[index];
+                let id = (index as u16).to_be_bytes();
+                let mut record = member(&id, if eligible { b"n".as_slice() } else { b"other".as_slice() }, f32::from(x), f32::from(y));
+                if elapsed {
+                    record.deadline = Some(1000);
+                }
+                record.metadata.insert(Bytes::from_static(b"rank"), Scalar::Integer(if eligible { 7 } else { 8 }));
+                collection = collection.apply_edits(&descriptor(), &[Edit::Upsert(record)], b"c").unwrap();
+            }
+            collection
+        };
+        let filter = BTreeMap::from([(Bytes::from_static(b"rank"), Scalar::Integer(7))]);
+        let query = vector(3.0, -2.0);
+        let forward = make(false);
+        let reverse = make(true);
+        let expected = oracle(&forward, &query, k, b"n", &filter, 1000);
+        let actual = forward.search(&query, k, b"n", &filter, 1000).unwrap();
+        let reordered = reverse.search(&query, k, b"n", &filter, 1000).unwrap();
+        prop_assert_eq!(&actual, &expected);
+        prop_assert_eq!(&reordered, &expected);
+        for ((actual_id, actual_distance), (expected_id, expected_distance)) in actual.iter().zip(expected.iter()) {
+            prop_assert_eq!(actual_id, expected_id);
+            prop_assert_eq!(actual_distance.to_bits(), expected_distance.to_bits());
+        }
+    }
 }
 
 #[test]
