@@ -98,9 +98,10 @@ model revision, transformation, and source provenance.
 The #109 contract is versioned in source. #110 and #111 own implementation and
 failure evidence, including AOF, replication, backup, TTL, and exact-search
 behavior. The published 1.0.1 binary neither stores nor searches memory records.
-The development tree has bounded `MEM.*` lifecycle and exact search stages, but
-its default record-1 AOF profile refuses memory writes. Public durable
-activation, memory replication, and release evidence remain pending.
+The development tree has bounded `MEM.*` lifecycle and exact search stages. Its
+default record-1 AOF profile refuses memory writes; an explicit record-2
+standalone server profile permits durable memory writes. Memory replication and
+release evidence remain pending.
 
 For small datasets, exact search supplies a correctness oracle. Approximate
 indexes trade recall for speed and add memory and rebuild costs. Filtered search

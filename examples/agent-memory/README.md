@@ -11,10 +11,11 @@ provenance with the record.
 
 Use a development `sider` binary that includes the `MEM.*` TCP parser. The
 published 1.0.1 binary does not implement these commands. The memory search
-stage also leaves the default server AOF profile on record 1, so run this
-example in in-memory mode. It demonstrates process restart behavior as data
-loss; durable restart/recovery awaits activation of the record-2 profile and
-the remaining lifecycle/recovery gates.
+stage leaves the default server AOF profile on record 1, so the commands below
+run this example in memory. A standalone development server can explicitly
+select `SIDER_AOF_RECORD_VERSION=2` with `SIDER_AOF_DIR`; the reference example
+has not yet been validated against an extracted distribution bundle or the
+full durable recovery gate.
 
 From this development branch, build the executable. In the first terminal,
 set its path and start it. An extracted development bundle with these changes
@@ -78,6 +79,7 @@ python .\examples\agent-memory\reference.py --host 127.0.0.1 --port 6380 --check
 ```
 
 It expects `MEM.INFO after restart: None` because this process has no AOF. Keep
-`SIDER_AOF_DIR` unset for this draft: this branch's default server writes record
-1 and rejects the memory durability profile. Record-2 restart/recovery is not
-claimed by this example.
+`SIDER_AOF_DIR` unset for this run. The default AOF profile writes record 1 and
+rejects memory writes. The standalone record-2 server path is documented in
+[the persistence guide](../../docs/persistence.md), but this example's restart
+check remains an in-memory check.
