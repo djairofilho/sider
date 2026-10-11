@@ -649,5 +649,27 @@ mod tests {
         assert!(restricted_files(&directory.0, CLIENT).is_err());
         icacls(&policy, &["/remove:g", "*S-1-1-0"]);
         assert!(restricted_files(&directory.0, CLIENT).is_ok());
+
+        let nested = directory.0.join("nested");
+        fs::create_dir(&nested).unwrap();
+        icacls(&nested, &["/grant:r", &format!("*{sid}:(OI)(CI)F")]);
+        icacls(&nested, &["/inheritance:r"]);
+        for (name, bytes) in &files {
+            fs::write(nested.join(name), bytes).unwrap();
+        }
+        fs::write(
+            nested.join(MANIFEST),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        icacls(&directory.0, &["/grant:r", "*S-1-1-0:(AD)"]);
+        assert!(restricted_files(&nested, CLIENT).is_ok());
+        icacls(&directory.0, &["/grant:r", "*S-1-1-0:(WD)"]);
+        assert!(restricted_files(&nested, CLIENT).is_err());
+        icacls(&directory.0, &["/grant:r", "*S-1-1-0:(DC)"]);
+        assert!(restricted_files(&nested, CLIENT).is_err());
+        icacls(&directory.0, &["/remove:g", "*S-1-1-0"]);
+        icacls(&directory.0, &["/grant", "*S-1-1-0:(OI)(CI)(IO)F"]);
+        assert!(restricted_files(&nested, CLIENT).is_ok());
     }
 }

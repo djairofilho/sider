@@ -7,9 +7,15 @@ required behavior; #93 tracks remaining implementation and release evidence.
 The published 1.0.1 listeners have no peer authentication or transport
 encryption.
 
-Contract version: 1, versioned in source. Changes to
+Contract version: 2, versioned in source. Changes to
 wire replies, profile defaults, role authority, or policy interpretation require
 a new contract version and migration note.
+
+Version 2 clarifies the Windows ancestor rule: an unrelated principal may create
+a sibling directory when it has no right to modify, rename, or remove any existing
+component of the protected path. Version 1's broad prohibition on ancestor write
+access would also reject the default volume-root ACL on common Windows installs.
+This clarification does not change the `security-manifest.json` schema version.
 
 ## Threat model and listener identities
 
@@ -373,8 +379,10 @@ On Windows, the service identity is the process token's user SID. Required files
 and the security directory are owned by that SID and allow access only to it,
 LocalSystem, and local Administrators; broad inherited access is rejected.
 Ancestors through the volume root may also be owned by those trusted identities
-or TrustedInstaller and may grant ordinary read/traverse access. They must not grant
-other identities write, child-delete, delete, ownership-change, or ACL-change rights.
+or TrustedInstaller and may grant ordinary read/traverse access. They may grant
+creation of sibling directories, but must not grant other identities file creation,
+modification, child-delete, delete, ownership-change, or ACL-change rights on the
+protected path. Inherit-only grants are evaluated on the child where they apply.
 Reparse points in any checked component are rejected. Check permissions on the
 objects whose bytes are read, not only path strings. If ownership, type, or mode/ACL
 checks cannot be performed, protected startup or replacement validation fails closed.
