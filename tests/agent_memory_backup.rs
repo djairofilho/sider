@@ -1232,7 +1232,7 @@ async fn live_record2_server_exports_worker_snapshot_and_refuses_legacy_or_small
         Arc::new(sider::storage::SystemClock),
     )
     .unwrap();
-    let recovered = persistence::recover(
+    let mut recovered = persistence::recover(
         AofConfig::new(restored).with_memory_profile(),
         StoreConfig::default(),
         Arc::new(sider::storage::SystemClock),
@@ -1241,6 +1241,24 @@ async fn live_record2_server_exports_worker_snapshot_and_refuses_legacy_or_small
     let images = recovered.store.snapshot_memory();
     assert_eq!(images.len(), 1);
     assert_eq!(images[0].key().as_ref(), b"c");
+    let restored_search = execute(
+        &mut recovered.store,
+        b"c",
+        Operation::Search {
+            descriptor: descriptor(),
+            vector: Bytes::from([1.0_f32.to_le_bytes(), 0.0_f32.to_le_bytes()].concat()),
+            k: 1,
+            namespace: Bytes::from_static(b"n"),
+            metadata: BTreeMap::new(),
+        },
+    );
+    assert_eq!(
+        restored_search,
+        Reply::Array(vec![Reply::Array(vec![
+            Reply::Bulk(Some(Bytes::from_static(b"\xff\0"))),
+            Reply::Bulk(Some(Bytes::copy_from_slice(&0.0_f64.to_le_bytes()))),
+        ])])
+    );
     drop(recovered);
     fn run_cli(args: Vec<std::ffi::OsString>) -> std::process::Output {
         let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_sider-backup"));
@@ -1344,13 +1362,27 @@ async fn live_record2_server_exports_worker_snapshot_and_refuses_legacy_or_small
         "{}",
         String::from_utf8_lossy(&restored_result.stderr)
     );
-    let cli_image = persistence::recover(
+    let mut cli_image = persistence::recover(
         AofConfig::new(cli_restored).with_memory_profile(),
         StoreConfig::default(),
         Arc::new(sider::storage::SystemClock),
     )
     .unwrap();
     assert_eq!(cli_image.store.snapshot_memory(), images);
+    assert_eq!(
+        execute(
+            &mut cli_image.store,
+            b"c",
+            Operation::Search {
+                descriptor: descriptor(),
+                vector: Bytes::from([1.0_f32.to_le_bytes(), 0.0_f32.to_le_bytes()].concat()),
+                k: 1,
+                namespace: Bytes::from_static(b"n"),
+                metadata: BTreeMap::new(),
+            },
+        ),
+        restored_search
+    );
     drop(cli_image);
     {
         use sider::replication::protocol::{self, Hello, Message};

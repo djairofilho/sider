@@ -322,6 +322,18 @@ async fn memory_replica_process_follows_full_delta_and_reconnects_after_source_r
         b"UPSERT", b"0", b"0",
     ]));
     let mut replica = Node::start_memory(&follower_path, Some(primary.internal)).await;
+    let search = [
+        b"MEM.SEARCH".as_slice(),
+        b"c",
+        b"p",
+        b"m",
+        b"r",
+        b"t",
+        &vector,
+        b"2",
+        b"n",
+        b"0",
+    ];
     let first = caught_up_memory(&primary, &replica).await;
     assert_eq!(first["replication_role"], "replica");
     assert_eq!(first["replication_full_syncs_total"], "1");
@@ -329,12 +341,14 @@ async fn memory_replica_process_follows_full_delta_and_reconnects_after_source_r
         replica.command(&[b"MEM.GET", b"c", b"id"]),
         primary.command(&[b"MEM.GET", b"c", b"id"])
     );
+    assert_eq!(replica.command(&search), primary.command(&search));
     assert!(matches!(
         replica.command(&[b"MEM.DEL", b"c", b"id"]),
         Response::Error(_)
     ));
     ok(primary.command(&[b"MEM.DEL", b"c", b"id"]));
     caught_up_memory(&primary, &replica).await;
+    assert_eq!(replica.command(&search), primary.command(&search));
     assert_eq!(
         replica.command(&[b"MEM.GET", b"c", b"id"]),
         primary.command(&[b"MEM.GET", b"c", b"id"])
@@ -361,6 +375,7 @@ async fn memory_replica_process_follows_full_delta_and_reconnects_after_source_r
         b"0", b"0",
     ]));
     caught_up_memory(&primary, &replica).await;
+    assert_eq!(replica.command(&search), primary.command(&search));
     assert_eq!(
         replica.command(&[b"MEM.GET", b"c", b"id"]),
         primary.command(&[b"MEM.GET", b"c", b"id"])
@@ -368,6 +383,7 @@ async fn memory_replica_process_follows_full_delta_and_reconnects_after_source_r
     replica.stop();
     replica = Node::start_memory(&follower_path, Some(primary.internal)).await;
     caught_up_memory(&primary, &replica).await;
+    assert_eq!(replica.command(&search), primary.command(&search));
     assert_eq!(
         replica.command(&[b"MEM.GET", b"c", b"id"]),
         primary.command(&[b"MEM.GET", b"c", b"id"])

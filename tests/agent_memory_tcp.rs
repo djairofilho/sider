@@ -7,7 +7,7 @@ mod wire;
 use sider::ServerConfig;
 use std::io::Write;
 use std::net::{SocketAddr, TcpStream};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use wire::Response;
 
 async fn tcp(config: ServerConfig, scenario: impl FnOnce(SocketAddr) + Send + 'static) {
@@ -193,6 +193,65 @@ async fn memory_tcp_search_filters_before_top_k_and_returns_binary_distances() {
             config
                 .windows(b"memory_max_search_components:1048576\r\n".len())
                 .any(|window| window == b"memory_max_search_components:1048576\r\n")
+        );
+        assert_eq!(command(&mut client, &[b"PING"]).bytes, b"+PONG\r\n");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn memory_tcp_search_at_member_limit_bounds_work_and_reply() {
+    tcp(ServerConfig::default(), |address| {
+        let mut client = connect(address);
+        create(&mut client, b"c");
+        for number in 0..1024u16 {
+            let id = number.to_be_bytes();
+            let mut args = put(b"c", &id);
+            args[3] = b"n".to_vec();
+            args[9] = [f32::from(number).to_le_bytes(), 0.0_f32.to_le_bytes()].concat();
+            assert_eq!(owned_command(&mut client, &args).bytes, b":1\r\n");
+        }
+        let query = [0.0_f32.to_le_bytes(), 0.0_f32.to_le_bytes()].concat();
+        let search = [
+            b"MEM.SEARCH".as_slice(),
+            b"c",
+            b"p",
+            b"m",
+            b"r",
+            b"t",
+            &query,
+            b"128",
+            b"n",
+            b"0",
+        ];
+        let started = Instant::now();
+        let reply = command(&mut client, &search);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(reply.bytes.len() <= 8192);
+        let Response::Array(Some(hits)) = reply.value else {
+            panic!("bounded search reply");
+        };
+        assert_eq!(hits.len(), 128);
+        assert_eq!(
+            hits[0],
+            array(vec![
+                bulk(&0u16.to_be_bytes()),
+                bulk(&0.0_f64.to_le_bytes())
+            ])
+        );
+        let stats = command(&mut client, &[b"INFO", b"stats"]).bytes;
+        for line in [
+            b"memory_searches_total:1\r\n".as_slice(),
+            b"memory_search_record_visits_total:1024\r\n",
+            b"memory_search_components_total:2048\r\n",
+        ] {
+            assert!(stats.windows(line.len()).any(|window| window == line));
+        }
+        let mut invalid = search.map(<[u8]>::to_vec);
+        invalid[7] = b"129".to_vec();
+        assert_eq!(
+            owned_command(&mut client, &invalid).bytes,
+            b"-ERR memory k is out of range\r\n"
         );
         assert_eq!(command(&mut client, &[b"PING"]).bytes, b"+PONG\r\n");
     })
@@ -678,6 +737,26 @@ fn memory_tcp_typed_command_name_and_routing_visit_only_collection_key() {
         panic!("typed memory command")
     };
     assert_eq!(operation.command_name(), "MEM.PUT");
+    let search = parsed(vec![
+        b"MEM.SEARCH".to_vec(),
+        b"collection:{owner}".to_vec(),
+        b"p".to_vec(),
+        b"m".to_vec(),
+        b"r".to_vec(),
+        b"t".to_vec(),
+        vector(),
+        b"1".to_vec(),
+        b"n".to_vec(),
+        b"0".to_vec(),
+    ]);
+    let mut search_keys = Vec::new();
+    search.visit_keys(|key| search_keys.push(key.clone()));
+    assert_eq!(search_keys, vec![Bytes::from_static(b"collection:{owner}")]);
+    assert!(!search.writes_dataset());
+    let Command::Memory { operation, .. } = search else {
+        panic!("typed memory search command")
+    };
+    assert_eq!(operation.command_name(), "MEM.SEARCH");
     assert_eq!(sider::command::memory::MAX_REQUEST_BYTES, 262_144);
     assert_eq!(sider::command::memory::MAX_REPLY_BYTES, 131_072);
 }
