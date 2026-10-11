@@ -553,6 +553,8 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn security_poll_logs_each_invalid_manifest_once_until_change_or_success() {
+        use tracing::instrument::WithSubscriber;
+
         let certified = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
         let generation = Generation::client_files(
             1,
@@ -571,7 +573,6 @@ mod tests {
                 move || CaptureWriter(output.clone())
             })
             .finish();
-        let _subscriber = tracing::subscriber::set_default(subscriber);
         let first = ManifestIdentity::Digest([1; 32]);
         let second = ManifestIdentity::Digest([2; 32]);
         let mut replacements = VecDeque::from([
@@ -595,17 +596,22 @@ mod tests {
         let invocations = calls.clone();
         let poller = runtime.clone();
         let (stop, shutdown) = tokio::sync::watch::channel(false);
-        let task = tokio::spawn(async move {
-            poller
-                .poll_with(
-                    move || {
-                        invocations.fetch_add(1, Ordering::SeqCst);
-                        std::future::ready(replacements.pop_front().unwrap())
-                    },
-                    shutdown,
-                )
-                .await
-        });
+        // A Tokio task may move to another worker thread between polls. Attach
+        // the capture subscriber to every poll instead of this test thread only.
+        let task = tokio::spawn(
+            async move {
+                poller
+                    .poll_with(
+                        move || {
+                            invocations.fetch_add(1, Ordering::SeqCst);
+                            std::future::ready(replacements.pop_front().unwrap())
+                        },
+                        shutdown,
+                    )
+                    .await
+            }
+            .with_subscriber(subscriber),
+        );
         for index in 1..=6 {
             if index > 1 {
                 tokio::time::advance(std::time::Duration::from_secs(1)).await;
