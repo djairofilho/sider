@@ -107,8 +107,10 @@ path can publish a header-5 snapshot generation and replace owner-worker images
 after durable publication. A memory source now persists a primary epoch at
 startup and publishes committed record-2 batches into its bounded journal.
 The database snapshot barrier captures a durable cursor and subscribes at that
-exact position. The server still refuses replica following because transport-2
-subscription and reconnect are not integrated.
+exact position. The memory source serves transport-2 `FULL` and `CONTINUE`
+sessions with cursor acknowledgements and bounded journal replay. The server
+still refuses replica following because follower startup, reconnect, and
+promotion controls are not integrated.
 The internal replica path also validates guarded record-2 deltas and commits them
 at the exact upstream sequence before acknowledging worker application.
 
