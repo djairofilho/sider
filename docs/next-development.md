@@ -124,6 +124,9 @@ the retained-member limit on Windows/NTFS and Linux WSL2/ext4 at commit
 The versioned search corpus and Windows/NTFS plus Linux WSL2/ext4 raw load
 results at commit `e2475bd` are in
 [issue #112 evidence](evidence/issue-112-corpus-e2475bd/README.md).
+The extracted development-binary reference integration passed on Windows/NTFS
+and Linux WSL2/ext4 at `dcd08ef`; see
+[issue #113 evidence](evidence/issue-113-reference-dcd08ef/README.md).
 
 For small datasets, exact search supplies a correctness oracle. Approximate
 indexes trade recall for speed and add memory and rebuild costs. Filtered search
