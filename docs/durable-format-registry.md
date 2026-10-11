@@ -217,8 +217,12 @@ application and verify that restart never replays only one owner.
 The internal replica path accepts a record-1 mixed snapshot, one expected-sequence
 batch, whole-owner preparation and application, and a flush before advancing its
 cursor. Tests cover quota rejection, restart, uncertain writer outcome, partial
-apply failure, and caller cancellation. It still refuses record 2, the missing
-mixed bit, and primary role before record scan.
+apply failure, and caller cancellation. It still refuses record 2 and the missing
+mixed bit before record scan. The explicit reader also accepts a persisted primary
+role, and the composed writer can publish one transport-3 journal frame for a
+mixed-owner batch after promotion. The executable refuses a persisted composed
+role without an explicit replication configuration, and its current composed
+configuration still rejects replication. Network following is not enabled yet.
 An isolated transport-3 codec now frames record-1 snapshot and batch records and
 requires an exact header-7/mixed-bit Hello. Its bounded reader rejects transport
 1/2 frames before payload allocation. Its isolated Export codec carries the same
