@@ -160,7 +160,7 @@ Build the runner before reserving the host. The output directory must be new and
 outside the checkout, so writing evidence does not change the source status.
 Windows focused tests passed 16 tests with the workload ignored; Clippy, formatting,
 `cargo doc --locked --no-deps`, and `cargo build --locked --release` passed.
-A native workload run remains pending. On 2026-10-10, preflight found substantial
+At that time, a native workload run remained pending. On 2026-10-10, preflight found substantial
 background CPU activity: over a five-second wait plus snapshot overhead, the
 preexisting Docker Desktop backend consumed 28.45 CPU seconds. The formatted WMI
 processor provider returned 100% busy in all five samples; its raw processor-time
@@ -175,7 +175,21 @@ The [Windows preflight summary](evidence/resource-envelope-108-windows-preflight
 and [raw archive](evidence/resource-envelope-108-windows-preflight-20261010.zip)
 preserve the blocked preflight, native check results, host observations, package
 verification, and exact harness inputs. This is preparation evidence and does
-not establish a measured Windows envelope.
+not establish a measured Windows envelope. A later completed Windows run is
+recorded below.
+
+## Windows measured run, 2026-10-11
+
+The [Windows report and raw archive](evidence/resource-envelope-108-windows-20261011.md)
+record 18/18 completed scenarios at clean source commit `ad801c2`. The
+runner observed saturated writes, large values, slow-client eviction,
+expiration, compaction, process CPU, sampled RSS/logical bytes/queues,
+startup, and AOF recovery. Maximum sampled RSS was 18.53 MiB, maximum logical
+charge was 4.58 MiB, and the largest worker/AOF queue depths were 7/4 requests.
+The report is `measurement_only`: one local development binary and host do not
+establish numeric operating guarantees. Retest on the intended host and storage
+before setting capacity or recovery objectives. The 2026-10-10 blocked
+preflight remains retained as a separate, unsuccessful attempt.
 
 ## Verification status
 
