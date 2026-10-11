@@ -110,8 +110,9 @@ The database snapshot barrier captures a durable cursor and subscribes at that
 exact position. The memory source serves transport-2 `FULL` and `CONTINUE`
 sessions with cursor acknowledgements and bounded journal replay. The record-2
 follower starts read-only, installs durable snapshots, applies exact-sequence
-deltas, and reconnects after source or follower restarts. Memory promotion
-controls and Linux filesystem crash evidence are still pending.
+deltas, and reconnects after source or follower restarts. Transport-2 status
+and promotion persist a new primary epoch and stop the follower before local
+writes resume. Linux filesystem crash evidence is still pending.
 The internal replica path also validates guarded record-2 deltas and commits them
 at the exact upstream sequence before acknowledging worker application.
 
