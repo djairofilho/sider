@@ -172,8 +172,11 @@ fn runtime_generation(
     .unwrap()
 }
 fn runtime_policy(roles: &[&str]) -> Value {
-    json!({"version":1,"instance_id":"primary-a",
-        "principals":[{"uri_san":PEER,"roles":roles}]})
+    let mut principal = json!({"uri_san":PEER,"roles":roles});
+    if roles.contains(&"replica") {
+        principal["upstream_instance"] = json!("primary-a");
+    }
+    json!({"version":1,"instance_id":"primary-a", "principals":[principal]})
 }
 fn raw_connector(
     certs: &Certificates,
@@ -1077,4 +1080,708 @@ async fn security_internal_backup_rejects_wrong_direction_before_creating_artifa
     assert!(result.is_err());
     assert!(!destination.exists());
     timeout(DEADLINE, task).await.unwrap().unwrap();
+}
+
+// Actual consumer paths: workers and durable state run behind the live registry.
+struct Consumer {
+    database: sider::storage::worker::DbHandle,
+    context: sider::storage::replication::Context,
+    stop: tokio::sync::watch::Sender<bool>,
+    workers: tokio::task::JoinSet<()>,
+    writer: tokio::task::JoinHandle<Result<(), sider::persistence::AofError>>,
+    directory: std::path::PathBuf,
+}
+impl Consumer {
+    async fn new(role: sider::persistence::Role) -> Self {
+        Self::with_faults(role, Arc::new(sider::persistence::NoFaults)).await
+    }
+    async fn with_faults(
+        role: sider::persistence::Role,
+        faults: Arc<dyn sider::persistence::FaultInjector>,
+    ) -> Self {
+        use sider::{
+            persistence::{self, AofConfig, ReplicationMetadata},
+            replication::{journal, state::Runtime},
+            storage::{Store, StoreConfig, worker},
+        };
+        let directory = std::env::temp_dir().join(format!(
+            "sider-live-consumer-{}-{}",
+            std::process::id(),
+            time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+        ));
+        let mut config = AofConfig::new(directory.clone());
+        config.compact_after_bytes = 0;
+        config.layout.shard_count = 1;
+        let layout = config.layout;
+        let aof_limits = config.limits;
+        let clock = Arc::new(sider::storage::SystemClock);
+        let store_config = StoreConfig {
+            max_dataset_bytes: 262144,
+        };
+        let recovered =
+            persistence::recover_with_faults(config, store_config, clock.clone(), faults).unwrap();
+        let (_, aof, writer) = recovered.start();
+        let cursor = Cursor {
+            epoch: [0; 16],
+            sequence: 0,
+        };
+        aof.install_snapshot(
+            Vec::new(),
+            0,
+            ReplicationMetadata {
+                role: persistence::Role::Replica,
+                epoch: cursor.epoch,
+            },
+        )
+        .await
+        .unwrap();
+        let runtime = Runtime::new(role, cursor);
+        let (stop, shutdown) = tokio::sync::watch::channel(false);
+        let (database, owners) = worker::channel_with_stores(
+            8,
+            DEADLINE,
+            shutdown,
+            vec![Store::with_config(store_config, clock.clone()).unwrap()],
+        )
+        .unwrap();
+        let database = database.with_replication(runtime.clone());
+        let mut workers = tokio::task::JoinSet::new();
+        for owner in owners {
+            workers.spawn(
+                owner
+                    .with_aof(aof.clone(), 0)
+                    .with_replication(runtime.clone())
+                    .run(),
+            );
+        }
+        let context = sider::storage::replication::Context {
+            aof,
+            runtime,
+            layout,
+            store_config,
+            clock,
+            journal_limits: journal::Limits {
+                max_bytes: 32768,
+                max_batches: 128,
+                max_frame_bytes: 32768,
+            },
+            aof_limits,
+        };
+        if role == persistence::Role::Primary {
+            database
+                .promote_replica(context.clone(), [1; 16])
+                .await
+                .unwrap();
+        }
+        Self {
+            database,
+            context,
+            stop,
+            workers,
+            writer,
+            directory,
+        }
+    }
+    async fn listen(
+        &self,
+        runtime: &sider::security::GenerationRuntime,
+    ) -> (
+        SocketAddr,
+        tokio::task::JoinHandle<Result<(), sider::replication::Error>>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let database = self.database.clone();
+        let context = self.context.clone();
+        let stop = self.stop.subscribe();
+        let internal = runtime.internal().await.unwrap();
+        let config = sider::replication::config::Config {
+            frame_timeout: Duration::from_millis(400),
+            sync_timeout: DEADLINE,
+            ..Default::default()
+        };
+        let server = tokio::spawn(sider::replication::session::serve_live(
+            listener, database, context, config, stop, internal,
+        ));
+        (address, server)
+    }
+    async fn finish(
+        mut self,
+        server: tokio::task::JoinHandle<Result<(), sider::replication::Error>>,
+    ) {
+        self.stop.send_replace(true);
+        timeout(DEADLINE, server).await.unwrap().unwrap().unwrap();
+        while let Some(result) = self.workers.join_next().await {
+            result.unwrap();
+        }
+        drop(self.database);
+        drop(self.context);
+        timeout(DEADLINE, self.writer)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        std::fs::remove_dir_all(self.directory).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn security_live_consumer_status_and_role_revocation_close_idle_before_header() {
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let remote = certs.leaf(PEER, 2, None);
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let runtime = sider::security::GenerationRuntime::new(runtime_generation(
+        1,
+        &certs,
+        &primary,
+        &crl,
+        runtime_policy(&["monitor"]),
+        false,
+    ))
+    .unwrap();
+    let client = certs.transport(&remote, &crl, tool_policy(SERVER), true);
+    let consumer = Consumer::new(sider::persistence::Role::Replica).await;
+    let (address, server) = consumer.listen(&runtime).await;
+    let mut stream = client.connect(address).await.unwrap();
+    protocol::write(
+        &mut stream,
+        &Message::StatusRequest,
+        protocol::Limits::default(),
+        DEADLINE,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        protocol::read(&mut stream, protocol::Limits::default(), DEADLINE)
+            .await
+            .unwrap(),
+        Message::Status { readonly: true, .. }
+    ));
+    let mut idle = client.connect(address).await.unwrap();
+    timeout(
+        Duration::from_millis(250),
+        runtime.activate(runtime_generation(
+            2,
+            &certs,
+            &primary,
+            &crl,
+            runtime_policy(&["backup"]),
+            false,
+        )),
+    )
+    .await
+    .expect("idle header wait owns no generation lease")
+    .unwrap();
+    physically_closed(&mut idle).await;
+    assert!(consumer.context.runtime.readonly());
+    consumer.finish(server).await;
+}
+
+#[tokio::test]
+async fn security_live_consumer_denies_promotion_before_payload_or_durable_effect() {
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let remote = certs.leaf(PEER, 2, None);
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let runtime = sider::security::GenerationRuntime::new(runtime_generation(
+        1,
+        &certs,
+        &primary,
+        &crl,
+        runtime_policy(&["monitor"]),
+        false,
+    ))
+    .unwrap();
+    let client = certs.transport(&remote, &crl, tool_policy(SERVER), true);
+    let consumer = Consumer::new(sider::persistence::Role::Replica).await;
+    let (address, server) = consumer.listen(&runtime).await;
+    let mut stream = client.connect(address).await.unwrap();
+    let before = consumer.context.runtime.status().applied;
+    let mut header = protocol::encode(&Message::Promote, protocol::Limits::default()).unwrap()
+        [..protocol::HEADER_BYTES]
+        .to_vec();
+    header[12..16].copy_from_slice(&65536_u32.to_le_bytes());
+    header[16..20].copy_from_slice(&(!65536_u32).to_le_bytes());
+    stream.write_all(&header).await.unwrap();
+    stream.flush().await.unwrap();
+    physically_closed(&mut stream).await;
+    assert!(consumer.context.runtime.readonly());
+    assert_eq!(consumer.context.runtime.status().applied, before);
+    consumer.finish(server).await;
+}
+
+#[tokio::test]
+async fn security_live_consumer_promotion_persists_and_returns_authorized_reply() {
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let remote = certs.leaf(PEER, 2, None);
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let runtime = sider::security::GenerationRuntime::new(runtime_generation(
+        1,
+        &certs,
+        &primary,
+        &crl,
+        runtime_policy(&["promotion"]),
+        false,
+    ))
+    .unwrap();
+    let client = certs.transport(&remote, &crl, tool_policy(SERVER), true);
+    let consumer = Consumer::new(sider::persistence::Role::Replica).await;
+    let (address, server) = consumer.listen(&runtime).await;
+    let mut stream = client.connect(address).await.unwrap();
+    protocol::write(
+        &mut stream,
+        &Message::Promote,
+        protocol::Limits::default(),
+        DEADLINE,
+    )
+    .await
+    .unwrap();
+    let Message::Promoted(cursor) =
+        protocol::read(&mut stream, protocol::Limits::default(), DEADLINE)
+            .await
+            .unwrap()
+    else {
+        panic!("expected promotion receipt")
+    };
+    assert!(!consumer.context.runtime.readonly());
+    assert_eq!(consumer.context.runtime.status().applied, cursor);
+    assert_ne!(cursor.epoch, [0; 16]);
+    consumer.finish(server).await;
+}
+
+#[tokio::test]
+async fn security_live_consumer_partial_authorized_body_bounds_reload_lease() {
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let remote = certs.leaf(PEER, 2, None);
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let runtime = sider::security::GenerationRuntime::new(runtime_generation(
+        1,
+        &certs,
+        &primary,
+        &crl,
+        runtime_policy(&["backup"]),
+        false,
+    ))
+    .unwrap();
+    let client = certs.transport(&remote, &crl, tool_policy(SERVER), true);
+    let consumer = Consumer::new(sider::persistence::Role::Primary).await;
+    let (address, server) = consumer.listen(&runtime).await;
+    let mut stream = client.connect(address).await.unwrap();
+    let frame = protocol::encode(
+        &Message::Export {
+            sider_version: env!("CARGO_PKG_VERSION").into(),
+            max_record_bytes: u32::MAX,
+            max_snapshot_bytes: u64::MAX,
+        },
+        protocol::Limits::default(),
+    )
+    .unwrap();
+    stream
+        .write_all(&frame[..protocol::HEADER_BYTES])
+        .await
+        .unwrap();
+    stream.flush().await.unwrap();
+    timeout(
+        Duration::from_secs(2),
+        runtime.activate(runtime_generation(
+            2,
+            &certs,
+            &primary,
+            &crl,
+            runtime_policy(&["backup"]),
+            false,
+        )),
+    )
+    .await
+    .expect("partial payload cannot hold the generation indefinitely")
+    .unwrap();
+    physically_closed(&mut stream).await;
+    consumer.finish(server).await;
+}
+
+struct ConsumerGate {
+    armed: std::sync::atomic::AtomicBool,
+    entered: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    released: std::sync::Mutex<bool>,
+    wake: std::sync::Condvar,
+}
+impl ConsumerGate {
+    fn new() -> (Arc<Self>, tokio::sync::oneshot::Receiver<()>) {
+        let (entered, response) = tokio::sync::oneshot::channel();
+        (
+            Arc::new(Self {
+                armed: false.into(),
+                entered: std::sync::Mutex::new(Some(entered)),
+                released: std::sync::Mutex::new(false),
+                wake: std::sync::Condvar::new(),
+            }),
+            response,
+        )
+    }
+    fn release(&self) {
+        *self.released.lock().unwrap() = true;
+        self.wake.notify_all();
+    }
+}
+impl sider::persistence::FaultInjector for ConsumerGate {
+    fn hit(&self, point: &'static str) -> std::io::Result<()> {
+        if point == "replication_before_publish"
+            && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            if let Some(entered) = self.entered.lock().unwrap().take() {
+                let _ = entered.send(());
+            }
+            let mut released = self.released.lock().unwrap();
+            while !*released {
+                released = self.wake.wait(released).unwrap();
+            }
+        }
+        Ok(())
+    }
+}
+struct ConsumerRelease(Arc<ConsumerGate>);
+impl Drop for ConsumerRelease {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
+#[tokio::test]
+async fn security_live_consumer_expiry_after_blocked_barrier_refuses_promotion() {
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let remote = certs.leaf(
+        PEER,
+        2,
+        Some(time::OffsetDateTime::now_utc() + time::Duration::seconds(2)),
+    );
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let runtime = sider::security::GenerationRuntime::new(runtime_generation(
+        1,
+        &certs,
+        &primary,
+        &crl,
+        runtime_policy(&["promotion"]),
+        false,
+    ))
+    .unwrap();
+    let client = certs.transport(&remote, &crl, tool_policy(SERVER), true);
+    let (gate, entered) = ConsumerGate::new();
+    let _release = ConsumerRelease(gate.clone());
+    let consumer = Consumer::with_faults(sider::persistence::Role::Replica, gate.clone()).await;
+    let generation = consumer.context.runtime.begin_session();
+    let cursor = Cursor {
+        epoch: [9; 16],
+        sequence: 0,
+    };
+    gate.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    let database = consumer.database.clone();
+    let context = consumer.context.clone();
+    let installing = tokio::spawn(async move {
+        database
+            .install_replica(context, generation, cursor, Vec::new())
+            .await
+    });
+    timeout(DEADLINE, entered).await.unwrap().unwrap();
+    let (address, server) = consumer.listen(&runtime).await;
+    let mut stream = client.connect(address).await.unwrap();
+    protocol::write(
+        &mut stream,
+        &Message::Promote,
+        protocol::Limits::default(),
+        DEADLINE,
+    )
+    .await
+    .unwrap();
+    let mut byte = [0];
+    assert!(
+        timeout(DEADLINE, stream.read(&mut byte))
+            .await
+            .unwrap()
+            .is_err()
+    );
+    gate.release();
+    timeout(DEADLINE, installing)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    timeout(
+        DEADLINE,
+        runtime.activate(runtime_generation(
+            2,
+            &certs,
+            &primary,
+            &crl,
+            runtime_policy(&["monitor"]),
+            false,
+        )),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        consumer.context.runtime.readonly(),
+        "expired waiting promotion was never accepted"
+    );
+    assert_eq!(consumer.context.runtime.status().applied, cursor);
+    consumer.finish(server).await;
+}
+
+#[tokio::test]
+async fn security_live_consumer_cancelled_promotion_retains_lease_through_publication() {
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let remote = certs.leaf(PEER, 2, None);
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let runtime = sider::security::GenerationRuntime::new(runtime_generation(
+        1,
+        &certs,
+        &primary,
+        &crl,
+        runtime_policy(&["promotion"]),
+        false,
+    ))
+    .unwrap();
+    let client = certs.transport(&remote, &crl, tool_policy(SERVER), true);
+    let (gate, entered) = ConsumerGate::new();
+    let _release = ConsumerRelease(gate.clone());
+    let consumer = Consumer::with_faults(sider::persistence::Role::Replica, gate.clone()).await;
+    let (address, server) = consumer.listen(&runtime).await;
+    gate.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    let mut stream = client.connect(address).await.unwrap();
+    protocol::write(
+        &mut stream,
+        &Message::Promote,
+        protocol::Limits::default(),
+        DEADLINE,
+    )
+    .await
+    .unwrap();
+    timeout(DEADLINE, entered).await.unwrap().unwrap();
+    server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
+    drop(stream);
+    let reload = runtime.clone();
+    let replacement = runtime_generation(
+        2,
+        &certs,
+        &primary,
+        &crl,
+        runtime_policy(&["monitor"]),
+        false,
+    );
+    let mut activation = tokio::spawn(async move { reload.activate(replacement).await });
+    assert!(
+        timeout(Duration::from_millis(80), &mut activation)
+            .await
+            .is_err(),
+        "owned accepted promotion pins old policy until durable publication"
+    );
+    gate.release();
+    timeout(DEADLINE, activation)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(!consumer.context.runtime.readonly());
+    assert_ne!(consumer.context.runtime.status().applied.epoch, [0; 16]);
+    // Listener was explicitly cancelled above; finish only the database owners.
+    let finished = tokio::spawn(async { Ok(()) });
+    consumer.finish(finished).await;
+}
+
+#[tokio::test]
+async fn security_live_consumer_backup_tool_exports_actual_worker_snapshot() {
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let remote = certs.leaf(PEER, 2, None);
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let runtime = sider::security::GenerationRuntime::new(runtime_generation(
+        1,
+        &certs,
+        &primary,
+        &crl,
+        runtime_policy(&["backup"]),
+        false,
+    ))
+    .unwrap();
+    let client = certs.transport(&remote, &crl, tool_policy(SERVER), true);
+    let consumer = Consumer::new(sider::persistence::Role::Primary).await;
+    consumer
+        .database
+        .execute(sider::command::Command::Set {
+            key: Bytes::from_static(b"backup-key"),
+            value: Bytes::from_static(b"snapshot-value"),
+        })
+        .await
+        .unwrap();
+    let (address, server) = consumer.listen(&runtime).await;
+    let destination = consumer.directory.join("export");
+    let options = sider::persistence::backup::ExportOptions {
+        source: address,
+        destination: destination.clone(),
+        source_sha: "1".repeat(40),
+        limits: sider::persistence::backup::Limits::default(),
+    };
+    timeout(
+        DEADLINE,
+        sider::persistence::backup::export_secure(options, consumer.context.clock.clone(), &client),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        destination.is_dir(),
+        "completed backup is published atomically"
+    );
+    consumer.finish(server).await;
+}
+
+#[tokio::test]
+async fn security_live_consumer_replica_installs_streams_and_stops_on_role_revocation() {
+    use sider::command::{Command, Reply};
+    let certs = Certificates::new();
+    let primary = certs.leaf(SERVER, 1, None);
+    let remote = certs.leaf(PEER, 2, None);
+    let crl = certs.crl(
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        None,
+    );
+    let primary_runtime = sider::security::GenerationRuntime::new(runtime_generation(
+        1,
+        &certs,
+        &primary,
+        &crl,
+        runtime_policy(&["replica"]),
+        false,
+    ))
+    .unwrap();
+    let outgoing =
+        json!({"version":1,"instance_id":"holder-b","principals":[],"upstream_principal":SERVER});
+    let replica_runtime = sider::security::GenerationRuntime::new(runtime_generation(
+        1, &certs, &remote, &crl, outgoing, true,
+    ))
+    .unwrap();
+    let source = Consumer::new(sider::persistence::Role::Primary).await;
+    let replica = Consumer::new(sider::persistence::Role::Replica).await;
+    let key = Bytes::from_static(b"replicated-key");
+    source
+        .database
+        .execute(Command::Set {
+            key: key.clone(),
+            value: Bytes::from_static(b"snapshot"),
+        })
+        .await
+        .unwrap();
+    let (address, server) = source.listen(&primary_runtime).await;
+    let config = sider::replication::config::Config {
+        upstream: Some(address),
+        frame_timeout: Duration::from_secs(2),
+        sync_timeout: DEADLINE,
+        reconnect_min: Duration::from_millis(20),
+        reconnect_max: Duration::from_millis(50),
+        ..Default::default()
+    };
+    let follower = tokio::spawn(sider::replication::session::follow_live(
+        replica.database.clone(),
+        replica.context.clone(),
+        config,
+        replica.stop.subscribe(),
+        replica_runtime.internal().await.unwrap(),
+    ));
+    timeout(DEADLINE, async {
+        loop {
+            if replica
+                .database
+                .execute(Command::Get { key: key.clone() })
+                .await
+                .unwrap()
+                == Reply::Bulk(Some(Bytes::from_static(b"snapshot")))
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("full snapshot is installed under the live upstream lease");
+    source
+        .database
+        .execute(Command::Set {
+            key: key.clone(),
+            value: Bytes::from_static(b"incremental"),
+        })
+        .await
+        .unwrap();
+    timeout(DEADLINE, async {
+        loop {
+            if replica
+                .database
+                .execute(Command::Get { key: key.clone() })
+                .await
+                .unwrap()
+                == Reply::Bulk(Some(Bytes::from_static(b"incremental")))
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("worker applies an incremental accepted batch");
+    primary_runtime
+        .activate(runtime_generation(
+            2,
+            &certs,
+            &primary,
+            &crl,
+            runtime_policy(&["monitor"]),
+            false,
+        ))
+        .await
+        .unwrap();
+    let stopped_at = replica.context.runtime.status().applied;
+    source
+        .database
+        .execute(Command::Set {
+            key: key.clone(),
+            value: Bytes::from_static(b"denied"),
+        })
+        .await
+        .unwrap();
+    replica.stop.send_replace(true);
+    timeout(DEADLINE, follower).await.unwrap().unwrap().unwrap();
+    assert_eq!(replica.context.runtime.status().applied, stopped_at);
+    assert_eq!(
+        replica.database.execute(Command::Get { key }).await,
+        Err(sider::storage::worker::DbError::ShuttingDown)
+    );
+    let finished = tokio::spawn(async { Ok(()) });
+    replica.finish(finished).await;
+    source.finish(server).await;
 }

@@ -5,6 +5,7 @@
 pub mod config;
 pub mod journal;
 pub mod protocol;
+mod security;
 pub mod session;
 pub mod state;
 
