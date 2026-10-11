@@ -377,3 +377,96 @@ async fn tcp_transports_all_types_snapshot_and_resolved_batch_to_real_replay() {
     .unwrap();
     primary.await.unwrap();
 }
+
+#[test]
+fn memory_transport_preserves_batch_bits_and_rejects_legacy_frames() {
+    use sider::persistence::memory_format;
+    let messages = [
+        Message::Hello(hello()),
+        Message::MemoryExport {
+            sider_version: hello().sider_version,
+            record_version: 2,
+            max_record_bytes: 4096,
+            max_snapshot_bytes: 65536,
+        },
+        Message::MemorySnapshotEntry(memory_format::Mutation::Legacy(Mutation::Put {
+            key: Bytes::from_static(b"binary\0\xff"),
+            value: Bytes::from_static(b"\0\xff").into(),
+            expires_at_unix_ms: Some(i64::MAX),
+        })),
+        Message::MemoryBatch {
+            sequence: 12,
+            origin: MutationOrigin::Expiration,
+            mutations: vec![memory_format::Mutation::Legacy(Mutation::Delete {
+                key: Bytes::from_static(b"binary\0\xff"),
+            })],
+        },
+    ];
+    for message in messages {
+        let frame = protocol::encode_memory(&message, Limits::default()).unwrap();
+        assert_eq!(&frame[8..10], &2u16.to_le_bytes());
+        assert_eq!(
+            protocol::decode_memory(frame.clone(), Limits::default()).unwrap(),
+            message
+        );
+        assert!(matches!(
+            protocol::decode(frame.clone(), Limits::default()),
+            Err(Error::Version(2))
+        ));
+        for end in 0..frame.len() {
+            assert!(protocol::decode_memory(frame.slice(..end), Limits::default()).is_err());
+        }
+        for index in 0..frame.len() {
+            let mut corrupt = frame.to_vec();
+            corrupt[index] ^= 0x80;
+            assert!(protocol::decode_memory(Bytes::from(corrupt), Limits::default()).is_err());
+        }
+    }
+    let legacy = protocol::encode(&Message::Ack(CURSOR), Limits::default()).unwrap();
+    assert!(matches!(
+        protocol::decode_memory(legacy, Limits::default()),
+        Err(Error::Version(1))
+    ));
+    let mut wrong = hello();
+    wrong.record_version = 1;
+    assert!(protocol::encode_memory(&Message::Hello(wrong), Limits::default()).is_err());
+}
+
+#[tokio::test]
+async fn memory_transport_refuses_version_and_phase_before_reading_payload() {
+    for memory in [false, true] {
+        let frame = if memory {
+            protocol::encode_memory(
+                &Message::MemoryBatch {
+                    sequence: 12,
+                    origin: MutationOrigin::Client,
+                    mutations: vec![sider::persistence::memory_format::Mutation::Legacy(
+                        Mutation::Delete {
+                            key: Bytes::from_static(b"k"),
+                        },
+                    )],
+                },
+                Limits::default(),
+            )
+            .unwrap()
+        } else {
+            protocol::encode(&Message::Ack(CURSOR), Limits::default()).unwrap()
+        };
+        let (mut sender, mut receiver) = duplex(64);
+        sender
+            .write_all(&frame[..protocol::HEADER_BYTES])
+            .await
+            .unwrap();
+        let result = protocol::read_memory_in_phase(
+            &mut receiver,
+            Limits::default(),
+            DEADLINE,
+            sider::security::InternalPhase::Hello,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(Error::Version(1)) | Err(Error::Invalid("permission denied"))
+        ));
+    }
+}

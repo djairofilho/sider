@@ -12,7 +12,9 @@ use std::time::Duration;
 pub use archive::{
     VerifiedBackup, restore, restore_memory, restore_memory_with_faults, verify, verify_memory,
 };
-pub use client::{ExportOptions, export, export_secure, export_stream};
+pub use client::{
+    ExportOptions, export, export_memory, export_memory_stream, export_secure, export_stream,
+};
 pub use manifest::Manifest;
 pub use memory::{
     OfflineMemoryExportOptions, export_memory_offline, export_memory_offline_with_faults,

@@ -941,3 +941,168 @@ fn memory_backup_manifest_digest_matches_independent_transport2_envelope_oracle(
         u64::from(digest)
     );
 }
+
+#[tokio::test]
+async fn live_memory_transport_export_round_trips_mixed_snapshot() {
+    use sider::replication::{
+        Cursor,
+        protocol::{self, Hello},
+    };
+    let directory = Directory::new();
+    let images = seed(&directory.child("source"));
+    let cursor = Cursor {
+        epoch: [7; 16],
+        sequence: 12,
+    };
+    let limits = backup::Limits::default();
+    let hello = Hello {
+        sider_version: Bytes::from_static(env!("CARGO_PKG_VERSION").as_bytes()),
+        record_version: 2,
+        shard_count: 1,
+        routing_version: 1,
+        max_record_bytes: limits.max_record_bytes as u32,
+        max_mutations: limits.max_mutations as u32,
+        max_snapshot_bytes: limits.max_snapshot_bytes,
+        cursor: Some(cursor),
+    };
+    let (mut producer, mut consumer) = tokio::io::duplex(128);
+    let source = tokio::spawn(async move {
+        sider::replication::memory::export_snapshot(
+            &mut producer,
+            hello,
+            cursor,
+            &images,
+            protocol::Limits::default(),
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+    });
+    let destination = directory.child("live");
+    let manifest = backup::export_memory_stream(
+        &mut consumer,
+        backup::ExportOptions {
+            source: "127.0.0.1:1".parse().unwrap(),
+            destination: destination.clone(),
+            source_sha: "a".repeat(40),
+            limits,
+        },
+        clock(1000),
+    )
+    .await
+    .unwrap();
+    source.await.unwrap();
+    assert_eq!(manifest.profile, backup::Profile::Memory);
+    assert_eq!(manifest.cursor, cursor);
+    backup::verify_memory(&destination, DurableLayout::default(), limits, clock(1000)).unwrap();
+    assert!(backup::verify(&destination, DurableLayout::default(), limits, clock(1000)).is_err());
+    backup::restore_memory(
+        backup::RestoreOptions {
+            source: destination,
+            destination: directory.child("restored"),
+            layout: DurableLayout::default(),
+            limits,
+        },
+        clock(1000),
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn live_memory_export_rejects_capacity_before_snapshot_or_destination() {
+    use sider::replication::{
+        Cursor,
+        protocol::{self, Hello},
+    };
+    let directory = Directory::new();
+    let cursor = Cursor {
+        epoch: [7; 16],
+        sequence: 12,
+    };
+    let limits = backup::Limits::default();
+    let source = Hello {
+        sider_version: Bytes::from_static(env!("CARGO_PKG_VERSION").as_bytes()),
+        record_version: 2,
+        shard_count: 1,
+        routing_version: 1,
+        max_record_bytes: limits.max_record_bytes as u32,
+        max_mutations: limits.max_mutations as u32,
+        max_snapshot_bytes: limits.max_snapshot_bytes,
+        cursor: Some(cursor),
+    };
+    let (mut producer, mut consumer) = tokio::io::duplex(128);
+    let task = tokio::spawn(async move {
+        sider::replication::memory::export_snapshot(
+            &mut producer,
+            source,
+            cursor,
+            &[],
+            protocol::Limits::default(),
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+    });
+    let destination = directory.child("rejected");
+    let smaller = backup::Limits {
+        max_record_bytes: limits.max_record_bytes - 1,
+        ..limits
+    };
+    assert!(
+        backup::export_memory_stream(
+            &mut consumer,
+            backup::ExportOptions {
+                source: "127.0.0.1:1".parse().unwrap(),
+                destination: destination.clone(),
+                source_sha: "a".repeat(40),
+                limits: smaller
+            },
+            clock(1000)
+        )
+        .await
+        .is_err()
+    );
+    task.await.unwrap();
+    assert!(!destination.exists());
+}
+
+#[test]
+fn memory_transport_delta_replay_preserves_historical_expired_state() {
+    use sider::replication::protocol::{self, Message};
+    let mut primary = Store::with_clock(clock(1000));
+    assert_eq!(
+        execute(&mut primary, b"c", Operation::Create(descriptor())),
+        Reply::Ok
+    );
+    let image = primary.snapshot_memory().remove(0);
+    let mut replica = Store::with_clock(clock(9000));
+    replica.replay_memory(&[image]).unwrap();
+    for operation in [
+        Operation::Put {
+            descriptor: descriptor(),
+            member: Box::new(member(b"id")),
+            ttl: Ttl::After(1),
+            condition: SetCondition::Always,
+        },
+        Operation::Persist {
+            id: Bytes::from_static(b"id"),
+        },
+    ] {
+        let prepared = primary.prepare_memory(Bytes::from_static(b"c"), operation);
+        let delta = prepared.resolved().unwrap().clone();
+        assert_eq!(primary.apply_memory(prepared), Reply::Integer(1));
+        let message = Message::MemoryBatch {
+            sequence: 1,
+            origin: sider::storage::MutationOrigin::Client,
+            mutations: vec![delta],
+        };
+        let frame = protocol::encode_memory(&message, protocol::Limits::default()).unwrap();
+        let Message::MemoryBatch { mutations, .. } =
+            protocol::decode_memory(frame, protocol::Limits::default()).unwrap()
+        else {
+            panic!("batch")
+        };
+        replica.replay_memory(&mutations).unwrap();
+    }
+    assert_eq!(replica.snapshot_memory(), primary.snapshot_memory());
+}

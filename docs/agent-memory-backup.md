@@ -3,8 +3,9 @@
 This development slice implements schema-2 archive export, verification and
 restoration for issue #110. It is not part of the published 1.0.1 package and
 does not complete the memory durability contract. The default server and backup
-CLI retain record 1. Live transport-2 export, replication and migration remain
-separate implementation gates.
+CLI retain record 1. An explicit transport-2 snapshot producer and live backup
+consumer are now available as library APIs; server capture/listener wiring and
+native replication remain separate gates.
 
 ## Explicit profiles
 
@@ -13,6 +14,7 @@ separate implementation gates.
 | Existing `export`, `export_secure`, `export_stream` | Transport 1 | Schema 1, header 2, record 1 |
 | Existing `verify`, `restore` | Schema 1, header 2, record 1 | Original legacy profile |
 | `export_memory_offline` | Stopped AOF explicitly configured with `with_memory_profile`, header 4/5, record 2 | Schema 2, header 4, record 2 |
+| `export_memory`, `export_memory_stream` | Explicit transport-2 memory snapshot source | Schema 2, header 4, record 2 |
 | `verify_memory`, `restore_memory` | Schema 2, header 4, record 2 | Verified original memory profile |
 
 No API infers a profile from the current values. Memory verification refuses
@@ -69,8 +71,25 @@ source executable's Sider version. The manifest identifies the exact exporting
 tool version and verification requires that same version. Offline
 `source_max_snapshot_bytes` records the explicit export ceiling, since an AOF
 source has no transport handshake announcing a snapshot limit. The transport
-digest is calculated from the frozen transport-2 tag-4 envelope for each record;
-this digest support does not enable a live transport-2 reader or listener.
+digest is calculated from the frozen transport-2 tag-4 envelope for each record.
+A separate live consumer now reads these frames; the default server still has
+no memory-profile listener.
+
+## Explicit live export stage
+
+`replication::memory::export_snapshot` accepts a caller-captured, ordered,
+consistent snapshot and its matching cursor. The caller owns authorization,
+the snapshot cut and the source stream. The producer checks transport version,
+record version and receiver capacity before sending any image; it does not
+capture a worker cut, publish a journal or start a listener. Transport 1 remains
+the default for existing replication and backup entry points.
+
+`backup::export_memory_stream` accepts an injected transport-2 stream;
+`backup::export_memory` connects to an explicitly configured source address.
+They verify the handshake and ordered complete images, write a sealed schema-2
+archive, and use the existing memory verifier and restorer. A caller must
+provide a trusted source. These APIs are not an authenticated server endpoint,
+and the default CLI does not select them.
 
 ## Verify and restore
 
@@ -111,7 +130,7 @@ contract's complete 16 MiB lifecycle scratch proof.
 Focused Windows tests cover mixed types/memory, schema/version preflight,
 elapsed TTL, binary data, corruption, incomplete source history, source locking,
 quota/layout rejection, and injected partial writes and publication failures.
-Live transport-2 export and secure network integration, memory-specific child
+Server-owned live export and secure network integration, memory-specific child
 process/power-loss gates, Linux filesystem checks and the full release gates
 remain pending.
 
