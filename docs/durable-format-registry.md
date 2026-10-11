@@ -136,8 +136,9 @@ fields against the actual header before replay. Restore uses a new directory
 with the same profile; it does not inherit source role, epoch, credentials or
 TTL duration. Schema 1/2 and transport 1/2 remain immutable. The explicit
 schema-3 stream export, verification and isolated restore library paths are now
-implemented for record 1 with the mixed bit. No server listener or executable
-selects them; default recovery still refuses the restored header-7 directory.
+implemented for record 1 with the mixed bit. Explicit library recovery and live
+source export are also implemented. No server listener or executable selects
+them; the default reader still refuses the restored header-7 directory.
 
 ## Offline migration and rollback
 

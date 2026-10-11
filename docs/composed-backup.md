@@ -14,6 +14,14 @@ profile change or invalid snapshot emits no valid cut. The source sends ordered
 record-1 snapshot entries, a digest-bearing `FullEnd`, and EOF without an ACK or
 incremental subscription.
 
+`replication::composed::export_database` connects that negotiation to a live
+`DbHandle`. A library caller explicitly recovers a header-7 directory, binds the
+handle and every owner worker to the same AOF writer, then passes that handle,
+writer, source profile, and nonzero epoch to the export function. It negotiates
+before `DbHandle::composed_snapshot` freezes the workers and flushes the writer.
+The captured sequence and sorted mutations form one cut. A handle bound to a
+different writer cannot supply that cut. No executable listener selects this path.
+
 `persistence::backup::export_composed_stream` receives that stream and publishes a
 new archive only after validating the Hello profile, cursor, frame order, per-shard
 quota, digest, seal, and EOF. `export_composed` and `export_composed_secure` use an
@@ -32,7 +40,9 @@ schema-1 and schema-2 APIs reject a schema-3 archive and retain their existing
 wire and manifest formats.
 
 Focused tests run with `cargo test --locked --test replication_composed_backup`.
-They cover a complete export/verify/restore/recover cycle, refusal before archive
-creation, cleanup after a truncated stream, and semantic profile mismatches after
-recomputing checksums. Production use still needs a selectable header-7 server
-source and replica path, the backup CLI, and native release evidence.
+They cover a complete export/verify/restore/recover cycle from both a captured
+fixture and a live mixed-owner transaction, refusal of an unbound source before
+archive creation, cleanup after a truncated stream, and semantic profile
+mismatches after recomputing checksums. Production use still needs a selectable
+header-7 server source and replica path, the backup CLI, and native release
+evidence.
