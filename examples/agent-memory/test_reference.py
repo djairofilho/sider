@@ -14,6 +14,13 @@ class FailingProvider:
         raise RuntimeError("provider unavailable")
 
 
+class MissingCredentialProvider:
+    provider, model, revision, transform = reference.IDENTITY
+
+    def embed(self, text: bytes):
+        raise RuntimeError("provider credential missing")
+
+
 class ReferenceTests(unittest.TestCase):
     def test_complete_fixture_preflights_before_any_client_exists(self):
         prepared = reference.prepare(reference.FixtureEmbeddingProvider(), reference.SOURCES)
@@ -23,6 +30,12 @@ class ReferenceTests(unittest.TestCase):
     def test_provider_failure_stops_preflight(self):
         with self.assertRaisesRegex(RuntimeError, "provider unavailable"):
             reference.prepare(FailingProvider(), reference.SOURCES)
+
+    def test_missing_credential_stops_preflight_before_connection(self):
+        with patch.object(reference, "Sider") as client:
+            with self.assertRaisesRegex(RuntimeError, "credential missing"):
+                reference.prepare(MissingCredentialProvider(), reference.SOURCES)
+        client.assert_not_called()
 
     def test_requested_provider_failure_does_not_open_sider_connection(self):
         with patch.object(reference, "Sider") as client:
