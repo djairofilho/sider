@@ -154,6 +154,63 @@ async fn memory_connection(
         authority.set_request(&request);
     }
     drop(request_lease);
+    if request == Message::StatusRequest {
+        let lease = match authority.as_deref() {
+            Some(authority) => authority.operation(config.frame_timeout).await?,
+            None => None,
+        };
+        let status = database
+            .authorized_internal(lease)
+            .replication_status(&source.context.runtime)
+            .await?;
+        let bytes = source
+            .context
+            .runtime
+            .journal()
+            .and_then(|journal| journal.status().ok())
+            .map_or(0, |status| status.bytes as u64);
+        return security::write_memory(
+            socket,
+            &Message::Status {
+                readonly: status.role == crate::persistence::Role::Replica,
+                cursor: status.applied,
+                upstream_sequence: status.upstream_sequence,
+                connected: status.connected,
+                backlog_bytes: bytes,
+                full_syncs: status.full_syncs,
+                partial_syncs: status.partial_syncs,
+            },
+            limits(aof_config),
+            config.frame_timeout,
+            authority.as_deref(),
+        )
+        .await;
+    }
+    if request == Message::Promote {
+        let lease = match authority.as_deref() {
+            Some(authority) => authority.operation(config.frame_timeout).await?,
+            None => None,
+        };
+        let cursor = if source.context.runtime.readonly() {
+            database
+                .authorized_internal(lease)
+                .promote_replica(source.context.clone(), super::new_epoch()?)
+                .await?
+        } else {
+            database
+                .authorized_internal(lease)
+                .replication_position(&source.context.runtime)
+                .await?
+        };
+        return security::write_memory(
+            socket,
+            &Message::Promoted(cursor),
+            limits(aof_config),
+            config.frame_timeout,
+            authority.as_deref(),
+        )
+        .await;
+    }
     if let Message::Hello(peer) = request {
         return replica_connection(socket, source, peer, authority.as_deref()).await;
     }
