@@ -3,7 +3,7 @@
 use std::future::{Future, poll_fn};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::task::Poll;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -642,6 +642,93 @@ async fn uncertain_replica_append_closes_admission_without_advancing_cursor() {
     );
     drop(store);
     cleanup(&directory);
+}
+
+struct OneShotFault {
+    point: &'static str,
+    armed: AtomicBool,
+}
+
+impl FaultInjector for OneShotFault {
+    fn hit(&self, point: &'static str) -> std::io::Result<()> {
+        if point == self.point && self.armed.swap(false, Ordering::SeqCst) {
+            Err(std::io::Error::other("injected composed replica boundary"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[tokio::test]
+async fn composed_replica_append_apply_and_sync_faults_recover_only_complete_batches() {
+    for (point, recovered_sequence, writer_fails) in [
+        ("before_append", 0, true),
+        ("after_append", 1, true),
+        ("before_sync", 1, true),
+        ("after_sync", 1, true),
+        ("before_reply", 1, true),
+        ("replica_mixed_before_first_apply", 1, false),
+        ("replica_mixed_after_first_apply", 1, false),
+        ("replica_mixed_after_all_apply", 1, false),
+    ] {
+        let fault = Arc::new(OneShotFault {
+            point,
+            armed: AtomicBool::new(false),
+        });
+        let harness = Harness::new(4096, fault.clone()).await;
+        fault.armed.store(true, Ordering::SeqCst);
+        let result = harness
+            .db
+            .apply_replica(
+                harness.context.clone(),
+                harness.generation,
+                Cursor {
+                    epoch: EPOCH,
+                    sequence: 1,
+                },
+                batch(b"left", b"right"),
+            )
+            .await;
+        assert!(
+            matches!(result, Err(Error::Persistence(_))),
+            "{point}: {result:?}"
+        );
+        assert_eq!(
+            harness.db.check_admission(),
+            Err(DbError::Unavailable),
+            "{point}"
+        );
+        assert_eq!(
+            harness.context.runtime.status().applied.sequence,
+            0,
+            "{point}"
+        );
+        let (directory, config, quota, writer) = harness.stop().await;
+        assert_eq!(writer.is_err(), writer_fails, "{point}");
+        let recovered = persistence::recover_composed_legacy_mixed(
+            config,
+            quota,
+            Arc::new(SystemClock),
+            Arc::new(NoFaults),
+        )
+        .unwrap();
+        assert_eq!(recovered.metadata.sequence, recovered_sequence, "{point}");
+        let mut store = recovered.store;
+        let expected = if recovered_sequence == 0 {
+            None
+        } else {
+            Some(Bytes::from_static(b"left"))
+        };
+        assert_eq!(get(&mut store, b"a"), Reply::Bulk(expected), "{point}");
+        let expected = if recovered_sequence == 0 {
+            None
+        } else {
+            Some(Bytes::from_static(b"right"))
+        };
+        assert_eq!(get(&mut store, b"b"), Reply::Bulk(expected), "{point}");
+        drop(store);
+        cleanup(&directory);
+    }
 }
 
 struct PauseBeforeApply {
