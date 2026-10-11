@@ -1,4 +1,4 @@
-//! Serialized client-generation activation and leases retained by accepted operations.
+//! Serialized complete-generation activation and leases retained by accepted operations.
 
 use std::sync::{Arc, Mutex, Weak};
 
@@ -33,10 +33,11 @@ struct State {
     // Also serializes validation against the currently active generation.
     activation: tokio::sync::Mutex<()>,
     sessions: Mutex<Vec<Weak<Endpoint>>>,
+    internal_sessions: Mutex<Vec<Weak<super::internal_runtime::Endpoint>>>,
 }
 
-/// Client-only reload stage. Internal generations are rejected until internal
-/// operation leases and revocation barriers are integrated as one atomic runtime.
+/// Shared client/internal activation. Internal consumers must use `internal()`
+/// and retain operation leases through accepted effects before enabling deployment.
 #[derive(Clone)]
 pub struct ClientRuntime(Arc<State>);
 
@@ -93,7 +94,7 @@ impl ClientRuntime {
         self.0.active.read().await.number
     }
     pub fn new(mut generation: Generation) -> Result<Self, Error> {
-        if generation.client.is_none() || generation.internal.is_some() {
+        if generation.client.is_none() {
             return Err(Error::Configuration);
         }
         generation
@@ -105,7 +106,26 @@ impl ClientRuntime {
             active: Arc::new(RwLock::new(generation)),
             activation: tokio::sync::Mutex::new(()),
             sessions: Mutex::new(Vec::new()),
+            internal_sessions: Mutex::new(Vec::new()),
         })))
+    }
+    /// Internal handle always resolves admission and reconnects from the active generation.
+    pub async fn internal(&self) -> Option<super::InternalRuntime> {
+        self.0.active.read().await.internal.as_ref()?;
+        Some(super::InternalRuntime::new(self.clone()))
+    }
+    pub(super) async fn internal_lease(&self) -> super::InternalLease {
+        let generation = Arc::new(self.0.active.clone().read_owned().await);
+        super::InternalLease::new(generation)
+    }
+    pub(super) fn register_internal(&self, endpoint: &Arc<super::internal_runtime::Endpoint>) {
+        let mut sessions = self
+            .0
+            .internal_sessions
+            .lock()
+            .expect("internal session registry mutex");
+        sessions.retain(|entry| entry.strong_count() != 0);
+        sessions.push(Arc::downgrade(endpoint));
     }
     pub async fn client(&self) -> ClientSecurity {
         let mut client = self
@@ -159,12 +179,32 @@ impl ClientRuntime {
     }
     async fn activate_inner(&self, replacement: &mut Generation) -> Result<bool, Error> {
         let _serial = self.0.activation.lock().await;
-        if replacement.client.is_none() || replacement.internal.is_some() {
+        if replacement.client.is_none() {
             return Err(Error::Configuration);
         }
         let mut active = self.0.active.write().await;
+        // Listener lanes are startup configuration; reload cannot silently add or
+        // remove a listener's material while handles still exist.
+        if replacement.internal.is_some() != active.internal.is_some() {
+            return Err(Error::Configuration);
+        }
         if !replacement.replacement_of(&active)? {
             return Ok(false);
+        }
+        // Validation may have completed before an accepted operation delayed the
+        // write lock. Expired replacements must retain the old sessions and state.
+        if !replacement
+            .client
+            .as_ref()
+            .expect("validated client generation")
+            .transport
+            .current()
+            || replacement
+                .internal
+                .as_ref()
+                .is_some_and(|internal| !internal.transport.current())
+        {
+            return Err(Error::Transport);
         }
         let client = replacement
             .client
@@ -189,6 +229,21 @@ impl ClientRuntime {
             .filter_map(Weak::upgrade)
             .collect();
         let mut acknowledgements = Vec::new();
+        if let Some(internal) = &replacement.internal {
+            let endpoints: Vec<_> = self
+                .0
+                .internal_sessions
+                .lock()
+                .expect("internal session registry mutex")
+                .iter()
+                .filter_map(Weak::upgrade)
+                .collect();
+            for endpoint in endpoints {
+                // Taking and dropping the owned TLS/TCP stream is the close ACK.
+                // It does not depend on an idle consumer polling an update channel.
+                endpoint.revalidate(&internal.transport);
+            }
+        }
         for endpoint in endpoints {
             let (acknowledged, acknowledgement) = oneshot::channel();
             if endpoint
@@ -218,13 +273,26 @@ impl ClientRuntime {
         directory: std::path::PathBuf,
         shutdown: tokio::sync::watch::Receiver<bool>,
     ) {
+        self.poll_server(directory, false, shutdown).await;
+    }
+    /// Polls the exact server file set used at startup, including both lanes.
+    /// `outgoing` is the immutable replica configuration, not a policy inference.
+    pub async fn poll_server(
+        &self,
+        directory: std::path::PathBuf,
+        outgoing: bool,
+        shutdown: tokio::sync::watch::Receiver<bool>,
+    ) {
+        let internal = self.0.active.read().await.internal.is_some();
         self.poll_with(
             move || {
                 let path = directory.clone();
                 async move {
-                    tokio::task::spawn_blocking(move || Generation::server(&path, false, false))
-                        .await
-                        .unwrap_or(Err(Error::Configuration))
+                    tokio::task::spawn_blocking(move || {
+                        Generation::server(&path, internal, outgoing)
+                    })
+                    .await
+                    .unwrap_or(Err(Error::Configuration))
                 }
             },
             shutdown,
@@ -253,7 +321,7 @@ impl ClientRuntime {
             };
             match result {
                 Ok(true) => {
-                    tracing::info!("client security generation activated after revocation cleanup")
+                    tracing::info!("security generation activated after revocation cleanup")
                 }
                 Ok(false) => {}
                 Err(_) => {

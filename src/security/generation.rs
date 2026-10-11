@@ -73,6 +73,33 @@ impl Generation {
             (CLIENT[1].to_owned(), certificate.to_vec()),
             (CLIENT[2].to_owned(), key.to_vec()),
         ]);
+        Self::from_files(number, files, CLIENT, false, false)
+    }
+    /// Validates a complete in-memory server generation. Client entries are
+    /// policy/certificate/key; internal entries are policy/certificate/key/CA/CRL.
+    /// This embedding seam never bypasses executable directory permission checks.
+    pub fn server_files(
+        number: u64,
+        client: [&[u8]; 3],
+        internal: [&[u8]; 5],
+        outgoing: bool,
+    ) -> Result<Self, Error> {
+        let names: Vec<_> = CLIENT.iter().chain(INTERNAL).copied().collect();
+        let files = names
+            .iter()
+            .copied()
+            .zip(client.into_iter().chain(internal))
+            .map(|(name, bytes)| (name.to_owned(), bytes.to_vec()))
+            .collect();
+        Self::from_files(number, files, &names, true, outgoing)
+    }
+    fn from_files(
+        number: u64,
+        files: BTreeMap<String, Vec<u8>>,
+        names: &[&str],
+        internal: bool,
+        outgoing: bool,
+    ) -> Result<Self, Error> {
         let digests: BTreeMap<_, _> = files
             .iter()
             .map(|(name, bytes)| {
@@ -87,7 +114,9 @@ impl Generation {
             &serde_json::json!({"version": 1, "generation": number, "files": digests}),
         )
         .map_err(|_| Error::Configuration)?;
-        Self::validate(&manifest, &manifest, &files, CLIENT, true, false, false)
+        Self::validate(
+            &manifest, &manifest, &files, names, true, internal, outgoing,
+        )
     }
     /// Loads a server generation, checking permissions before any listeners open.
     pub fn server(directory: &Path, internal: bool, outgoing: bool) -> Result<Self, Error> {

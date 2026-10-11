@@ -323,6 +323,7 @@ impl InternalTransport {
             roles,
             own_pair: self.own_pair,
             validity,
+            runtime_closed: None,
         };
         Ok((ExpiringStream::boxed(Box::new(stream), validity), peer))
     }
@@ -368,12 +369,17 @@ impl InternalTransport {
                 roles: Vec::new(),
                 own_pair: self.own_pair,
                 validity,
+                runtime_closed: None,
             };
             Ok::<_, Error>((ExpiringStream::boxed(Box::new(stream), validity), peer))
         })
         .await
         .map_err(|_| Error::Transport)??;
         Ok(stream)
+    }
+    /// Current loaded certificate, trust-anchor and CRL validity bounds.
+    pub(crate) fn current(&self) -> bool {
+        self.validity.current()
     }
     /// Validates an established peer against replacement material without trusting
     /// the old handshake. This is a component seam, not a live reload barrier.
