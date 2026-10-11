@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -668,6 +669,7 @@ fn load(
                     config.layout,
                     store_config.max_dataset_bytes,
                     &mut shard_usage,
+                    false,
                 )?;
             }
             memory_format::Record::Seal {
@@ -692,6 +694,7 @@ fn load(
                     config.layout,
                     store_config.max_dataset_bytes,
                     &mut shard_usage,
+                    false,
                 )?;
                 sequence = next;
             }
@@ -789,31 +792,36 @@ fn replay_routed_memory(
     layout: DurableLayout,
     total: usize,
     usage: &mut [usize],
+    allow_mixed: bool,
 ) -> Result<(), AofError> {
     let mut selected = None;
     for mutation in mutations {
         let shard = layout.shard_for(mutation.key())?;
-        if selected.is_some_and(|previous| previous != shard) {
+        if !allow_mixed && selected.is_some_and(|previous| previous != shard) {
             return Err(AofError::CrossShard);
         }
         selected = Some(shard);
     }
-    let shard = selected.unwrap_or(0);
-    let before = store.used_bytes();
-    store.replay_memory(mutations)?;
-    let after = store.used_bytes();
-    usage[shard] = if after >= before {
-        usage[shard] + after - before
-    } else {
-        usage[shard] - (before - after)
-    };
-    let quota = layout.quota(total, shard)?;
-    if usage[shard] > quota {
-        return Err(AofError::ShardQuota {
-            shard,
-            used: usage[shard],
-            quota,
-        });
+    let prepared =
+        store.prepare_memory_replay(mutations, crate::storage::MutationOrigin::Client)?;
+    let mut projected = BTreeMap::new();
+    for (key, before, after) in prepared.usage_deltas(store)? {
+        let shard = layout.shard_for(key)?;
+        let used = projected.entry(shard).or_insert(usage[shard]);
+        *used = used
+            .checked_sub(before)
+            .and_then(|value| value.checked_add(after))
+            .ok_or(ReplayError::Quota)?;
+    }
+    for (&shard, &used) in &projected {
+        let quota = layout.quota(total, shard)?;
+        if used > quota {
+            return Err(AofError::ShardQuota { shard, used, quota });
+        }
+    }
+    store.apply(prepared);
+    for (shard, used) in projected {
+        usage[shard] = used;
     }
     Ok(())
 }
@@ -1204,6 +1212,7 @@ impl Writer {
                 self.config.layout,
                 self.store_config.max_dataset_bytes,
                 &mut usage,
+                false,
             )?;
         }
         drop(checked);
@@ -1455,5 +1464,95 @@ mod lock_tests {
         .unwrap();
         drop((reopened, duplicate));
         fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod routed_replay_tests {
+    use super::*;
+    use crate::storage::{SystemClock, Value};
+    use bytes::Bytes;
+
+    fn put(key: &'static [u8], bytes: usize) -> memory_format::Mutation {
+        memory_format::Mutation::Legacy(Mutation::Put {
+            key: Bytes::from_static(key),
+            value: Value::String(Bytes::from(vec![b'x'; bytes])),
+            expires_at_unix_ms: None,
+        })
+    }
+
+    #[test]
+    fn routed_replay_prepares_every_owner_before_a_mixed_apply() {
+        let layout = DurableLayout {
+            shard_count: 2,
+            ..DurableLayout::default()
+        };
+        assert_ne!(
+            layout.shard_for(b"a").unwrap(),
+            layout.shard_for(b"b").unwrap()
+        );
+        let mut store = Store::with_config(
+            StoreConfig {
+                max_dataset_bytes: 600,
+            },
+            Arc::new(SystemClock),
+        )
+        .unwrap();
+        let mut usage = vec![0; 2];
+        let batch = [put(b"a", 10), put(b"b", 10)];
+
+        assert!(matches!(
+            replay_routed_memory(&mut store, &batch, layout, 600, &mut usage, false),
+            Err(AofError::CrossShard)
+        ));
+        assert!(store.is_empty());
+        assert_eq!(usage, [0, 0]);
+
+        replay_routed_memory(&mut store, &batch, layout, 600, &mut usage, true).unwrap();
+        assert_eq!(store.len(), 2);
+        assert_eq!(usage, [139, 139]);
+        let snapshot = store.snapshot();
+
+        let rejected = [put(b"a", 20), put(b"b", 200)];
+        assert!(matches!(
+            replay_routed_memory(&mut store, &rejected, layout, 600, &mut usage, true),
+            Err(AofError::ShardQuota { .. })
+        ));
+        assert_eq!(store.snapshot(), snapshot);
+        assert_eq!(usage, [139, 139]);
+
+        let replacement = [put(b"a", 20), put(b"b", 5)];
+        replay_routed_memory(&mut store, &replacement, layout, 600, &mut usage, true).unwrap();
+        assert_eq!(usage[layout.shard_for(b"a").unwrap()], 149);
+        assert_eq!(usage[layout.shard_for(b"b").unwrap()], 134);
+    }
+
+    #[test]
+    fn routed_replay_rejects_last_owner_quota_before_any_initial_write() {
+        let layout = DurableLayout {
+            shard_count: 2,
+            ..DurableLayout::default()
+        };
+        let mut store = Store::with_config(
+            StoreConfig {
+                max_dataset_bytes: 600,
+            },
+            Arc::new(SystemClock),
+        )
+        .unwrap();
+        let mut usage = vec![0; 2];
+        assert!(matches!(
+            replay_routed_memory(
+                &mut store,
+                &[put(b"a", 10), put(b"b", 200)],
+                layout,
+                600,
+                &mut usage,
+                true,
+            ),
+            Err(AofError::ShardQuota { .. })
+        ));
+        assert!(store.is_empty());
+        assert_eq!(usage, [0, 0]);
     }
 }

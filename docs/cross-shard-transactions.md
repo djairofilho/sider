@@ -1,6 +1,7 @@
 # Proposed cross-shard transaction contract
 
-**Status: protocol proposed; preparation foundations integrated.** This design addresses
+**Status: protocol proposed; preparation and isolated replay foundations integrated.**
+This design addresses
 [issue #92](https://github.com/djairofilho/sider/issues/92) against source baseline
 `0f0f232`. It supplies a written contract and an implementation plan; it does not
 complete the issue's implementation or crash/network validation criteria.
@@ -10,6 +11,11 @@ Participant discovery includes watched-only keys and keeps owner IDs bounded and
 sorted. Owner-local candidate preparation and a shared execution time are in the
 development checkout; single-shard EXEC uses the latter for WATCH and TTL.
 Mixed-owner EXEC, durable append, replay, and replica application are not enabled.
+The recovery helper now stages postimages and validates each touched shard's
+projected quota before applying a record. An internal test exercises a mixed-owner
+record and a quota failure on its last owner; all production recovery calls still
+pass the single-owner gate and reject such records before preparation. This proves
+the helper's local all-or-none application only, not durable mixed-owner replay.
 
 ## Contents
 

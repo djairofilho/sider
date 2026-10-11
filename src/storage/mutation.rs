@@ -174,6 +174,33 @@ pub struct Prepared {
     entries: Vec<(Bytes, Option<Entry>)>,
 }
 
+impl Prepared {
+    /// Charges each touched key against its current and prepared postimage.
+    /// Replay can validate every shard quota before applying any key.
+    pub(crate) fn usage_deltas<'a>(
+        &'a self,
+        store: &Store,
+    ) -> Result<Vec<(&'a Bytes, usize, usize)>, ReplayError> {
+        self.entries
+            .iter()
+            .map(|(key, after)| {
+                let before = store
+                    .values
+                    .get(key)
+                    .map(|entry| Store::entry_bytes(key, &entry.value).ok_or(ReplayError::Quota))
+                    .transpose()?
+                    .unwrap_or(0);
+                let after = after
+                    .as_ref()
+                    .map(|entry| Store::entry_bytes(key, &entry.value).ok_or(ReplayError::Quota))
+                    .transpose()?
+                    .unwrap_or(0);
+                Ok((key, before, after))
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ReplayError {
     #[error("invalid memory replay state: {0}")]
