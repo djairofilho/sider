@@ -79,7 +79,9 @@ impl Authority {
     pub(super) fn set_request(&mut self, message: &Message) {
         self.request = Some(match message {
             Message::Hello(_) | Message::ComposedHello(_) => 1,
-            Message::Export { .. } | Message::MemoryExport { .. } => 10,
+            Message::Export { .. }
+            | Message::MemoryExport { .. }
+            | Message::ComposedExport { .. } => 10,
             Message::StatusRequest => 11,
             Message::Promote => 12,
             _ => 0,
