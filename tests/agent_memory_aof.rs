@@ -269,6 +269,148 @@ fn image() -> persistence::memory_format::Mutation {
         key_deadline: None,
     }
 }
+
+#[tokio::test]
+async fn memory_aof_replica_install_publishes_complete_header5_generation() {
+    use sider::storage::{Mutation, Store, Value, memory::Edit};
+
+    let directory = Directory::new();
+    let (initial, aof, writer) = recover(&directory).start();
+    drop(initial);
+    let metadata = persistence::ReplicationMetadata {
+        role: persistence::Role::Replica,
+        epoch: [0x51; 16],
+    };
+    assert!(matches!(
+        aof.install_memory_snapshot(
+            vec![delta(vec![Edit::Upsert(member())], None)],
+            40,
+            metadata
+        )
+        .await,
+        Err(persistence::AofError::Sequence)
+    ));
+    assert_eq!(aof.flush().await.unwrap(), 0);
+    assert!(
+        !directory
+            .path()
+            .join("generation-00000000000000000001.aof")
+            .exists()
+    );
+    let collection = sider::storage::memory::Collection::new(descriptor())
+        .unwrap()
+        .apply_edits(&descriptor(), &[Edit::Upsert(member())], b"c")
+        .unwrap();
+    let snapshot = vec![
+        persistence::memory_format::Mutation::Image {
+            key: Bytes::from_static(b"c"),
+            collection,
+            key_deadline: None,
+        },
+        persistence::memory_format::Mutation::Legacy(Mutation::Put {
+            key: Bytes::from_static(b"z"),
+            value: Value::from(Bytes::from_static(b"binary\0\xff")),
+            expires_at_unix_ms: None,
+        }),
+    ];
+    let mut expected = Store::with_config(StoreConfig::default(), Arc::new(SystemClock)).unwrap();
+    for mutation in &snapshot {
+        expected
+            .replay_memory(std::slice::from_ref(mutation))
+            .unwrap();
+    }
+    aof.install_memory_snapshot(snapshot, 40, metadata)
+        .await
+        .unwrap();
+    assert_eq!(aof.flush().await.unwrap(), 40);
+    drop(aof);
+    writer.await.unwrap().unwrap();
+    let recovered = recover(&directory);
+    assert_eq!(recovered.metadata.format_version, 5);
+    assert_eq!(recovered.metadata.replication, Some(metadata));
+    assert_eq!(recovered.metadata.sequence, 40);
+    assert_eq!(recovered.store.snapshot(), expected.snapshot());
+}
+
+#[tokio::test]
+async fn memory_replica_install_persists_and_swaps_worker_image() {
+    use sider::replication::{Cursor, journal, state::Runtime};
+    use sider::storage::{memory::Edit, replication::Context};
+
+    let directory = Directory::new();
+    let config = directory.config();
+    let (store, aof, writer) = recover(&directory).start();
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let (database, owner) =
+        worker::channel_with_store(4, Duration::from_secs(5), shutdown, store).unwrap();
+    let runtime = Runtime::new(
+        persistence::Role::Replica,
+        Cursor {
+            epoch: [0; 16],
+            sequence: 0,
+        },
+    );
+    let database = database.with_replication(runtime.clone());
+    let owner_task = tokio::spawn(
+        owner
+            .with_aof(aof.clone(), 0)
+            .with_replication(runtime.clone())
+            .run(),
+    );
+    let context = Context {
+        aof: aof.clone(),
+        runtime: runtime.clone(),
+        layout: config.layout,
+        store_config: StoreConfig::default(),
+        clock: Arc::new(SystemClock),
+        journal_limits: journal::Limits {
+            max_bytes: 4096,
+            max_batches: 8,
+            max_frame_bytes: 4096,
+        },
+        aof_limits: config.limits,
+    };
+    let collection = sider::storage::memory::Collection::new(descriptor())
+        .unwrap()
+        .apply_edits(&descriptor(), &[Edit::Upsert(member())], b"c")
+        .unwrap();
+    let cursor = Cursor {
+        epoch: [0x61; 16],
+        sequence: 17,
+    };
+    database
+        .install_memory_replica(
+            context.clone(),
+            runtime.begin_session(),
+            cursor,
+            vec![persistence::memory_format::Mutation::Image {
+                key: Bytes::from_static(b"c"),
+                collection,
+                key_deadline: None,
+            }],
+        )
+        .await
+        .unwrap();
+    let image = database.snapshot(Some(&aof)).await.unwrap();
+    assert_eq!(image.sequence, Some(17));
+    assert_eq!(runtime.status().applied, cursor);
+    assert_eq!(image.mutations.len(), 1);
+    stop.send_replace(true);
+    owner_task.await.unwrap();
+    drop(database);
+    drop(context);
+    drop(aof);
+    writer.await.unwrap().unwrap();
+    let recovered = recover(&directory);
+    assert_eq!(recovered.metadata.sequence, 17);
+    assert_eq!(recovered.metadata.format_version, 5);
+    assert_eq!(
+        recovered.metadata.replication.unwrap().role,
+        persistence::Role::Replica
+    );
+    assert_eq!(recovered.store.snapshot(), image.mutations);
+}
+
 fn delta(
     edits: Vec<sider::storage::memory::Edit>,
     key_deadline: Option<i64>,
@@ -488,6 +630,51 @@ impl persistence::FaultInjector for FailOnce {
         } else {
             Ok(())
         }
+    }
+}
+
+#[tokio::test]
+async fn memory_replica_install_faults_preserve_old_or_recover_published_generation() {
+    for (point, published) in [
+        ("replication_before_publish", false),
+        ("replication_after_publish", true),
+    ] {
+        let directory = Directory::new();
+        let faults = Arc::new(FailOnce {
+            point,
+            armed: std::sync::atomic::AtomicBool::new(true),
+        });
+        let recovered = persistence::recover_with_faults(
+            directory.config(),
+            StoreConfig::default(),
+            Arc::new(SystemClock),
+            faults,
+        )
+        .unwrap();
+        let (initial, aof, writer) = recovered.start();
+        drop(initial);
+        let metadata = persistence::ReplicationMetadata {
+            role: persistence::Role::Replica,
+            epoch: [0x72; 16],
+        };
+        let result = aof
+            .install_memory_snapshot(vec![image()], 7, metadata)
+            .await;
+        assert!(result.is_err(), "{point}");
+        drop(aof);
+        let _ = writer.await.unwrap();
+        let recovered = recover(&directory);
+        assert_eq!(
+            recovered.metadata.sequence,
+            if published { 7 } else { 0 },
+            "{point}"
+        );
+        assert_eq!(
+            recovered.metadata.replication,
+            published.then_some(metadata),
+            "{point}"
+        );
+        assert_eq!(recovered.store.snapshot().len(), usize::from(published));
     }
 }
 

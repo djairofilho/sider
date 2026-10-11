@@ -8,7 +8,7 @@ use super::{
     Clock, Mutation, ResolvedBatch, Store, StoreConfig,
     worker::{DbError, DbHandle},
 };
-use crate::persistence::{AofHandle, DurableLayout, ReplicationMetadata, Role};
+use crate::persistence::{AofHandle, DurableLayout, ReplicationMetadata, Role, memory_format};
 use crate::replication::{
     Cursor, Error,
     journal::{Journal, Limits, Subscriber},
@@ -119,6 +119,45 @@ impl DbHandle {
         cursor: Cursor,
         mutations: Vec<Mutation>,
     ) -> Result<(), Error> {
+        if context.aof.is_memory_profile() {
+            return Err(Error::Sequence);
+        }
+        self.install_replica_profile(
+            context,
+            generation,
+            cursor,
+            mutations
+                .into_iter()
+                .map(memory_format::Mutation::from_storage)
+                .collect(),
+            false,
+        )
+        .await
+    }
+
+    /// Installs a complete record-2 image and swaps all owner workers after AOF publication.
+    pub async fn install_memory_replica(
+        &self,
+        context: Context,
+        generation: u64,
+        cursor: Cursor,
+        mutations: Vec<memory_format::Mutation>,
+    ) -> Result<(), Error> {
+        if !context.aof.is_memory_profile() {
+            return Err(Error::Sequence);
+        }
+        self.install_replica_profile(context, generation, cursor, mutations, true)
+            .await
+    }
+
+    async fn install_replica_profile(
+        &self,
+        context: Context,
+        generation: u64,
+        cursor: Cursor,
+        mutations: Vec<memory_format::Mutation>,
+        memory: bool,
+    ) -> Result<(), Error> {
         let database = self.clone();
         tokio::spawn(async move {
             let mut stores = (0..context.layout.shard_count)
@@ -135,14 +174,17 @@ impl DbHandle {
                 .collect::<Result<Vec<_>, crate::ConfigError>>()?;
             let mut previous = None;
             for mutation in &mutations {
-                if !matches!(mutation, Mutation::Put { .. })
-                    || previous.as_ref().is_some_and(|key| key >= mutation.key())
+                if !matches!(
+                    mutation,
+                    memory_format::Mutation::Image { .. }
+                        | memory_format::Mutation::Legacy(Mutation::Put { .. })
+                ) || previous.as_ref().is_some_and(|key| key >= mutation.key())
                 {
                     return Err(Error::Sequence);
                 }
                 previous = Some(mutation.key().clone());
                 stores[context.layout.shard_for(mutation.key())?]
-                    .replay(std::slice::from_ref(mutation))?;
+                    .replay_memory(std::slice::from_ref(mutation))?;
             }
             let _guard = database.internal_barrier().await?;
             database.admission.check()?;
@@ -164,17 +206,35 @@ impl DbHandle {
                 None
             };
             let publication = database.admission.publication();
-            let decision = context
-                .aof
-                .install_snapshot(
-                    mutations,
-                    cursor.sequence,
-                    ReplicationMetadata {
-                        role: Role::Replica,
-                        epoch: cursor.epoch,
-                    },
-                )
-                .await;
+            let metadata = ReplicationMetadata {
+                role: Role::Replica,
+                epoch: cursor.epoch,
+            };
+            let decision = if memory {
+                context
+                    .aof
+                    .install_memory_snapshot(mutations, cursor.sequence, metadata)
+                    .await
+            } else {
+                let legacy = mutations
+                    .into_iter()
+                    .map(|mutation| match mutation {
+                        memory_format::Mutation::Legacy(mutation) => Ok(mutation),
+                        _ => Err(Error::Sequence),
+                    })
+                    .collect::<Result<Vec<_>, _>>();
+                let legacy = match legacy {
+                    Ok(legacy) => legacy,
+                    Err(error) => {
+                        publication.complete();
+                        return Err(error);
+                    }
+                };
+                context
+                    .aof
+                    .install_snapshot(legacy, cursor.sequence, metadata)
+                    .await
+            };
             if let Err(error) = decision {
                 if !matches!(error, crate::persistence::AofError::Unavailable) {
                     publication.complete();
