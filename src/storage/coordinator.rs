@@ -18,6 +18,9 @@ use super::worker::{DbError, DbHandle, Worker};
 use super::{Clock, MutationOrigin, Prepared, ResolvedBatch, WatchToken};
 
 #[cfg(test)]
+#[path = "coordinator_crash_tests.rs"]
+mod crash_tests;
+#[cfg(test)]
 #[path = "coordinator_durable_tests.rs"]
 mod durable_tests;
 
@@ -311,6 +314,8 @@ async fn run(
         }
     };
     if let Mode::Composed(aof) = &mode {
+        aof.lifecycle_fault("mixed_before_append")
+            .map_err(|_| DbError::Unavailable)?;
         let mut batch = ResolvedBatch {
             origin: MutationOrigin::Client,
             mutations: owners
@@ -349,7 +354,11 @@ async fn run(
     let apply_deadline = Instant::now()
         .checked_add(handle.request_timeout)
         .ok_or(DbError::Timeout)?;
-    for (owner, prepared) in owners {
+    if let Mode::Composed(aof) = &mode {
+        aof.lifecycle_fault("mixed_before_first_apply")
+            .map_err(|_| DbError::Unavailable)?;
+    }
+    for (index, (owner, prepared)) in owners.into_iter().enumerate() {
         control(&handle.coordination[owner], apply_deadline, |reply| {
             Control::Apply {
                 mode: mode.clone(),
@@ -358,6 +367,16 @@ async fn run(
             }
         })
         .await??;
+        if index == 0
+            && let Mode::Composed(aof) = &mode
+        {
+            aof.lifecycle_fault("mixed_after_first_apply")
+                .map_err(|_| DbError::Unavailable)?;
+        }
+    }
+    if let Mode::Composed(aof) = &mode {
+        aof.lifecycle_fault("mixed_after_all_apply")
+            .map_err(|_| DbError::Unavailable)?;
     }
     publication.complete();
     Ok(Reply::Array(replies))
