@@ -10,11 +10,12 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 pub use archive::{
-    VerifiedBackup, restore, restore_memory, restore_memory_with_faults, verify, verify_memory,
+    VerifiedBackup, restore, restore_composed, restore_memory, restore_memory_with_faults, verify,
+    verify_composed, verify_memory,
 };
 pub use client::{
-    ExportOptions, export, export_memory, export_memory_secure, export_memory_stream,
-    export_secure, export_stream,
+    ExportOptions, export, export_composed, export_composed_secure, export_composed_stream,
+    export_memory, export_memory_secure, export_memory_stream, export_secure, export_stream,
 };
 pub use manifest::Manifest;
 pub use memory::{
@@ -33,6 +34,7 @@ pub const CHECKSUMS: &str = "SHA256SUMS";
 pub enum Profile {
     Legacy,
     Memory,
+    Composed,
 }
 
 impl Profile {
@@ -43,6 +45,11 @@ impl Profile {
                 2,
                 super::memory_format::HEADER_VERSION,
                 super::memory_format::RECORD_VERSION,
+            ),
+            Self::Composed => (
+                3,
+                super::composed_format::HEADER_VERSION,
+                super::composed_format::RecordVersion::Legacy as u32,
             ),
         }
     }

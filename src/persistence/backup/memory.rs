@@ -145,6 +145,7 @@ pub fn export_memory_offline_with_faults(
         source_max_record_bytes: options.source.limits.max_record_bytes as u32,
         source_max_mutations: options.source.limits.max_mutations as u32,
         source_max_snapshot_bytes: options.limits.max_snapshot_bytes,
+        required_capabilities: None,
         validation_max_dataset_bytes: options.limits.max_dataset_bytes as u64,
         entries: mutations.len() as u64,
         snapshot_bytes,

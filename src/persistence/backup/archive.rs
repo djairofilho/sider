@@ -201,7 +201,11 @@ pub(super) fn validate_file(
     clock: Arc<dyn Clock>,
 ) -> Result<(Vec<usize>, u64), Error> {
     file.seek(SeekFrom::Start(0))?;
-    let codec = crate::persistence::profile::Profile::selected(manifest.profile == Profile::Memory);
+    let codec = match manifest.profile {
+        Profile::Legacy => crate::persistence::profile::Profile::Legacy,
+        Profile::Memory => crate::persistence::profile::Profile::Memory,
+        Profile::Composed => crate::persistence::profile::Profile::ComposedLegacyMixed,
+    };
     let header = codec.read_header(&mut *file)?;
     if header.format_version != manifest.profile.versions().1
         || header.replication.is_some()
@@ -233,19 +237,23 @@ pub(super) fn validate_file(
         previous = Some(mutation.key().clone());
         quotas.add(&mutation)?;
         let encoded = codec.encode(&Record::Snapshot(image), limits.record())?;
-        let framed = if manifest.profile == Profile::Memory {
-            super::memory::snapshot_frame(&encoded, limits)?
-        } else {
-            crate::replication::protocol::encode(
+        let framed = match manifest.profile {
+            Profile::Memory => super::memory::snapshot_frame(&encoded, limits)?,
+            Profile::Legacy => crate::replication::protocol::encode(
                 &crate::replication::protocol::Message::SnapshotEntry(mutation.clone()),
                 limits.transport(),
             )?
-            .to_vec()
+            .to_vec(),
+            Profile::Composed => crate::replication::protocol::encode_composed(
+                &crate::replication::protocol::Message::SnapshotEntry(mutation.clone()),
+                limits.transport(),
+            )?
+            .to_vec(),
         };
         transfer_bytes = transfer_bytes
             .checked_add(framed.len() as u64)
             .ok_or(Error::Invalid("snapshot transfer size overflow"))?;
-        if manifest.profile == Profile::Memory && transfer_bytes > limits.max_snapshot_bytes {
+        if manifest.profile != Profile::Legacy && transfer_bytes > limits.max_snapshot_bytes {
             return Err(Error::Invalid("snapshot exceeds transfer budget"));
         }
         transport_digest = format::snapshot_digest(transport_digest, &framed);
@@ -284,6 +292,16 @@ pub fn verify_memory(
     clock: Arc<dyn Clock>,
 ) -> Result<VerifiedBackup, Error> {
     verify_profile(source, layout, limits, clock, Profile::Memory)
+}
+
+/// Verifies the exact schema-3/header-7/record-1 mixed-owner archive.
+pub fn verify_composed(
+    source: &Path,
+    layout: DurableLayout,
+    limits: Limits,
+    clock: Arc<dyn Clock>,
+) -> Result<VerifiedBackup, Error> {
+    verify_profile(source, layout, limits, clock, Profile::Composed)
 }
 
 fn verify_profile(
@@ -351,6 +369,19 @@ pub fn restore_memory_with_faults(
     faults: Arc<dyn crate::persistence::FaultInjector>,
 ) -> Result<VerifiedBackup, Error> {
     restore_profile(options, clock, Profile::Memory, faults)
+}
+
+/// Restores a verified composed archive into a new, explicitly selected directory.
+pub fn restore_composed(
+    options: RestoreOptions,
+    clock: Arc<dyn Clock>,
+) -> Result<VerifiedBackup, Error> {
+    restore_profile(
+        options,
+        clock,
+        Profile::Composed,
+        Arc::new(crate::persistence::NoFaults),
+    )
 }
 
 fn restore_profile(

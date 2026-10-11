@@ -170,6 +170,69 @@ pub async fn export_memory_secure(
     .await
 }
 
+/// Explicit header-7/record-1 backup consumer over an injected stream.
+pub async fn export_composed_stream(
+    stream: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    options: ExportOptions,
+    clock: Arc<dyn Clock>,
+) -> Result<Manifest, Error> {
+    options.validate()?;
+    let deadline = Instant::now() + options.limits.timeout;
+    receive(
+        stream,
+        options,
+        clock,
+        deadline,
+        None,
+        super::Profile::Composed,
+    )
+    .await
+}
+
+/// Connects to an explicitly selected transport-3 source.
+pub async fn export_composed(
+    options: ExportOptions,
+    clock: Arc<dyn Clock>,
+) -> Result<Manifest, Error> {
+    options.validate()?;
+    let deadline = Instant::now() + options.limits.timeout;
+    let mut stream = timeout(remaining(deadline)?, TcpStream::connect(options.source))
+        .await
+        .map_err(|_| Error::Timeout)??;
+    receive(
+        &mut stream,
+        options,
+        clock,
+        deadline,
+        None,
+        super::Profile::Composed,
+    )
+    .await
+}
+
+/// Exports a composed snapshot through authenticated internal mutual TLS.
+pub async fn export_composed_secure(
+    options: ExportOptions,
+    clock: Arc<dyn Clock>,
+    transport: &crate::security::InternalTransport,
+) -> Result<Manifest, Error> {
+    options.validate()?;
+    let deadline = Instant::now() + options.limits.timeout;
+    let (mut stream, peer) = transport
+        .connect_with_peer(options.source)
+        .await
+        .map_err(|_| Error::Invalid("internal TLS authentication failed"))?;
+    receive(
+        &mut stream,
+        options,
+        clock,
+        deadline,
+        Some(&peer),
+        super::Profile::Composed,
+    )
+    .await
+}
+
 async fn read_profile(
     stream: &mut (impl AsyncRead + Unpin),
     limits: protocol::Limits,
@@ -181,6 +244,9 @@ async fn read_profile(
         super::Profile::Legacy => protocol::read_in_phase(stream, limits, deadline, phase).await,
         super::Profile::Memory => {
             protocol::read_memory_in_phase(stream, limits, deadline, phase).await
+        }
+        super::Profile::Composed => {
+            protocol::read_composed_in_phase(stream, limits, deadline, phase).await
         }
     }
 }
@@ -207,10 +273,19 @@ async fn receive(
             max_record_bytes: limits.max_record_bytes as u32,
             max_snapshot_bytes: limits.max_snapshot_bytes,
         },
+        super::Profile::Composed => Message::ComposedExport {
+            sider_version: Bytes::from_static(env!("CARGO_PKG_VERSION").as_bytes()),
+            record_version: crate::persistence::composed_format::RecordVersion::Legacy as u32,
+            aof_header_version: crate::persistence::composed_format::HEADER_VERSION,
+            required_capabilities: crate::persistence::composed_format::MIXED_OWNER_BATCH,
+            max_record_bytes: limits.max_record_bytes as u32,
+            max_snapshot_bytes: limits.max_snapshot_bytes,
+        },
     };
     let frame = match profile {
         super::Profile::Legacy => protocol::encode(&request, transport)?,
         super::Profile::Memory => protocol::encode_memory(&request, transport)?,
+        super::Profile::Composed => protocol::encode_composed(&request, transport)?,
     };
     use tokio::io::AsyncWriteExt;
     timeout(remaining(deadline)?, stream.write_all(&frame))
@@ -219,7 +294,7 @@ async fn receive(
     timeout(remaining(deadline)?, stream.flush())
         .await
         .map_err(|_| Error::Timeout)??;
-    let Message::Hello(hello) = read_profile(
+    let response = read_profile(
         stream,
         transport,
         remaining(deadline)?,
@@ -227,11 +302,22 @@ async fn receive(
         profile,
     )
     .await?
-    .1
-    else {
-        return Err(Error::Invalid(
-            "source rejected export or did not send Hello",
-        ));
+    .1;
+    let (hello, required_capabilities) = match (profile, response) {
+        (super::Profile::Legacy | super::Profile::Memory, Message::Hello(hello)) => (hello, None),
+        (super::Profile::Composed, Message::ComposedHello(composed))
+            if composed.aof_header_version
+                == crate::persistence::composed_format::HEADER_VERSION
+                && composed.required_capabilities
+                    == crate::persistence::composed_format::MIXED_OWNER_BATCH =>
+        {
+            (composed.base, Some(composed.required_capabilities))
+        }
+        _ => {
+            return Err(Error::Invalid(
+                "source rejected export or did not send Hello",
+            ));
+        }
     };
     if hello.sider_version.as_ref() != env!("CARGO_PKG_VERSION").as_bytes()
         || hello.record_version != profile.versions().2
@@ -272,7 +358,11 @@ async fn receive(
         .write(true)
         .create_new(true)
         .open(&path)?;
-    let codec = crate::persistence::profile::Profile::selected(profile == super::Profile::Memory);
+    let codec = match profile {
+        super::Profile::Legacy => crate::persistence::profile::Profile::Legacy,
+        super::Profile::Memory => crate::persistence::profile::Profile::Memory,
+        super::Profile::Composed => crate::persistence::profile::Profile::ComposedLegacyMixed,
+    };
     codec.write_header(&mut file, cursor.sequence, layout, None)?;
     let mut previous = None;
     let mut digest = 0;
@@ -290,7 +380,7 @@ async fn receive(
         .await?;
         let mutation = match message {
             Message::SnapshotEntry(mutation @ Mutation::Put { .. })
-                if profile == super::Profile::Legacy =>
+                if profile != super::Profile::Memory =>
             {
                 mutation
             }
@@ -358,6 +448,7 @@ async fn receive(
         source_max_record_bytes: hello.max_record_bytes,
         source_max_mutations: hello.max_mutations,
         source_max_snapshot_bytes: hello.max_snapshot_bytes,
+        required_capabilities,
         validation_max_dataset_bytes: limits.max_dataset_bytes as u64,
         entries,
         snapshot_bytes,
