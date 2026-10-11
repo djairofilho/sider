@@ -1058,6 +1058,197 @@ async fn composed_replica_disconnect_during_commit_reconnects_after_whole_batch(
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn composed_replica_ack_retransmission_rejects_changes_and_resumes_at_cursor() {
+    use crate::replication::protocol::{self, Message};
+
+    let limits = protocol::Limits::default();
+    let deadline = Duration::from_secs(5);
+    let base = Cursor {
+        epoch: EPOCH,
+        sequence: 0,
+    };
+    let first = Cursor {
+        sequence: 1,
+        ..base
+    };
+    let second = Cursor {
+        sequence: 2,
+        ..base
+    };
+    let follower = Harness::new(4096, Arc::new(NoFaults)).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let config = crate::replication::config::Config {
+        upstream: Some(listener.local_addr().unwrap()),
+        ..Default::default()
+    };
+    let (stop, shutdown) = watch::channel(false);
+    let following = tokio::spawn(crate::replication::session::follow(
+        follower.db.clone(),
+        follower.context.clone(),
+        config,
+        shutdown,
+    ));
+
+    let (mut socket, _) = tokio::time::timeout(deadline, listener.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    let (_, Message::ComposedHello(mut peer)) =
+        protocol::read_composed_authorized(&mut socket, limits, deadline, |_| true)
+            .await
+            .unwrap()
+    else {
+        panic!("expected initial composed hello");
+    };
+    assert_eq!(peer.base.cursor, Some(base));
+    peer.base.cursor = Some(base);
+    protocol::write_composed(&mut socket, &Message::ComposedHello(peer), limits, deadline)
+        .await
+        .unwrap();
+    protocol::write_composed(&mut socket, &Message::Continue(base), limits, deadline)
+        .await
+        .unwrap();
+    assert_eq!(
+        protocol::read_composed_authorized(&mut socket, limits, deadline, |_| true)
+            .await
+            .unwrap()
+            .1,
+        Message::Ack(base)
+    );
+
+    let original = Message::Batch {
+        sequence: 1,
+        batch: batch(b"left-1", b"right-1"),
+    };
+    protocol::write_composed(&mut socket, &original, limits, deadline)
+        .await
+        .unwrap();
+    assert_eq!(
+        protocol::read_composed_authorized(&mut socket, limits, deadline, |_| true)
+            .await
+            .unwrap()
+            .1,
+        Message::Ack(first)
+    );
+    protocol::write_composed(&mut socket, &original, limits, deadline)
+        .await
+        .unwrap();
+    assert_eq!(
+        protocol::read_composed_authorized(&mut socket, limits, deadline, |_| true)
+            .await
+            .unwrap()
+            .1,
+        Message::Ack(first)
+    );
+    assert_eq!(follower.context.aof.status().await.unwrap().0, 1);
+
+    protocol::write_composed(
+        &mut socket,
+        &Message::Batch {
+            sequence: 1,
+            batch: batch(b"forged-left", b"forged-right"),
+        },
+        limits,
+        deadline,
+    )
+    .await
+    .unwrap();
+    assert!(
+        protocol::read_composed_authorized(&mut socket, limits, deadline, |_| true)
+            .await
+            .is_err()
+    );
+    drop(socket);
+    assert_eq!(follower.context.aof.status().await.unwrap().0, 1);
+    let before_reconnect = follower
+        .db
+        .snapshot(Some(&follower.context.aof))
+        .await
+        .unwrap();
+    assert_eq!(
+        before_reconnect.mutations,
+        batch(b"left-1", b"right-1").mutations
+    );
+
+    let (mut reconnected, _) = tokio::time::timeout(deadline, listener.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    let (_, Message::ComposedHello(mut peer)) =
+        protocol::read_composed_authorized(&mut reconnected, limits, deadline, |_| true)
+            .await
+            .unwrap()
+    else {
+        panic!("expected reconnect after changed retransmission");
+    };
+    assert_eq!(peer.base.cursor, Some(first));
+    peer.base.cursor = Some(first);
+    protocol::write_composed(
+        &mut reconnected,
+        &Message::ComposedHello(peer),
+        limits,
+        deadline,
+    )
+    .await
+    .unwrap();
+    protocol::write_composed(
+        &mut reconnected,
+        &Message::Continue(first),
+        limits,
+        deadline,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        protocol::read_composed_authorized(&mut reconnected, limits, deadline, |_| true)
+            .await
+            .unwrap()
+            .1,
+        Message::Ack(first)
+    );
+    protocol::write_composed(
+        &mut reconnected,
+        &Message::Batch {
+            sequence: 2,
+            batch: batch(b"left-2", b"right-2"),
+        },
+        limits,
+        deadline,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        protocol::read_composed_authorized(&mut reconnected, limits, deadline, |_| true)
+            .await
+            .unwrap()
+            .1,
+        Message::Ack(second)
+    );
+    stop.send_replace(true);
+    following.await.unwrap().unwrap();
+    assert_eq!(follower.context.aof.status().await.unwrap().0, 2);
+    let snapshot = follower
+        .db
+        .snapshot(Some(&follower.context.aof))
+        .await
+        .unwrap();
+    assert_eq!(snapshot.mutations, batch(b"left-2", b"right-2").mutations);
+    let (directory, config, quota, writer) = follower.stop().await;
+    writer.unwrap();
+    let recovered = persistence::recover_composed_legacy_mixed(
+        config,
+        quota,
+        Arc::new(SystemClock),
+        Arc::new(NoFaults),
+    )
+    .unwrap();
+    assert_eq!(recovered.metadata.sequence, 2);
+    assert_eq!(recovered.store.len(), 2);
+    drop(recovered);
+    cleanup(&directory);
+}
+
 struct PauseBeforeApply {
     reached: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
     resume: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
