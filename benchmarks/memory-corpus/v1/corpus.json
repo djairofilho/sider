@@ -1,0 +1,34 @@
+{
+  "corpus_version": "sider-memory-corpus/1",
+  "contract": "sider-memory/1",
+  "seed": 1122026,
+  "dimension": 2,
+  "clock_unix_ms": 1000000,
+  "identity": {"provider": "fixture", "model": "toy-2d", "revision": "1", "transform": "raw-f32le"},
+  "vector_file": "vectors.f32le",
+  "vector_encoding": "F32LE",
+  "records": [
+    {"id":"a","vector_index":0,"namespace":"team-a","deadline_ms":null,"metadata":{"kind":{"type":"BYTES","value":"doc"},"rank":{"type":"I64","value":1}},"content":"origin: base"},
+    {"id":"b","vector_index":1,"namespace":"team-a","deadline_ms":null,"metadata":{"kind":{"type":"BYTES","value":"doc"},"rank":{"type":"I64","value":2}},"content":"origin: base"},
+    {"id":"c","vector_index":2,"namespace":"team-a","deadline_ms":null,"metadata":{"kind":{"type":"BYTES","value":"image"},"rank":{"type":"I64","value":1}},"content":"origin: base"},
+    {"id":"d","vector_index":3,"namespace":"team-b","deadline_ms":null,"metadata":{"kind":{"type":"BYTES","value":"doc"},"rank":{"type":"I64","value":1}},"content":"origin: base"},
+    {"id":"e","vector_index":4,"namespace":"team-a","deadline_ms":1000000,"metadata":{"kind":{"type":"BYTES","value":"doc"},"rank":{"type":"I64","value":1}},"content":"origin: expires at clock sample"},
+    {"id":"f","vector_index":5,"namespace":"team-a","deadline_ms":1000500,"metadata":{"kind":{"type":"BYTES","value":"doc"},"rank":{"type":"I64","value":1}},"content":"origin: ttl 500ms"},
+    {"id":"tie-1","vector_index":6,"namespace":"team-a","deadline_ms":null,"metadata":{"kind":{"type":"BYTES","value":"doc"},"rank":{"type":"I64","value":1}},"content":"origin: base"},
+    {"id":"tie-2","vector_index":7,"namespace":"team-a","deadline_ms":null,"metadata":{"kind":{"type":"BYTES","value":"doc"},"rank":{"type":"I64","value":1}},"content":"origin: base"},
+    {"id":"a\u0000","vector_index":12,"namespace":"team-a","deadline_ms":null,"metadata":{"kind":{"type":"BYTES","value":"doc"},"rank":{"type":"I64","value":1},"note":{"type":"BYTES","value":"x\u0000y"}},"content":"origin: binary NUL fixture"},
+    {"id":"rank2","vector_index":13,"namespace":"team-a","deadline_ms":null,"metadata":{"kind":{"type":"BYTES","value":"doc"},"rank":{"type":"I64","value":2}},"content":"origin: rank 2 filter control"}
+  ],
+  "operations": [
+    {"op":"update","id":"b","vector_index":8,"namespace":"team-a","deadline_ms":null,"metadata":{"kind":{"type":"BYTES","value":"doc"},"rank":{"type":"I64","value":1}},"content":"origin: updated"},
+    {"op":"delete","id":"c"},
+    {"op":"recover"}
+  ],
+  "queries": [
+    {"name":"broad-team-a","vector_index":9,"namespace":"team-a","metadata":[],"k":6},
+    {"name":"selective-doc-rank-1","vector_index":10,"namespace":"team-a","metadata":[{"field":"kind","type":"BYTES","value":"doc"},{"field":"rank","type":"I64","value":1}],"k":8},
+    {"name":"typed-bool-mismatch","vector_index":11,"namespace":"team-a","metadata":[{"field":"rank","type":"BOOL","value":1}],"k":8},
+    {"name":"other-namespace","vector_index":9,"namespace":"team-b","metadata":[],"k":8},
+    {"name":"binary-id-and-value","vector_index":9,"namespace":"team-a","metadata":[{"field":"note","type":"BYTES","value":"x\u0000y"}],"k":8}
+  ]
+}
