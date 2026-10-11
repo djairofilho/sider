@@ -9,12 +9,12 @@ use std::time::Duration;
 use bytes::Bytes;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use sider::persistence::{DurableLayout, backup, composed_format, format};
+use sider::persistence::{self, AofConfig, DurableLayout, backup, composed_format, format};
 use sider::replication::{
     Cursor, composed,
     protocol::{self, ComposedHello, Hello, Message},
 };
-use sider::storage::{Clock, Mutation};
+use sider::storage::{Clock, Mutation, StoreConfig};
 use tokio::io::{AsyncWriteExt, duplex};
 
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
@@ -178,6 +178,27 @@ async fn schema3_export_verify_and_restore_use_header7_exactly() {
     )
     .unwrap();
     assert_eq!(restored_header, header);
+    let snapshot_path = restored.join("generation-00000000000000000000.aof");
+    let before = fs::read(&snapshot_path).unwrap();
+    let mut config = AofConfig::new(restored);
+    config.layout = layout();
+    assert!(persistence::recover(config.clone(), StoreConfig::default(), clock()).is_err());
+    assert!(
+        persistence::recover(
+            config.clone().with_memory_profile(),
+            StoreConfig::default(),
+            clock(),
+        )
+        .is_err()
+    );
+    assert_eq!(fs::read(&snapshot_path).unwrap(), before);
+    let recovered = persistence::recover_composed(config, StoreConfig::default(), clock()).unwrap();
+    assert_eq!(
+        recovered.metadata.format_version,
+        composed_format::HEADER_VERSION
+    );
+    assert_eq!(recovered.metadata.sequence, CURSOR.sequence);
+    assert_eq!(recovered.store.snapshot(), images());
 }
 
 #[tokio::test]
