@@ -1,10 +1,11 @@
 # Isolated composed backup profile
 
 The development library has an explicit schema-3 path for header-7, record-1
-mixed-owner snapshots. It is not selected by the Sider executable or backup CLI.
-The default AOF reader still rejects header 7. A library caller can explicitly
-open a restored directory with `persistence::recover_composed`; the Sider server
-configuration still cannot select this profile.
+mixed-owner snapshots. The server selects the local AOF profile only with
+`SIDER_AOF_COMPOSED=1`; the backup CLI still has no composed mode. The default
+AOF reader rejects header 7. A library caller can open a restored directory with
+`persistence::recover_composed`, or start the server with the same explicit
+profile and matching shard count.
 
 Transport 3 sends a standalone `ComposedExport` request with exact record version
 `1`, header version `7`, and the `MIXED_OWNER_BATCH` capability bit. A source can
@@ -35,7 +36,7 @@ seal, and transport digest. `restore_composed` copies only a verified archive in
 a new directory and revalidates the copy before publication. The caller must
 set the restored layout on `AofConfig` and call `persistence::recover_composed`
 to replay header 7. Every owner must use its returned writer handle for
-atomic mixed-owner batches. This does not enable normal server startup. The
+atomic mixed-owner batches. Server startup requires `SIDER_AOF_COMPOSED=1`. The
 schema-1 and schema-2 APIs reject a schema-3 archive and retain their existing
 wire and manifest formats.
 

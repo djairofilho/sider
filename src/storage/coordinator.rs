@@ -1,8 +1,7 @@
 //! Worker-owned tentative execution under exclusive admission, without persistence.
 //!
-//! This internal path proves the owner-control protocol. Public EXEC still uses
-//! the single-owner worker path until one durable decision and replica application
-//! are integrated. Workers with an AOF or a replica role refuse these controls.
+//! The explicit local composed AOF profile uses this owner-control protocol for
+//! mixed-owner EXEC. Default EXEC remains single-owner; replica roles refuse it.
 
 use std::collections::BTreeSet;
 

@@ -410,7 +410,7 @@ impl DbHandle {
         self.router
     }
 
-    /// Executes the batch in one shard and releases observations in all results.
+    /// Executes a single-owner batch, or an explicitly bound composed batch.
     pub async fn execute_batch(
         &self,
         commands: Vec<Command>,
@@ -451,8 +451,7 @@ impl DbHandle {
         let participants = self
             .router
             .transaction_participants(commands, watched.iter().map(|token| token.key().as_ref()));
-        // The public gate remains closed until mixed-owner durability and replay
-        // can publish one complete decision.
+        // Only the composed server profile may open the coordinated path.
         match participants.as_slice() {
             [owner] => Ok(*owner),
             _ => Err(ExecutionError::CrossShard),
@@ -468,6 +467,13 @@ impl DbHandle {
     ) -> Result<TransactionReply, DbError> {
         let shard = match self.batch_shard(&commands, &watched) {
             Ok(shard) => shard,
+            Err(ExecutionError::CrossShard) if self.composed_aof.is_some() => {
+                let reply = self.execute_coordinated(commands, watched).await?;
+                return Ok(TransactionReply {
+                    output: encode_reply(reply, limits, subscription.resp3),
+                    subscription,
+                });
+            }
             Err(error) => {
                 return Ok(TransactionReply {
                     output: encode_reply(Reply::Error(error), limits, subscription.resp3),

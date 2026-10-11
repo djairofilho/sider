@@ -90,6 +90,9 @@ and watch limits are Sider-specific. The Redis 8.10.1 differential test passed
 `EXEC`, and messages to the same connection. The
 [transactions guide](transactions.md) records commands, restrictions, special
 RESP2 framing, persistence, and verification reproduction.
+The development checkout also has an explicit local header-7 mixed-owner mode
+(`SIDER_AOF_COMPOSED=1`). Its cross-shard behavior is a Sider extension and is
+not part of those Redis differential results or a released compatibility claim.
 
 ## Implemented protocol
 

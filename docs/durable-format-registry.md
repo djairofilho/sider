@@ -1,7 +1,7 @@
 # Proposed durable format registry
 
-**Status: proposed composition contract, not an implemented reader or released
-allocation.** This document coordinates [cross-shard transactions](cross-shard-transactions.md)
+**Status: proposed release allocation with an explicit local record-1 mixed-owner
+implementation in the development checkout.** This document coordinates [cross-shard transactions](cross-shard-transactions.md)
 with the accepted [AI memory contract](agent-memory-v1.md). Its audit
 baseline is `0f0f232`. It does not change published layouts, allocate memory tags
 again, enable mixed-owner EXEC, or authorize mixed-version rolling upgrades.
@@ -22,7 +22,7 @@ the absence of memory/mixed batches so far.
 | 4 | Reserved by accepted memory contract | 36 | 2, explicit | One | None |
 | 5 | Reserved by accepted memory contract | 56 | 2, explicit | One | Memory contract role and epoch |
 | 6 | Local experiment, never a release target | 32 | 1, implicit | Mixed recovery only | None |
-| 7 | Proposed composed profile | 64 | 1 or 2, explicit | Required capability below | Explicit optional role and epoch |
+| 7 | Proposed release profile; explicit local record-1 mixed implementation | 64 | 1 or 2, explicit | Required capability below | Explicit optional role and epoch |
 
 Numbers 1 through 5 retain their exact bytes and meaning. Do not turn 4/5 into
 mixed-owner profiles. Retire the local 6 experiment rather than reusing its number
@@ -137,8 +137,9 @@ with the same profile; it does not inherit source role, epoch, credentials or
 TTL duration. Schema 1/2 and transport 1/2 remain immutable. The explicit
 schema-3 stream export, verification and isolated restore library paths are now
 implemented for record 1 with the mixed bit. Explicit library recovery and live
-source export are also implemented. No server listener or executable selects
-them; the default reader still refuses the restored header-7 directory.
+source export are also implemented. The executable selects local record-1 mixed
+recovery and EXEC only with `SIDER_AOF_COMPOSED=1`; no transport-3 listener is
+bound, and the default reader still refuses a restored header-7 directory.
 
 ## Offline migration and rollback
 
@@ -204,18 +205,13 @@ Header 7, same length/sequence/layout, record 2, mixed bit, replica role, epoch
 
 ## Implementation gate and profile sequencing
 
-Current production readers must continue rejecting 4/5/7 before record scanning;
-the experimental 6 reader remains isolated. No production format changes are made
-by this proposal. The isolated `persistence::composed_format` module encodes and
-validates the header-7 grammar against the literal fixtures, all truncated headers,
-and invalid fields with recomputed checksums. It does not select a supported
-profile or open, scan, repair, append, back up, replicate, or migrate a directory.
-An internal, unselectable writer profile now exercises record-1 mixed batches
-through append, whole-record replay, compaction, restart, and torn-tail repair.
-An internal test-only coordinator also appends one combined owner record before
-application. It verifies restart with both owners, record-limit rejection without
-an append, and fail-closed admission when the writer result is uncertain or the
-second owner is lost after the append.
+Published readers retain their existing profile behavior; the experimental 6
+reader remains isolated. The development checkout validates the header-7 grammar
+against literal fixtures, truncated headers, and invalid fields with recomputed
+checksums. `SIDER_AOF_COMPOSED=1` selects the exact record-1 mixed profile for local
+server recovery and RESP EXEC. The writer appends one combined owner record before
+application; replay, compaction, restart, and torn-tail repair preserve that
+decision. Wrong-profile startup rejects before readiness and preserves the AOF.
 Process-kill tests cover nine boundaries from before append through owner
 application and verify that restart never replays only one owner.
 The internal replica path accepts a record-1 mixed snapshot, one expected-sequence
@@ -232,13 +228,13 @@ the source profile and capacities before sending a Hello or snapshot payload. It
 preflights record encoding, key order and transfer bytes before advertising a cut.
 The two-phase export API also returns an admission token before capture and binds
 the captured Hello to that exact admitted profile; a mismatch emits no snapshot.
-No network listener or backup archive path selects transport 3 yet.
-No public AOF configuration selects that profile; default recovery still rejects
-version 7 before inspecting records, including every torn first-record prefix,
-and preserves the file bytes. The backup CLI and a production transport-3 session
-remain unavailable.
-Coordinate acceptance of allocations 7, transport 3 and backup schema 3 with
-the memory contract owner before enabling any of them in production.
+The schema-3 archive library exports, verifies, restores, and recovers record-1
+mixed snapshots. A live library source negotiates transport 3 before capture.
+The server selects local header-7 storage and EXEC, while the default reader
+still rejects version 7 before inspecting records and preserves source bytes.
+No composed network listener, follower, or backup CLI is available. Coordinate
+acceptance of allocations 7, transport 3, and backup schema 3 with the memory
+contract owner before a production release.
 
 A first header-7 implementation may support only record-1 profiles with an
 explicit capability allowlist. It must reject every record-2 profile before record

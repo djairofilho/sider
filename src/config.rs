@@ -54,6 +54,8 @@ pub struct ServerConfig {
     pub ready_file: Option<PathBuf>,
     /// Optional persistence; absence keeps in-memory mode.
     pub aof: Option<crate::persistence::AofConfig>,
+    /// Explicit local header-7/record-1 mixed-owner profile.
+    pub composed_aof: bool,
     /// Internal Sider listener; configuration requires AOF on both sides.
     pub replication: Option<crate::replication::config::Config>,
 }
@@ -80,6 +82,7 @@ impl Default for ServerConfig {
             shutdown_timeout: Duration::from_secs(5),
             ready_file: None,
             aof: None,
+            composed_aof: false,
             replication: None,
         }
     }
@@ -202,6 +205,16 @@ impl ServerConfig {
             read_size!(aof.compact_after_bytes, "SIDER_AOF_COMPACT_AFTER_BYTES");
             config.aof = Some(aof);
         }
+        config.composed_aof = match lookup("SIDER_AOF_COMPOSED") {
+            None => false,
+            Some(value) if value == "0" => false,
+            Some(value) if value == "1" => true,
+            Some(_) => {
+                return Err(ConfigError::InvalidServerLimits {
+                    reason: "SIDER_AOF_COMPOSED accepts 0 or 1",
+                });
+            }
+        };
         config.replication = crate::replication::config::Config::from_lookup(&mut lookup)?;
         config.validate()?;
         Ok(config)
@@ -213,6 +226,15 @@ impl ServerConfig {
     /// bulk with its framing. Input-line limits do not limit internal output messages.
     /// Port zero remains valid for an ephemeral bind.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.composed_aof
+            && (self.aof.is_none()
+                || self.aof.as_ref().is_some_and(|aof| aof.is_memory_profile())
+                || self.replication.is_some())
+        {
+            return Err(ConfigError::InvalidServerLimits {
+                reason: "composed AOF requires record version 1 and SIDER_AOF_DIR without replication",
+            });
+        }
         if let Some(replication) = &self.replication {
             let aof = self.aof.as_ref().ok_or(ConfigError::InvalidServerLimits {
                 reason: "replication requires SIDER_AOF_DIR",
@@ -471,6 +493,40 @@ mod tests {
         assert!(direct.validate().is_ok());
         direct.replication.as_mut().unwrap().upstream = Some("127.0.0.1:6380".parse().unwrap());
         assert!(direct.validate().is_ok());
+    }
+
+    #[test]
+    fn composed_profile_requires_local_record_one_aof() {
+        let configured = config_with(&[
+            ("SIDER_AOF_DIR", "composed-aof"),
+            ("SIDER_AOF_COMPOSED", "1"),
+            ("SIDER_SHARDS", "2"),
+        ])
+        .unwrap();
+        assert!(configured.composed_aof);
+        assert!(!configured.aof.as_ref().unwrap().is_memory_profile());
+        assert!(configured.diagnostic().contains("aof_composed_enabled:1"));
+        assert!(
+            !config_with(&[("SIDER_AOF_COMPOSED", "0")])
+                .unwrap()
+                .composed_aof
+        );
+        for values in [
+            vec![("SIDER_AOF_COMPOSED", "1")],
+            vec![
+                ("SIDER_AOF_DIR", "aof"),
+                ("SIDER_AOF_COMPOSED", "1"),
+                ("SIDER_AOF_RECORD_VERSION", "2"),
+            ],
+            vec![
+                ("SIDER_AOF_DIR", "aof"),
+                ("SIDER_AOF_COMPOSED", "1"),
+                ("SIDER_REPLICATION_ADDR", "127.0.0.1:0"),
+            ],
+            vec![("SIDER_AOF_DIR", "aof"), ("SIDER_AOF_COMPOSED", "yes")],
+        ] {
+            assert!(config_with(&values).is_err());
+        }
     }
 
     #[test]

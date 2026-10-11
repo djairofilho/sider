@@ -1,60 +1,27 @@
 # Proposed cross-shard transaction contract
 
-**Status: protocol proposed; native owner coordination, an internal durable decision, and local replica application integrated.**
-This design addresses
-[issue #92](https://github.com/djairofilho/sider/issues/92) against source baseline
-`0f0f232`. It supplies a written contract and an implementation plan; it does not
-complete the issue's implementation or crash/network validation criteria.
-The current [transactions](transactions.md), [routing](sharding.md), and
-[compatibility](compatibility.md) contracts still require one shard.
-Participant discovery includes watched-only keys and keeps owner IDs bounded and
-sorted. Owner-local candidate preparation and a shared execution time are in the
-development checkout; single-shard EXEC uses the latter for WATCH and TTL.
-Mixed-owner RESP EXEC and network replica application are not enabled.
-The recovery helper now stages postimages and validates each touched shard's
-projected quota before applying a record. An internal test exercises a mixed-owner
-record and a quota failure on its last owner; all production recovery calls still
-pass the single-owner gate and reject such records before preparation. This proves
-the helper's local all-or-none application, without enabling a durable profile.
-An internal, unselectable header-7/record-1 profile now exercises one mixed batch
-through an actual AOF append, restart, replay, compaction, and every torn-record
-prefix. It rejects an over-quota owner and unsupported profiles without repair.
-The router can now split mixed-owner MGET, EXISTS, DEL, and MSET into sorted owner
-fragments and reconstruct their replies. MGET keeps binary key order and duplicate
-occurrences; MSET keeps each owner's original pair order and marks the command
-for joint candidate acceptance. The router itself does not admit an EXEC.
-Whole-queue preflight now gathers sorted unique owners including watched-only keys,
-keeps the original command order, and fails before returning any plan if a late
-mixed-owner command has no fragment rule. The native `DbHandle` can use this plan
-through `with_unpersisted_multi_owner().execute_batch(...)`: a supervised task
-holds exclusive admission, drives separate bounded owner controls, and publishes
-the in-memory result only after every owner acknowledges application. A rejected
-MSET discards all its candidates while other commands retain their queue order.
-This explicit library opt-in refuses AOF-backed workers and either replication
-role before preparation; connection-context commands are also refused before
-effects. Normal handles and RESP MULTI/EXEC continue to reject mixed owners.
-Focused worker tests cover WATCH conflict, quota rejection, frozen TTL,
-concurrent opposite owner orders, and AOF/replication refusal. Phase-controlled
-tests also show that predecision rejection aborts overlays without closing
-admission; after the first owner applies, client cancellation cannot expose a
-partial read or snapshot; losing the second owner closes global admission.
-An internal test-only `DbHandle` path now binds both owners to the same
-header-7/record-1 writer, combines their sealed mutations into one sorted record,
-and appends it before either owner applies. Focused tests verify one append and
-whole-batch restart, whole-record limit rejection without effects, and fail-closed
-admission after an uncertain writer result or loss of the second owner. Recovery
-restores both owners after either failure.
-Process-kill tests now exercise nine points from pre-append through post-apply;
-each restart sees the previous state or the complete new batch. These tests do
-not simulate power loss or cover network and replica boundaries. An internal
-composed replica path now installs a mixed-owner snapshot, prepares every owner
-before one expected-sequence append, applies under global exclusion, flushes, and
-then advances the applied cursor. Focused tests cover the two-owner restart,
-quota rejection on the last owner, uncertain writer outcome, fail-closed partial
-live application, and caller cancellation after the append. Network transport
-and release gates are still unproven.
-The public server and tools still cannot select header 7; transport 3, backup 3,
-network replica application, and RESP coordinated EXEC remain unimplemented.
+**Status: explicit local header-7/record-1 server mode implemented; replication
+and release validation remain open.** This design addresses
+[issue #92](https://github.com/djairofilho/sider/issues/92). The default
+[transactions](transactions.md) and [routing](sharding.md) contracts still require
+one shard. `SIDER_AOF_COMPOSED=1` with a record-1 AOF directory selects the
+mixed-owner profile for local RESP `MULTI`/`EXEC`; configuration rejects any
+replication setting. A mixed-owner EXEC uses sorted participant discovery, owner
+preparation under global exclusion, one durable batch decision, and complete
+application before visibility. Unsupported cross-shard commands invalidate the
+queue before participant preparation. A single `WATCH` command still requires
+one shard, but its observed keys may belong to another owner than later queued
+commands.
+
+The header-7 reader stages and validates each touched shard before replay. Tests
+cover compaction, torn records, last-owner quota failure, writer uncertainty,
+partial live application, cancellation, and nine process-kill boundaries. The
+TCP test covers mixed-owner EXEC, ordered binary `MGET`, WATCH conflict, unsupported
+command rejection, restart, and wrong-profile startup refusal. These tests do not
+simulate power loss or cover network replication boundaries. The transport-3
+codec, schema-3 backup library, live source export library, and local replica
+application path exist, but no composed network listener, follower, backup CLI, or
+release gate selects them. The issue remains open.
 
 ## Contents
 
@@ -107,26 +74,25 @@ Deduplicate participant IDs and sort ascending. Preserve original key occurrence
 and command indices separately so duplicates and reply order remain intact.
 Empty and keyless batches use worker zero where owner state is needed.
 
-The proposed enabled mode allows queued supported commands to span workers. No new
-RESP command is required. A proposed startup opt-in, disabled by default, must be
-documented and validated before enabling; until the complete path is implemented,
-the existing CROSSSLOT restriction remains. Ordinary multi-key commands outside
-EXEC retain their current restriction in the first stage.
+The local enabled mode allows queued supported commands to span workers. No new
+RESP command is required. `SIDER_AOF_COMPOSED=1` is disabled by default and
+requires record version 1, an AOF directory, and no replication configuration.
+Ordinary multi-key commands outside EXEC retain their current restriction.
 
-Inside enabled EXEC, DEL, EXISTS, MGET, MSET, and WATCH can discover several
-participants. MGET returns original order and duplicates; EXISTS counts occurrences;
+Inside enabled EXEC, DEL, EXISTS, MGET, and MSET can discover several participants.
+WATCH may observe a single owner outside the queued commands. MGET returns original order and duplicates; EXISTS counts occurrences;
 DEL counts each actual removal once; MSET uses the last value per key and clears TTL.
 For MSET, all destination preparations and quota checks must succeed before any
 tentative effect from that command is retained. An error rejects that entire MSET
 while later queued commands continue. Do not split one command into independently
 committing subcommands.
 
-Initially reject a multi-shard EXEC containing PUBLISH, SUBSCRIBE, or UNSUBSCRIBE
-with proposed `ERR unsupported cross-shard transaction command` during queueing,
+Reject a multi-shard EXEC containing PUBLISH, SUBSCRIBE, UNSUBSCRIBE, or INFO
+with `ERR unsupported cross-shard transaction command` during queueing,
 marking the queue invalid so EXEC returns EXECABORT. This avoids promising an atomic
 publication relationship with the independently accessible Pub/Sub hub. Existing
-single-shard Pub/Sub transactions retain their documented behavior. INFO is allowed
-only with a defined capture that cannot expose tentative participant statistics.
+single-shard Pub/Sub transactions retain their documented behavior. INFO remains
+unsupported in a mixed-owner queue until its capture semantics are defined.
 PING, ECHO, and queued UNWATCH retain current semantics. Future commands require
 explicit key discovery and preparation support before joining this allowlist.
 Unknown keys, unsupported commands, queue limits, or invalid layouts must reject
@@ -240,8 +206,8 @@ reserves header versions 4 and 5 for a different record format. Cross-shard
 capability numbering and migration must account for both features, including files
 that eventually contain memory mutations and multi-shard batches.
 The [proposed durable format registry](durable-format-registry.md) defines a
-composable profile for review. Its local reader and writer remain unselectable by
-the executable, and it does not enable a replica.
+composable profile for review. Its record-1 mixed-owner reader and writer are
+selectable only through the explicit local server option; no replica is enabled.
 Its explicit profile allowlist permits a complete record-1 mixed-owner release
 before memory record-2 support, provided every record-2 profile is rejected
 before scanning or repairing a file. Combined memory and mixed-owner data needs
@@ -334,7 +300,7 @@ transaction history. These names and metrics are proposed, not currently availab
 
 ## Proof obligations and implementation stages
 
-The baseline cannot meet this contract by removing CROSSSLOT alone:
+The remaining work extends the local implementation across network and release boundaries:
 
 | Current boundary | Required proof/change |
 | --- | --- |
@@ -364,10 +330,10 @@ until all required paths pass:
    only after passing results. Release requirements remain in [releases](releases.md).
 
 Issue #92 remains open until implementation and crash/network evidence satisfy all
-four acceptance criteria. Focused tests exercise an internal coordinated
-mixed-owner batch through the actual writer and recovery path, including nine
-process-kill boundaries. They do not exercise RESP EXEC, replication, backup,
-network failure, power loss, or a release configuration.
+four acceptance criteria. Focused tests exercise coordinated mixed-owner RESP EXEC,
+actual writer/recovery, nine process-kill boundaries, and an isolated backup library
+path. They do not exercise network replication failure, power loss, or a native
+release configuration.
 
 ## Required deterministic tests
 

@@ -168,7 +168,7 @@ pub enum Command {
     },
     /// Starts a transaction queue owned by the connection.
     Multi,
-    /// Executes the entire queue in its single shard.
+    /// Executes the queue in one shard, or across owners in the composed profile.
     Exec,
     /// Discards the queue and its observations.
     Discard,

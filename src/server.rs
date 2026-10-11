@@ -70,8 +70,13 @@ async fn prepare_inner(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let recovered = if let Some(aof) = config.aof.clone() {
+        let composed = config.composed_aof;
         let mut recovered = tokio::task::spawn_blocking(move || {
-            crate::persistence::recover(aof, store_config, Arc::new(SystemClock))
+            if composed {
+                crate::persistence::recover_composed(aof, store_config, Arc::new(SystemClock))
+            } else {
+                crate::persistence::recover(aof, store_config, Arc::new(SystemClock))
+            }
         })
         .await
         .map_err(ServerError::WorkerFailed)??;
@@ -301,6 +306,10 @@ async fn serve_prepared_inner(
     )?;
     if let Some(runtime) = &runtime {
         database = database.with_replication(runtime.clone());
+    }
+    if config.composed_aof {
+        let (aof, _) = persistence.as_ref().expect("composed AOF validated");
+        database = database.with_composed_aof(aof.clone())?;
     }
     let mut workers = JoinSet::new();
     for worker in shard_workers {
