@@ -209,11 +209,14 @@ cargo test --locked --test replication_journal
 cargo test --locked --test replication_storage
 cargo test --locked --test replication_persistence
 cargo test --locked --test replication_network replication_
+cargo test --locked --test replication_network composed_replica_refuses_partial_frames_bad_full_and_sequence_errors
 ```
 
-`replication_network` runs five scenarios with real binaries: types/TTL/transactions
-and export; invalid transfer and ACK followed by crash; slow replica and history
-loss; primary restart; and lagging promotion with upstream cutoff.
+`replication_network` includes five original release scenarios with real binaries:
+types/TTL/transactions and export; invalid transfer and ACK followed by crash;
+slow replica and history loss; primary restart; and lagging promotion with
+upstream cutoff. Development tests additionally exercise composed process
+replication and a controlled transport-3 failure source.
 `replication_persistence` includes six controlled kills during installation, at the
 three publication points for each role. Storage tests verify the barrier,
 cancellation, quota, and absence of mixed state across shards.
