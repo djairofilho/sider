@@ -2348,16 +2348,20 @@ async fn security_posix_complete_file_generation_serves_tls_and_enforces_backup_
                 .collect::<String>();
             digests.insert(*name, digest);
             let path = directory.join(name);
-            fs::write(&path, bytes).unwrap();
-            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+            let staged = directory.join(format!(".next-{name}"));
+            fs::write(&staged, bytes).unwrap();
+            fs::set_permissions(&staged, fs::Permissions::from_mode(0o600)).unwrap();
+            fs::rename(staged, path).unwrap();
         }
         let manifest = directory.join("security-manifest.json");
+        let staged = directory.join(".next-security-manifest.json");
         fs::write(
-            &manifest,
+            &staged,
             serde_json::to_vec(&json!({"version":1,"generation":number,"files":digests})).unwrap(),
         )
         .unwrap();
-        fs::set_permissions(manifest, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::rename(staged, manifest).unwrap();
     }
 
     let home = fs::canonicalize(std::env::var_os("HOME").expect("service home")).unwrap();
@@ -2509,6 +2513,63 @@ async fn security_posix_complete_file_generation_serves_tls_and_enforces_backup_
 
     drop(client);
     drop(stream);
+    files[3].1 = serde_json::to_vec(&runtime_policy(&["monitor"])).unwrap();
+    write_generation(security_directory.path(), &files, 2);
+    timeout(DEADLINE, async {
+        let mut attempt = 0;
+        loop {
+            let destination = directory
+                .0
+                .join(format!("backup-during-rotation-{attempt}"));
+            match sider::persistence::backup::export_secure(
+                options(internal_address, destination.clone()),
+                Arc::new(sider::storage::SystemClock),
+                &tool_transport,
+            )
+            .await
+            {
+                Ok(_) => {
+                    assert!(destination.join("backup-manifest.json").exists());
+                    attempt += 1;
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                }
+                Err(_) => {
+                    assert!(!destination.exists());
+                    break;
+                }
+            }
+        }
+    })
+    .await
+    .expect("manifest polling activates backup-role removal");
+    child.assert_alive().unwrap();
+    let denied_live = directory.0.join("backup-denied-live");
+    assert!(
+        sider::persistence::backup::export_secure(
+            options(internal_address, denied_live.clone()),
+            Arc::new(sider::storage::SystemClock),
+            &tool_transport,
+        )
+        .await
+        .is_err()
+    );
+    assert!(!denied_live.exists());
+    let mut monitor = tool_transport.connect(internal_address).await.unwrap();
+    protocol::write(
+        &mut monitor,
+        &Message::StatusRequest,
+        protocol::Limits::default(),
+        DEADLINE,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        protocol::read(&mut monitor, protocol::Limits::default(), DEADLINE)
+            .await
+            .unwrap(),
+        Message::Status { .. }
+    ));
+    drop(monitor);
     child.terminate(DEADLINE).unwrap();
     fs::remove_file(config.ready_file.as_ref().unwrap()).unwrap();
     fs::remove_file(
@@ -2521,8 +2582,6 @@ async fn security_posix_complete_file_generation_serves_tls_and_enforces_backup_
             .unwrap(),
     )
     .unwrap();
-    files[3].1 = serde_json::to_vec(&runtime_policy(&["monitor"])).unwrap();
-    write_generation(security_directory.path(), &files, 2);
     let mut child = startup_process::OwnedChild::spawn(&mut command).unwrap();
     let denied_source = startup_ready(
         config
