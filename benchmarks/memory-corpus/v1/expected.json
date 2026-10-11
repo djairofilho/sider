@@ -1,0 +1,12 @@
+{
+  "corpus_version": "sider-memory-corpus/1",
+  "evaluation_state": "after update, delete, and recovery",
+  "results": {
+    "broad-team-a": {"eligible_ids": ["a", "a\u0000", "b", "f", "rank2", "tie-1", "tie-2"], "ranked_ids": ["a", "a\u0000", "b", "rank2", "tie-1", "tie-2"]},
+    "selective-doc-rank-1": {"eligible_ids": ["a", "a\u0000", "b", "f", "tie-1", "tie-2"], "ranked_ids": ["a", "a\u0000", "b", "tie-1", "tie-2", "f"]},
+    "typed-bool-mismatch": {"eligible_ids": [], "ranked_ids": []},
+    "other-namespace": {"eligible_ids": ["d"], "ranked_ids": ["d"]},
+    "binary-id-and-value": {"eligible_ids": ["a\u0000"], "ranked_ids": ["a\u0000"]}
+  },
+  "oracle": "checker.py uses sequential binary64 squared-L2 and independent namespace/TTL/typed-metadata predicates"
+}
