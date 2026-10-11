@@ -215,7 +215,11 @@ an append, and fail-closed admission when the writer result is uncertain or the
 second owner is lost after the append.
 Process-kill tests cover nine boundaries from before append through owner
 application and verify that restart never replays only one owner.
-It refuses record 2, the missing mixed bit, and replica roles before record scan.
+The internal replica path accepts a record-1 mixed snapshot, one expected-sequence
+batch, whole-owner preparation and application, and a flush before advancing its
+cursor. Tests cover quota rejection, restart, uncertain writer outcome, partial
+apply failure, and caller cancellation. It still refuses record 2, the missing
+mixed bit, and primary role before record scan.
 No public AOF configuration selects that profile; default recovery still rejects
 version 7 before inspecting records, including every torn first-record prefix,
 and preserves the file bytes. Backup and transport 3 are still unavailable.
