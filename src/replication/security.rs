@@ -166,7 +166,7 @@ pub(super) async fn read_memory(
 ) -> Result<(bytes::Bytes, Message, Option<InternalLease>), Error> {
     Ok(
         protocol::read_memory_admitted(socket, limits, deadline, |kind| async move {
-            if !matches!(kind, 1 | 10) {
+            if !matches!(kind, 1 | 10 | 11 | 12) {
                 return Err(protocol::Error::Invalid("permission denied"));
             }
             let Some(authority) = authority else {

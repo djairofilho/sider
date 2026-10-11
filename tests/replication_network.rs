@@ -174,6 +174,16 @@ impl Node {
             .await
             .unwrap()
     }
+    async fn admin_memory(&self, message: Message) -> Message {
+        let mut socket = TcpStream::connect(self.internal).await.unwrap();
+        protocol::write_memory(&mut socket, &message, Limits::default(), DEADLINE)
+            .await
+            .unwrap();
+        protocol::read_memory_authorized(&mut socket, Limits::default(), DEADLINE, |_| true)
+            .await
+            .unwrap()
+            .1
+    }
     async fn status(&self) -> Message {
         self.admin(Message::StatusRequest).await
     }
@@ -362,6 +372,45 @@ async fn memory_replica_process_follows_full_delta_and_reconnects_after_source_r
         replica.command(&[b"MEM.GET", b"c", b"id"]),
         primary.command(&[b"MEM.GET", b"c", b"id"])
     );
+    let before_promotion = replication_metrics(replica.command(&[b"INFO", b"replication"]));
+    primary.stop();
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        let status = replication_metrics(replica.command(&[b"INFO", b"replication"]));
+        if status["replication_connected"] == "0" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "follower did not disconnect before promotion"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let Message::Status { readonly: true, .. } = replica.admin_memory(Message::StatusRequest).await
+    else {
+        panic!("record-2 replica status");
+    };
+    let Message::Promoted(promoted) = replica.admin_memory(Message::Promote).await else {
+        panic!("record-2 promotion");
+    };
+    assert_ne!(promoted.epoch, [0; 16]);
+    assert_eq!(
+        promoted.sequence.to_string(),
+        before_promotion["replication_applied_sequence"]
+    );
+    let promoted_status = replication_metrics(replica.command(&[b"INFO", b"replication"]));
+    assert_eq!(promoted_status["replication_role"], "primary");
+    assert_ne!(
+        promoted_status["replication_epoch"],
+        before_promotion["replication_epoch"]
+    );
+    ok(replica.command(&[b"MEM.DEL", b"c", b"id"]));
+    let promoted_image = replica.command(&[b"MEM.GET", b"c", b"id"]);
+    replica.stop();
+    replica = Node::start_memory(&follower_path, Some(upstream)).await;
+    let restarted = replication_metrics(replica.command(&[b"INFO", b"replication"]));
+    assert_eq!(restarted["replication_role"], "primary");
+    assert_eq!(replica.command(&[b"MEM.GET", b"c", b"id"]), promoted_image);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
