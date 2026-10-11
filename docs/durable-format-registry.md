@@ -227,6 +227,8 @@ exact profile before capacities; invalid profile fields reject even with valid
 checksums. An explicit captured-snapshot exporter now checks the request against
 the source profile and capacities before sending a Hello or snapshot payload. It
 preflights record encoding, key order and transfer bytes before advertising a cut.
+The two-phase export API also returns an admission token before capture and binds
+the captured Hello to that exact admitted profile; a mismatch emits no snapshot.
 No network listener or backup archive path selects transport 3 yet.
 No public AOF configuration selects that profile; default recovery still rejects
 version 7 before inspecting records, including every torn first-record prefix,
