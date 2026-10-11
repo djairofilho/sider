@@ -35,7 +35,7 @@ impl OwnerTransaction {
         self.shadow.apply(candidate)
     }
 
-    fn seal(self, owner: &Store, replies: Vec<Reply>) -> Prepared {
+    pub(crate) fn seal(self, owner: &Store, replies: Vec<Reply>) -> Prepared {
         let entries = self
             .trace
             .into_iter()
