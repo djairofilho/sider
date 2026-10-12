@@ -1,0 +1,82 @@
+name: Manual Ubuntu recovery drill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  published-package-drill:
+    name: Published v1.0.1 recovery on Ubuntu 24.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - name: Check out the dispatched SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify published package and record host
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          root="$RUNNER_TEMP/sider-recovery-107"
+          inputs="$root/inputs"
+          mkdir -p "$inputs"
+          gh release download v1.0.1 --repo djairofilho/sider --dir "$inputs" \
+            --pattern SHA256SUMS --pattern release-manifest.json \
+            --pattern sider-v1.0.1-x86_64-unknown-linux-gnu.tar.gz
+          archive="$inputs/sider-v1.0.1-x86_64-unknown-linux-gnu.tar.gz"
+          test "$(sha256sum "$archive" | cut -d' ' -f1)" = \
+            acc9520e120d5960c286a184d8e0079774398ad4479610cd9e6a540f5274243d
+          (cd "$inputs" && sha256sum --check SHA256SUMS --ignore-missing)
+          tar -xzf "$archive" -C "$inputs"
+          virt="$(systemd-detect-virt || true)"
+          jq -n \
+            --arg os "$(cat /etc/os-release)" \
+            --arg cpu "$(lscpu)" \
+            --arg ram_bytes "$(free -b | awk '/^Mem:/ {print $2}')" \
+            --arg storage "$(lsblk -o NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS)" \
+            --arg filesystem "$(findmnt --target "$root" --output SOURCE,FSTYPE,OPTIONS --noheadings)" \
+            --arg kernel "$(uname -a)" \
+            --arg virtualization "$virt" \
+            --arg runner_sha "$GITHUB_SHA" \
+            '{os:$os,cpu:$cpu,ram_bytes:$ram_bytes,storage:$storage,filesystem:$filesystem,workload_isolation:"no competing benchmark, build, or load test",kernel:$kernel,virtualization:$virtualization,runner_sha:$runner_sha}' \
+            > "$root/context.json"
+          cat "$root/context.json"
+          {
+            echo "SIDER_DRILL_PACKAGE_DIR=$inputs/sider-v1.0.1-x86_64-unknown-linux-gnu"
+            echo "SIDER_DRILL_ARCHIVE=$archive"
+            echo "SIDER_DRILL_MANIFEST=$inputs/release-manifest.json"
+            echo "SIDER_DRILL_SHA256SUMS=$inputs/SHA256SUMS"
+            echo "SIDER_DRILL_SOURCE_SHA=b738a0b4f97074fe272bc21f1eacf5db93cd020e"
+            echo "SIDER_DRILL_CONTEXT=$root/context.json"
+            echo "SIDER_DRILL_EVIDENCE=$root/evidence"
+          } >> "$GITHUB_ENV"
+
+      - name: Exercise backup, restore, and AOF recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --test recovery_drill -- --ignored \
+            --exact extracted_package_operator_recovery_drill --nocapture \
+            2>&1 | tee "$RUNNER_TEMP/sider-recovery-107/drill.log"
+          cat "$SIDER_DRILL_EVIDENCE/result.json"
+
+      - name: Retain raw drill evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ubuntu-recovery-v1.0.1-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/sider-recovery-107/context.json
+            ${{ runner.temp }}/sider-recovery-107/drill.log
+            ${{ runner.temp }}/sider-recovery-107/evidence/
+          if-no-files-found: error
+          retention-days: 14
