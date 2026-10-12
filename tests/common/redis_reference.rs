@@ -566,7 +566,9 @@ fn capture(mut stream: impl Read) -> io::Result<Vec<u8>> {
 
 fn docker(args: &[&str]) -> Result<Output, String> {
     let deadline = Instant::now() + COMMAND_TIMEOUT;
-    let mut child = Command::new("docker")
+    let executable = std::env::var_os("SIDER_TEST_DOCKER_EXECUTABLE")
+        .unwrap_or_else(|| std::ffi::OsString::from("docker"));
+    let mut child = Command::new(executable)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
