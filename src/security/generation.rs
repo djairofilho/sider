@@ -816,6 +816,20 @@ mod tests {
         icacls(&policy, &["/remove:g", "*S-1-1-0"]);
         assert!(restricted_files(&directory.0, CLIENT).is_ok());
 
+        let token = Command::new("whoami.exe").arg("/groups").output().unwrap();
+        assert!(token.status.success());
+        if String::from_utf8_lossy(&token.stdout).contains("S-1-16-12288") {
+            // A privileged test process can assign a trusted but different
+            // owner. Sensitive files must belong to the service identity.
+            set_owner(&policy, "S-1-5-32-544");
+            assert!(restricted_files(&directory.0, CLIENT).is_err());
+            set_owner(&policy, &sid);
+            assert!(restricted_files(&directory.0, CLIENT).is_ok());
+            eprintln!("alternate Windows owner case verified");
+        } else {
+            eprintln!("alternate Windows owner case requires an elevated token");
+        }
+
         let policy_target = directory.0.join("policy-target");
         fs::rename(&policy, &policy_target).unwrap();
         let file_symlink = std::os::windows::fs::symlink_file(&policy_target, &policy);
