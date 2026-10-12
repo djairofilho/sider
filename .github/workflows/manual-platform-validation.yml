@@ -19,7 +19,7 @@ jobs:
       CARGO_INCREMENTAL: "0"
     steps:
       - name: Check out the dispatched SHA
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -46,7 +46,34 @@ jobs:
             $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
             $principal = [Security.Principal.WindowsPrincipal]::new($identity)
             $facts.windows_version = (Get-CimInstance Win32_OperatingSystem).Version
+            $facts.identity_sid = $identity.User.Value
             $facts.administrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+            $driveRoot = $env:SystemDrive + '\'
+            $driveAcl = Get-Acl -LiteralPath $driveRoot
+            $facts.drive_root_owner = $driveAcl.Owner
+            $facts.drive_root_aces = @($driveAcl.Access | ForEach-Object {
+              [ordered]@{
+                identity = $_.IdentityReference.Value
+                rights = $_.FileSystemRights.ToString()
+                type = $_.AccessControlType.ToString()
+                propagation = $_.PropagationFlags.ToString()
+              }
+            })
+            $privateProbe = Join-Path $driveRoot ("sider-owner-probe-" + [guid]::NewGuid())
+            try {
+              New-Item -ItemType Directory -Path $privateProbe | Out-Null
+              $grant = '*' + $identity.User.Value + ':(OI)(CI)F'
+              & icacls.exe $privateProbe '/grant:r' $grant | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw 'private grant failed' }
+              & icacls.exe $privateProbe '/inheritance:r' | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw 'inheritance removal failed' }
+              $facts.private_directory_owner = (Get-Acl -LiteralPath $privateProbe).Owner
+              $privateFile = Join-Path $privateProbe 'material.txt'
+              Set-Content -LiteralPath $privateFile -Value 'sider probe'
+              $facts.private_file_owner = (Get-Acl -LiteralPath $privateFile).Owner
+            } catch {
+              $facts.private_acl_probe_error = $_.Exception.Message
+            }
             $probe = Join-Path $env:RUNNER_TEMP ("sider-symlink-" + [guid]::NewGuid())
             New-Item -ItemType Directory -Path $probe | Out-Null
             $target = Join-Path $probe 'target.txt'
@@ -74,7 +101,7 @@ jobs:
 
       - name: Retain context and check log
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-check-${{ matrix.os }}-${{ github.sha }}-${{ github.run_attempt }}
           path: |
