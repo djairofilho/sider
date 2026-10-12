@@ -402,5 +402,18 @@ and tail files remain outside Git under
 `/var/tmp/sider-recovery-107-v1.0.1/linux-wsl2-attempt-{1,2,3}` in the Ubuntu
 distribution. Their sizes and SHA-256 hashes are versioned in the summary;
 copy them to durable storage before removing that directory or distribution.
-Native Ubuntu host behavior, power loss, device failure, and optional replica
-promotion remain pending.
+A non-WSL Ubuntu VM exercise is recorded below. Bare-metal host behavior, power
+loss, device failure, and optional replica promotion remain pending.
+
+## Published v1.0.1 Ubuntu GitHub-hosted VM exercise
+
+The [2026-10-12 result](evidence/R107-v1.0.1-ubuntu-actions-38208988384.md) and
+[raw evidence](evidence/R107-v1.0.1-ubuntu-actions-38208988384-raw.zip) record a
+successful manual drill of the exact published Linux package on a GitHub-hosted
+Ubuntu 24.04.5 x86_64 Azure VM with an ext4 test filesystem. The run covered one
+and four shards, backup verification and restore, AOF restart and incomplete-tail
+recovery, full data and TTL checks, and negative corruption cases. Its measured
+restore and recovery phases completed within 9 seconds under the recorded VM
+conditions. The linked summary identifies the package and runner SHAs, checksums,
+host context, commands, raw observations, and limitations. This result does not
+validate a later candidate package or physical power loss.
