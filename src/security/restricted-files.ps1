@@ -135,13 +135,18 @@ public static class SiderRestrictedHandle {
                     $descriptor.SetSecurityDescriptorBinaryForm([SiderRestrictedHandle]::Descriptor($file.SafeFileHandle))
                     Assert-Descriptor $descriptor $true
                     if ($file.Length -eq 0 -or $file.Length -gt 4194304) { throw 'size' }
-                    $buffer = [byte[]]::new([int]$file.Length)
+                    $originalLength = $file.Length
+                    $buffer = [byte[]]::new([int]$originalLength)
                     $position = 0
                     while ($position -lt $buffer.Length) {
                         $read = $file.Read($buffer, $position, $buffer.Length - $position)
                         if ($read -eq 0) { throw 'truncated' }
                         $position += $read
                     }
+                    if ($file.Length -ne $originalLength) { throw 'size changed' }
+                    $after = [Security.AccessControl.FileSecurity]::new()
+                    $after.SetSecurityDescriptorBinaryForm([SiderRestrictedHandle]::Descriptor($file.SafeFileHandle))
+                    Assert-Descriptor $after $true
                     return [Convert]::ToBase64String($buffer)
                 } finally { $file.Dispose() }
             } finally { $handle.Dispose() }
@@ -150,6 +155,11 @@ public static class SiderRestrictedHandle {
         $result['security-manifest.json'] = Read-Restricted 'security-manifest.json'
         foreach ($name in $env:SIDER_SECURITY_READ_FILES.Split(',')) { $result[$name] = Read-Restricted $name }
         $result['manifest-after'] = Read-Restricted 'security-manifest.json'
+        for ($i = 0; $i -lt $openedAncestors.Count; $i++) {
+            $descriptor = [Security.AccessControl.DirectorySecurity]::new()
+            $descriptor.SetSecurityDescriptorBinaryForm([SiderRestrictedHandle]::Descriptor($openedAncestors[$i]))
+            Assert-Descriptor $descriptor ($i -eq $openedAncestors.Count - 1)
+        }
         [Console]::Out.Write(($result | ConvertTo-Json -Compress))
     } finally {
         foreach ($handle in $openedAncestors) { $handle.Dispose() }

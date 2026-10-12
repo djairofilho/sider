@@ -10,6 +10,8 @@ On POSIX, the development executable accepts a complete restricted client/intern
 
 Windows protected startup remains explicitly unavailable pending the full filesystem permission matrix. The gate fails before listener or AOF startup. Focused Windows loader tests accept private files, reject broad grants on the security directory or a file, distinguish ancestor rights, and reject a junction in the directory path. The loader now opens components without following reparse points and checks type, owner, and DACL through the opened handles while retaining ancestor handles during material reads. The local host did not permit creation of a file symlink (Windows error 1314), so that negative case remains unexecuted here.
 
+The Windows reader also checks each material file's length, owner, and DACL again after reading, and rechecks every pinned directory handle before returning the generation. Persistent permission or length changes during a read now fail closed. This does not prove that a transient change and restore, or an in-place same-length rewrite, is impossible; the manifest digest checks the returned bytes. The remaining Windows replacement and owner cases still block protected executable startup.
+
 `SIDER_SECURITY_PROFILE=legacy-loopback` explicitly selects plaintext without authentication and restricts client, internal, upstream, and tool addresses to literal loopback. It rejects a security directory and emits a warning. The existing plaintext library APIs still require callers to opt into their secure counterparts.
 
 ## Client boundary implemented
