@@ -62,7 +62,7 @@ hardware, cache state, dataset and workload must be recorded with each run.
 
 | Target | Measurable check | Current evidence and limit |
 | --- | --- | --- |
-| Recovery | With one and four shards and a dataset between 63 and 64 MiB logical usage, complete AOF restart or isolated backup restore through the full data and TTL oracle within 60 seconds on each native supported platform. | The final Windows observations were below 19 seconds; the WSL2 Ubuntu observations were below 30 seconds. Native Ubuntu and cold-cache conditions remain unmeasured. |
+| Recovery | With one and four shards and a dataset between 63 and 64 MiB logical usage, complete AOF restart or isolated backup restore through the full data and TTL oracle within 60 seconds on each supported operating system. | The final Windows 11 observations were below 19 seconds; the Ubuntu 24.04 GitHub-hosted VM observations were below 9 seconds. Cold-cache, physical power loss, and device failure remain unmeasured. |
 | Operating latency | For the [resource-envelope saturation workload](resource-envelope.md) with eight clients, 1,024 concurrent `SET`s, 128-byte values, AOF `always`, and one or four shards, keep p99 round-trip latency at or below 250 ms on each native supported platform. | WSL2 observed 93.88 ms for one shard and 155.64 ms for four. This does not predict another host or a near-quota dataset. |
 | Operating memory and queues | For that same workload, record peak RSS below 256 MiB and no full worker or AOF queue. Also record logical bytes separately; the 64 MiB quota is not an RSS bound. | WSL2 sampled at most 11.73 MiB RSS and neither queue filled. Windows and native Ubuntu measurements remain pending. |
 
@@ -75,13 +75,15 @@ do not turn into a production guarantee.
 
 The [recovery drill](recovery-drill.md) exercised the published v1.0.1 packages
 with a dataset near the default 64 MiB logical quota and one and four shards.
-The final Windows 11 run and an Ubuntu 24.04 run under WSL2 passed backup restore,
-AOF restart, incomplete-tail repair, TTL deadline checks, and negative corruption
-cases. The runbook links raw logs, package hashes, hardware context, and measured
-phase times. The WSL2 result establishes a virtualized Linux functional run;
-a native Ubuntu host run is still pending. These observations are **not a
-published recovery-time guarantee**. [Issue #107](https://github.com/djairofilho/sider/issues/107)
-tracks the remaining evidence.
+The final [Windows 11 run](evidence/R107-v1.0.1-windows-final.json) and the
+[Ubuntu 24.04 run](evidence/R107-v1.0.1-ubuntu-actions-38208988384.md) on a
+GitHub-hosted Azure VM passed backup restore, AOF restart, incomplete-tail
+repair, TTL deadline checks, and negative corruption cases. The runbook links
+raw logs, package hashes, host context, and measured phase times. The Ubuntu
+run uses an ext4 filesystem outside WSL2; it does not represent physical power
+loss or device failure. These observations are **not a published recovery-time
+guarantee**. Optional replica promotion requires its own two-instance drill
+before the replica profile can claim a measured recovery objective.
 
 The [resource-envelope exercise](resource-envelope.md) now records throughput,
 p50/p95/p99 command latency, RSS, CPU, queue pressure, startup, recovery, slow
