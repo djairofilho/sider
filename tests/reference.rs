@@ -93,6 +93,8 @@ fn fixtures_distinguish_null_empty_and_binary_payloads() {
 
 #[test]
 fn reference_fails_explicitly_when_docker_is_unavailable() {
+    // A child PATH override does not reliably change executable lookup on Windows.
+    let nonexistent_docker = std::env::current_exe().unwrap().join("missing-docker");
     let output = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
@@ -100,9 +102,9 @@ fn reference_fails_explicitly_when_docker_is_unavailable() {
             "--ignored",
             "--nocapture",
         ])
-        .env("PATH", "")
+        .env("SIDER_TEST_DOCKER_EXECUTABLE", nonexistent_docker)
         .output()
-        .expect("run child test without Docker in PATH");
+        .expect("run child test with an unavailable Docker executable");
     assert!(!output.status.success(), "missing reference must not pass");
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(error.contains("Docker unavailable"), "{error}");
