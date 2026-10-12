@@ -746,6 +746,9 @@ mod tests {
                 .unwrap();
             assert!(output.status.success(), "ACL setup failed");
         }
+        fn set_owner(path: &Path, sid: &str) {
+            icacls(path, &["/setowner", &format!("*{sid}")]);
+        }
         let identity = Command::new("powershell.exe")
             .args([
                 "-NoProfile",
@@ -774,15 +777,16 @@ mod tests {
         fs::create_dir(&directory.0).unwrap();
         icacls(&directory.0, &["/grant:r", &format!("*{sid}:(OI)(CI)F")]);
         icacls(&directory.0, &["/inheritance:r"]);
+        set_owner(&directory.0, &sid);
         let (manifest, files) = fixture(1);
         for (name, bytes) in &files {
-            fs::write(directory.0.join(name), bytes).unwrap();
+            let path = directory.0.join(name);
+            fs::write(&path, bytes).unwrap();
+            set_owner(&path, &sid);
         }
-        fs::write(
-            directory.0.join(MANIFEST),
-            serde_json::to_vec(&manifest).unwrap(),
-        )
-        .unwrap();
+        let manifest_path = directory.0.join(MANIFEST);
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        set_owner(&manifest_path, &sid);
         let read = restricted_files(&directory.0, CLIENT).unwrap();
         assert_eq!(
             read.get("client-policy.json"),
@@ -841,14 +845,15 @@ mod tests {
         fs::create_dir(&nested).unwrap();
         icacls(&nested, &["/grant:r", &format!("*{sid}:(OI)(CI)F")]);
         icacls(&nested, &["/inheritance:r"]);
+        set_owner(&nested, &sid);
         for (name, bytes) in &files {
-            fs::write(nested.join(name), bytes).unwrap();
+            let path = nested.join(name);
+            fs::write(&path, bytes).unwrap();
+            set_owner(&path, &sid);
         }
-        fs::write(
-            nested.join(MANIFEST),
-            serde_json::to_vec(&manifest).unwrap(),
-        )
-        .unwrap();
+        let nested_manifest = nested.join(MANIFEST);
+        fs::write(&nested_manifest, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        set_owner(&nested_manifest, &sid);
         icacls(&directory.0, &["/grant:r", "*S-1-1-0:(AD)"]);
         assert!(restricted_files(&nested, CLIENT).is_ok());
         icacls(&directory.0, &["/grant:r", "*S-1-1-0:(WD)"]);
