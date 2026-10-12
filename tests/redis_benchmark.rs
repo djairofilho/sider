@@ -643,6 +643,7 @@ fn diagnose(binary: &Path, overrides: &[(&str, OsString)]) -> Result<String, Str
             command.env_remove(name);
         }
     }
+    command.env("SIDER_SECURITY_PROFILE", "legacy-loopback");
     for (name, value) in overrides {
         command.env(name, value);
     }
@@ -1017,6 +1018,16 @@ fn benchmark_contract_matrix_and_workloads_are_fixed_and_count_warmup_separately
         assert_eq!(work.measured, plan(scenario, 2).measured);
     }
     assert_eq!(16 * REPETITIONS * CLIENTS * OPERATIONS, 393216);
+}
+#[test]
+fn benchmark_contract_diagnose_uses_the_same_legacy_profile_as_the_server() {
+    let output = diagnose(
+        Path::new(env!("CARGO_BIN_EXE_sider")),
+        &[("SIDER_SHARDS", OsString::from("1"))],
+    )
+    .unwrap();
+    assert!(output.contains("security_profile:legacy-loopback"));
+    assert!(output.contains("transport_mode:plaintext"));
 }
 #[test]
 fn benchmark_contract_percentiles_measure_whole_batches_and_variation_is_descriptive() {
