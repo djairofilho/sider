@@ -99,6 +99,19 @@ jobs:
           cargo xtask check 2>&1 | Tee-Object -FilePath native-check.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Verify elevated Windows ownership and symlink cases
+        if: matrix.os == 'windows-2022'
+        shell: pwsh
+        run: |
+          cargo test --locked --lib security_windows_restricted_files_accept_private_acl_and_reject_broad_grants -- --nocapture 2>&1 | Tee-Object -FilePath windows-owner-probe.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Select-String -LiteralPath windows-owner-probe.log -Pattern 'alternate Windows owner case verified' -Quiet)) {
+            throw 'elevated alternate-owner case did not run'
+          }
+          if (Select-String -LiteralPath windows-owner-probe.log -Pattern 'file symlink case unavailable' -Quiet) {
+            throw 'file symlink case did not run'
+          }
+
       - name: Retain context and check log
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -107,5 +120,6 @@ jobs:
           path: |
             runner-context.json
             native-check.log
+            windows-owner-probe.log
           if-no-files-found: error
           retention-days: 14
