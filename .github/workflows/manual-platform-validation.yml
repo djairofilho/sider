@@ -46,7 +46,34 @@ jobs:
             $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
             $principal = [Security.Principal.WindowsPrincipal]::new($identity)
             $facts.windows_version = (Get-CimInstance Win32_OperatingSystem).Version
+            $facts.identity_sid = $identity.User.Value
             $facts.administrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+            $driveRoot = $env:SystemDrive + '\'
+            $driveAcl = Get-Acl -LiteralPath $driveRoot
+            $facts.drive_root_owner = $driveAcl.Owner
+            $facts.drive_root_aces = @($driveAcl.Access | ForEach-Object {
+              [ordered]@{
+                identity = $_.IdentityReference.Value
+                rights = $_.FileSystemRights.ToString()
+                type = $_.AccessControlType.ToString()
+                propagation = $_.PropagationFlags.ToString()
+              }
+            })
+            $privateProbe = Join-Path $driveRoot ("sider-owner-probe-" + [guid]::NewGuid())
+            try {
+              New-Item -ItemType Directory -Path $privateProbe | Out-Null
+              $grant = '*' + $identity.User.Value + ':(OI)(CI)F'
+              & icacls.exe $privateProbe '/grant:r' $grant | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw 'private grant failed' }
+              & icacls.exe $privateProbe '/inheritance:r' | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw 'inheritance removal failed' }
+              $facts.private_directory_owner = (Get-Acl -LiteralPath $privateProbe).Owner
+              $privateFile = Join-Path $privateProbe 'material.txt'
+              Set-Content -LiteralPath $privateFile -Value 'sider probe'
+              $facts.private_file_owner = (Get-Acl -LiteralPath $privateFile).Owner
+            } catch {
+              $facts.private_acl_probe_error = $_.Exception.Message
+            }
             $probe = Join-Path $env:RUNNER_TEMP ("sider-symlink-" + [guid]::NewGuid())
             New-Item -ItemType Directory -Path $probe | Out-Null
             $target = Join-Path $probe 'target.txt'
