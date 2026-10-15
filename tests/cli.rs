@@ -14,6 +14,45 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+fn security_cli_hash_password_emits_valid_policy_verifier_without_echoing_secret() {
+    use argon2::{Argon2, PasswordVerifier, password_hash::PasswordHash};
+
+    let secret = b"exactly-sixteen-or-more-secret-bytes";
+    let mut command = sider();
+    command
+        .arg("--hash-password")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    child.stdin.take().unwrap().write_all(secret).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(
+        !output
+            .stdout
+            .windows(secret.len())
+            .any(|part| part == secret)
+    );
+    let verifier = String::from_utf8(output.stdout).unwrap();
+    assert!(verifier.starts_with("$argon2id$v=19$m=65536,t=3,p=1$"));
+    let parsed = PasswordHash::new(verifier.trim_end()).unwrap();
+    Argon2::default().verify_password(secret, &parsed).unwrap();
+
+    let mut command = sider();
+    command
+        .arg("--hash-password")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    child.stdin.take().unwrap().write_all(b"short").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
 fn security_cli_default_requires_protected_material_and_redacts_environment_values() {
     let mut command = sider();
     command
