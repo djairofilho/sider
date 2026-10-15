@@ -1536,17 +1536,27 @@ mod tests {
         let proof = CredentialProof::for_test("Reader", verifier);
         let lease = runtime.client().await.lease().await.authenticated(proof);
         assert!(lease.admitted_now());
-        let (_stop, handle, mut worker) = setup(1);
+        // Expiry is wall-clock based. Leave room for a loaded test host so the
+        // queue deadline cannot win the race this test is meant to exercise.
+        let (_stop, shutdown) = watch::channel(false);
+        let (handle, mut worker) = channel(1, Duration::from_secs(30), shutdown).unwrap();
         let first = enqueue(&handle, Command::Ping(None));
         let authorized = handle.authorized(Some(lease));
-        let mut request = Box::pin(authorized.execute(set(b"key", b"must-not-apply")));
-        assert_pending(request.as_mut()).await;
+        let (started, observed_start) = oneshot::channel();
+        let request = tokio::spawn(async move {
+            let _ = started.send(());
+            authorized.execute(set(b"key", b"must-not-apply")).await
+        });
+        observed_start.await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(!request.is_finished());
         tokio::time::sleep(Duration::from_millis(2100)).await;
-        assert_pending(request.as_mut()).await;
+        assert!(!request.is_finished());
         let first_request = worker.requests.try_recv().unwrap();
         assert!(worker.apply(first_request).await);
         assert_eq!(first.await.unwrap(), Ok(Reply::Pong));
-        assert_eq!(request.await, Err(DbError::SecurityExpired));
+        tokio::task::yield_now().await;
+        assert_eq!(request.await.unwrap(), Err(DbError::SecurityExpired));
         assert!(matches!(
             worker.requests.try_recv(),
             Err(TryRecvError::Empty)
