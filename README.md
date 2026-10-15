@@ -4,8 +4,8 @@ Sider is an in-memory database server project written in Rust.
 Its goal is to provide an explicit subset of Redis compatibility over RESP2.
 The name is Redis spelled backward.
 
-The published package is `1.0.1`; the current checkout contains staged work
-after that release. Publication of another package depends on validating its
+The published version is `1.0.1`; the current checkout contains staged work
+after that release. Publication of the planned Docker image depends on validating its
 candidate build and files. The [1.0.1 release notes](releases/notes/v1.0.1.md)
 describe the published scope without replacing gate receipts.
 
@@ -36,8 +36,8 @@ The differential reference uses Redis and `redis-cli` 8.10.1, pinned in the plan
 [0.1.0-rc.1 candidate](https://github.com/djairofilho/sider/releases/tag/v0.1.0-rc.1)
 was published in the public repository and remains a historical record.
 
-Deliverables through 1.0 and the 1.0.1 patch are organized in the [ROADMAP](ROADMAP.md),
-with 12 milestones and 52 implementation tasks. Milestones 0.1–0.10 have technical
+Deliverables and the planned 1.1.0 release are organized in the [ROADMAP](ROADMAP.md),
+with 13 milestones and 57 implementation tasks. Milestones 0.1–0.10 have technical
 checkpoints; 1.0 and explicitly registered patches have candidate and final releases. The
 [release guide](docs/releases.md) describes synchronizing the backlog and preparing
 a candidate and final release with the same SHA and approved files.
@@ -48,17 +48,21 @@ issues by dependency, acceptance evidence, and model. The
 [next development plan](docs/next-development.md) records the active workstreams;
 its proposals do not expand the released 1.0.1 contract.
 
-CI and automatic publication are deferred until after 1.0. Through and including 1.0,
-development uses local validation and releases are published manually.
+CI and automatic publication remain deferred. Development uses local validation,
+and the planned 1.1.0 image will be published manually after its gates pass.
 
 `INFO` queries instance metrics and `sider --diagnose` validates configuration
 without starting the server. The [operations guide](docs/metrics.md) defines fields,
 limits, and procedures for full queues, slow clients, and AOF failures.
-The [packages](docs/packages.md) include `sider`, `sider-aof-migrate`, `sider-backup`,
-and `sider-replica`. The [Docker image](docs/docker.md) copies these same
-Linux executables without rebuilding the server.
-See the [runtime requirements](docs/runtime-requirements.md) to run the packages
-on Windows 11 x64 or Ubuntu 24.04 GNU without installing Rust or Cargo.
+The historical [v1.0.1 packages](docs/packages.md) include `sider`,
+`sider-aof-migrate`, `sider-backup`, and `sider-replica`. Its
+[Docker image archive](docs/docker.md) copies the Linux executables.
+The [Docker-only v1.1.0 launch plan](docs/docker-first-launch.md) covers the
+current development capabilities and its two separate durable profiles. That
+candidate has not been published; v1.0.1 remains the current release.
+The [v1.0.1 runtime requirements](docs/runtime-requirements.md) document
+historical native packages. Version 1.1.0 will distribute only a Linux amd64
+container image.
 
 ## Running the server
 

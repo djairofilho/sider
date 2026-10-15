@@ -5,6 +5,10 @@ This is the technical consolidation for R11-01 and R11-02. Packages `1.0.0` and
 source SHAs. Internal milestones and the R10 baseline retained `0.1.0`.
 Historical comparisons below are not evidence for a different build. See the
 [current deployment profile](deployment-profile.md) for operating limits.
+The planned [v1.1.0 Docker candidate](docker-first-launch.md) adds `MEM.*`,
+RESP3, protected security, and explicit composed transactions in separate
+durable profiles. Their release matrix and exact-image receipts remain pending;
+this 1.0 matrix does not certify them.
 
 The Redis contract uses server and `redis-cli` **8.10.1**, with a Linux amd64 image
 pinned by tag and digest in [releases/plan.json](../releases/plan.json).

@@ -63,3 +63,14 @@ reads fail. This does not prove an in-place same-length rewrite cannot race the
 read, although the manifest digest checks the resulting material bytes.
 
 Issue #93 still requires broader executable deployment evidence for generation activation, close barriers, reconnects, and operation leases; full real TLS replica/backup/admin allow and deny matrices across certificate chains; further POSIX replacement and concurrent permission-change tests; and the remaining Windows permission cases including alternate owner, file reparse points, and replacement races. The Windows protected startup gate stays closed. Ignored package, external, soak, and release tests have not been promoted into evidence for this feature.
+
+For the planned Docker-only v1.1.0 target, a development image on Ubuntu 22.04
+under WSL2 started with restricted client material, a read-only root filesystem,
+and a read-only security bind mount. Loopback TLS, pre-auth denial, named AUTH,
+RESP2/RESP3, and basic memory and composed operations succeeded. Both durable
+profiles survived restarts on separate volumes; each refused the other's
+volume. This was a dirty-checkout rehearsal with an all-zero source-SHA image
+label, not a candidate or gate receipt. Issue #208 records the results. The
+Linux Docker gate still needs the remaining real-process
+rotation, reconnect, internal TLS, backup, replication, and administrative
+cases. Windows protected deployment is outside the v1.1.0 distribution target.

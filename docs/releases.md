@@ -125,6 +125,99 @@ The patch inherits the cumulative gate matrix because it changes the executable 
 its human-readable protocol errors. Final promotion uses the candidate's exact SHA
 and downloaded files without rebuilding.
 
+## Planned 1.1.0 Docker-only candidate
+
+R13 in [the release manifest](../releases/plan.json) defines a Linux amd64 GHCR
+distribution. It does not change the asset and platform rules of v1.0.0 or
+v1.0.1. The only public runtime artifact for v1.1.0 is the image at
+`ghcr.io/djairofilho/sider`, identified by its OCI digest. The GitHub release
+still carries notes, runtime requirements, checksums, a manifest, and candidate
+evidence. No native Windows/Linux package or exported image archive belongs in
+the v1.1.0 asset set.
+
+Complete the protected Docker deployment, record-2 memory and record-1
+composed profiles, #92, #93, and every R13 gate before approval. The
+`docker_oci` runner in `releases/gates.json` remains pending and blocks
+publication; the other new runners still require exact-candidate execution. The
+3600-second soak and isolated benchmark remain required. Verify the actual
+image after pulling it by digest on a clean Linux Docker host. Record the
+source SHA, OCI digest, image platform, gate receipts, and anonymous pull.
+The `docker_oci` gate replaces the v1.0.x `docker` archive gate for this
+distribution; the other applicable cumulative gates remain required.
+Every v1.1.0 gate receipt must name the same `oci_digest` as the immutable
+release manifest. Set `SIDER_RELEASE_OCI_DIGEST=sha256:<64 lowercase hex>`
+for every v1.1.0 gate runner. The receipt publisher rejects an absent or
+invalid digest and rejects Windows targets for this Docker-only release.
+The offline verifier checks this identity; the external
+Docker gate must prove that the named image was actually pulled and exercised.
+Build the four Linux binaries and package from that exact clean SHA, following
+the existing package guide. Stage only those binaries, license notices, and
+the [Docker image README](../releases/docker-README.md) in a fresh context;
+the historical native-package README is not image guidance. The Dockerfile
+verifies all four binary hashes and versions. For example, on Linux amd64:
+
+```bash
+test -z "$(git status --porcelain)"
+SOURCE_SHA=$(git rev-parse HEAD)
+PACKAGE_DIR=/absolute/path/to/extracted-linux-package
+BUILD_CONTEXT=$(mktemp -d)
+cp -a "$PACKAGE_DIR/sider" "$PACKAGE_DIR/sider-aof-migrate" \
+  "$PACKAGE_DIR/sider-backup" "$PACKAGE_DIR/sider-replica" \
+  "$PACKAGE_DIR/LICENSE" "$PACKAGE_DIR/licenses" "$BUILD_CONTEXT/"
+cp releases/docker-README.md "$BUILD_CONTEXT/README.md"
+digest() { sha256sum "$PACKAGE_DIR/$1" | cut -d ' ' -f 1; }
+docker build --platform linux/amd64 --network none --file deploy/Dockerfile \
+  --tag ghcr.io/djairofilho/sider:1.1.0-rc.1 \
+  --build-arg SIDER_VERSION=1.1.0 \
+  --build-arg "SIDER_SOURCE_SHA=$SOURCE_SHA" \
+  --build-arg "SIDER_SHA256=$(digest sider)" \
+  --build-arg "SIDER_MIGRATOR_SHA256=$(digest sider-aof-migrate)" \
+  --build-arg "SIDER_BACKUP_SHA256=$(digest sider-backup)" \
+  --build-arg "SIDER_REPLICA_SHA256=$(digest sider-replica)" \
+  "$BUILD_CONTEXT"
+```
+
+Review the expanded [license inventory](../releases/licenses/inventory.json)
+before creating the candidate bundle.
+
+Publication remains manual. Build and push `1.1.0-rc.1` from the exact
+preparation merge SHA, then make the GHCR package public and verify an
+unauthenticated pull. After candidate approval, add the final `1.1.0` tag
+to the **same digest** without rebuilding and verify both tags resolve to it.
+A changed image or release bundle requires another candidate. Do not add a
+mutable `latest` tag to the install contract. The [Docker launch plan](docker-first-launch.md)
+defines the two profiles and their separate volumes.
+
+For the manual registry step, sign in with a [classic token carrying
+`write:packages`](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry), push
+the candidate, and record the `Digest:` reported by registry inspection:
+
+```sh
+docker login ghcr.io --username djairofilho
+docker push ghcr.io/djairofilho/sider:1.1.0-rc.1
+docker buildx imagetools inspect ghcr.io/djairofilho/sider:1.1.0-rc.1
+```
+
+Set the package to **Public** in [GitHub package settings](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
+Verify a pull by digest with an empty Docker client configuration. After every
+gate and candidate approval, copy the single-platform manifest to the final
+tag without rebuilding, then compare the two registry digests:
+
+```sh
+APPROVED_DIGEST='sha256:<approved-64-hex-digest>'
+docker --config "$(mktemp -d)" pull "ghcr.io/djairofilho/sider@$APPROVED_DIGEST"
+docker buildx imagetools create --prefer-index=false \
+  --tag ghcr.io/djairofilho/sider:1.1.0 \
+  "ghcr.io/djairofilho/sider@$APPROVED_DIGEST"
+docker buildx imagetools inspect ghcr.io/djairofilho/sider:1.1.0-rc.1
+docker buildx imagetools inspect ghcr.io/djairofilho/sider:1.1.0
+```
+
+The final tag must report the exact approved digest. A different digest fails
+the promotion check. Docker's [registry inspect](https://docs.docker.com/reference/cli/docker/buildx/imagetools/inspect/)
+and [single-source create](https://docs.docker.com/reference/cli/docker/buildx/imagetools/create/)
+commands expose the manifest identity used here.
+
 ## Product gates
 
 [releases/gates.json](../releases/gates.json) defines commands as argument arrays
@@ -158,7 +251,7 @@ must run, be exported, and be restored; no dummy file counts as a tested image.
 The runner copies the four executables from the validated Linux package and preserves
 hashes and Image ID before and after `docker load`.
 
-## Immutable file set
+## Historical 1.0 immutable file set
 
 Follow the [package guide](packages.md): Linux GNU x86_64 in `.tar.gz`, built on
 Ubuntu 24.04, and Windows MSVC x86_64 in `.zip`, with the binary, README, MIT license,
@@ -183,7 +276,7 @@ milestone publications and mismatched identities. It does not execute binaries o
 confirm byte provenance, remote approval, or publication authorization; its result
 retains `publication_authorized: false`.
 
-## Publishing the candidate and promoting the final release
+## Historical 1.0 candidate publication and final promotion
 
 1. Confirm the repository is public, the preparation PR is merged, the label and
    SHA are correct, tasks are complete, and the full matrix passed on the frozen build.
