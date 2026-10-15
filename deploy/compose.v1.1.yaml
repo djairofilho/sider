@@ -1,0 +1,57 @@
+# Candidate configuration for the v1.1.0 Linux amd64 image.
+# SIDER_IMAGE must be a verified ghcr.io/djairofilho/sider@sha256:<digest>.
+services:
+  memory:
+    profiles: [memory]
+    image: ${SIDER_IMAGE:?Set the approved GHCR image digest}
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 10s
+    ports:
+      - "127.0.0.1:${SIDER_MEMORY_PORT:-6379}:6379"
+    environment:
+      SIDER_ADDR: 0.0.0.0:6379
+      SIDER_SECURITY_PROFILE: protected
+      SIDER_SECURITY_DIR: /run/sider/security
+      SIDER_AOF_DIR: /var/lib/sider
+      SIDER_AOF_RECORD_VERSION: "2"
+      SIDER_SHARDS: "${SIDER_MEMORY_SHARDS:-1}"
+      SIDER_AOF_SYNC: always
+    volumes:
+      - type: bind
+        source: ${SIDER_SECURITY_DIR_HOST:?Set an absolute restricted security directory}
+        target: /run/sider/security
+        read_only: true
+      - sider-memory-data:/var/lib/sider
+
+  composed:
+    profiles: [composed]
+    image: ${SIDER_IMAGE:?Set the approved GHCR image digest}
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 10s
+    ports:
+      - "127.0.0.1:${SIDER_COMPOSED_PORT:-6380}:6379"
+    environment:
+      SIDER_ADDR: 0.0.0.0:6379
+      SIDER_SECURITY_PROFILE: protected
+      SIDER_SECURITY_DIR: /run/sider/security
+      SIDER_AOF_DIR: /var/lib/sider
+      SIDER_AOF_RECORD_VERSION: "1"
+      SIDER_AOF_COMPOSED: "1"
+      SIDER_SHARDS: "${SIDER_COMPOSED_SHARDS:-4}"
+      SIDER_AOF_SYNC: always
+    volumes:
+      - type: bind
+        source: ${SIDER_SECURITY_DIR_HOST:?Set an absolute restricted security directory}
+        target: /run/sider/security
+        read_only: true
+      - sider-composed-data:/var/lib/sider
+
+volumes:
+  sider-memory-data:
+  sider-composed-data:
