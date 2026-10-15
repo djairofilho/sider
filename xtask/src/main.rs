@@ -159,10 +159,33 @@ fn execute(task: Task, root: &Path) -> Result<(), String> {
             sha,
             directory,
         } => {
-            plan::release_for_version(&plan, &version)?;
+            let release = plan::release_for_version(&plan, &version)?;
+            require_release_runners(root, &plan, release)?;
             print_json(artifacts::verify(&plan, &version, &sha, &directory)?)?;
         }
         Task::Help | Task::Check { .. } => unreachable!("handled above"),
+    }
+    Ok(())
+}
+
+fn require_release_runners(root: &Path, plan: &Value, release: &Value) -> Result<(), String> {
+    let gates: Value = serde_json::from_slice(
+        &fs::read(root.join("releases/gates.json")).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("releases/gates.json: {e}"))?;
+    validate_gates(plan, &gates)?;
+    if release["distribution"]["kind"] == "ghcr" {
+        for name in release["required_gates"]
+            .as_array()
+            .ok_or("Missing required gates")?
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|name| !matches!(*name, "native" | "tcp_smoke"))
+        {
+            if gates["gates"][name]["command"].is_null() {
+                return Err(format!("Pending release gate runner: {name}"));
+            }
+        }
     }
     Ok(())
 }
@@ -405,5 +428,20 @@ mod tests {
         let mut bad = gates;
         bad["gates"].as_object_mut().unwrap().remove("crash");
         assert!(validate_gates(&plan, &bad).is_err());
+    }
+
+    #[test]
+    fn docker_only_release_verification_blocks_pending_gate_runners() {
+        let plan = plan::load(&root().join("releases/plan.json")).unwrap();
+        for version in ["1.0.0", "1.0.1"] {
+            let release = plan::release_for_version(&plan, version).unwrap();
+            require_release_runners(&root(), &plan, release).unwrap();
+        }
+        let release = plan::release_for_version(&plan, "1.1.0-rc.1").unwrap();
+        assert!(
+            require_release_runners(&root(), &plan, release)
+                .unwrap_err()
+                .contains("Pending release gate runner: docker_oci")
+        );
     }
 }

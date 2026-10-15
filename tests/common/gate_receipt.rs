@@ -41,6 +41,7 @@ struct Expected {
     sha: String,
     target: String,
     reference_image: String,
+    oci_digest: Option<String>,
 }
 
 /// A context publishes only after rechecking the same clean checkout.
@@ -93,6 +94,12 @@ impl GateContext {
                 | "replication"
                 | "soak"
                 | "benchmarks"
+                | "memory_lifecycle"
+                | "memory_search"
+                | "resp3"
+                | "security"
+                | "composed_transactions"
+                | "docker_oci"
         ) {
             return Err("unknown gate or runner not implemented".into());
         }
@@ -114,6 +121,13 @@ impl GateContext {
             sha: text("SIDER_RELEASE_SHA")?,
             target: text("SIDER_RELEASE_TARGET")?,
             reference_image: text("SIDER_REFERENCE_IMAGE")?,
+            oci_digest: lookup("SIDER_RELEASE_OCI_DIGEST")
+                .map(|value| {
+                    value
+                        .into_string()
+                        .map_err(|_| "OCI digest must be UTF-8".to_owned())
+                })
+                .transpose()?,
         };
         let release_dir =
             PathBuf::from(lookup("SIDER_RELEASE_DIR").ok_or("missing SIDER_RELEASE_DIR")?);
@@ -161,7 +175,7 @@ impl GateContext {
         self.ensure_destination_absent()?;
         let observed = (self.observer)(&self.root)?;
         self.validate(&observed)?;
-        let receipt = json!({
+        let mut receipt = json!({
             "schema_version": 1,
             "gate": self.gate,
             "sha": self.expected.sha,
@@ -174,6 +188,9 @@ impl GateContext {
             "duration_seconds": duration.as_secs_f64(),
             "details": details,
         });
+        if let Some(digest) = &self.expected.oci_digest {
+            receipt["oci_digest"] = json!(digest);
+        }
         let mut contents = serde_json::to_vec_pretty(&receipt).map_err(|e| e.to_string())?;
         contents.push(b'\n');
         if contents.len() > MAX_RECEIPT_BYTES {
@@ -282,6 +299,24 @@ impl GateContext {
             return Err(
                 "publishable version or gate not uniquely registered in the manifest".into(),
             );
+        }
+        let docker_only = matches[0]["distribution"]["kind"] == "ghcr";
+        if docker_only
+            && (!linux
+                || matches[0]["distribution"]["image"] != "ghcr.io/djairofilho/sider"
+                || matches[0]["distribution"]["platform"] != "linux/amd64"
+                || matches[0]["distribution"]["native_packages"] != false)
+        {
+            return Err("GHCR release requires the Linux amd64 Docker distribution".into());
+        }
+        match (docker_only, expected.oci_digest.as_deref()) {
+            (true, Some(digest))
+                if digest
+                    .strip_prefix("sha256:")
+                    .is_some_and(|hash| hex_id(hash, 64)) => {}
+            (true, _) => return Err("GHCR release requires a valid OCI digest".into()),
+            (false, None) => {}
+            (false, Some(_)) => return Err("historical release must not have an OCI digest".into()),
         }
         let reference = &plan["reference"];
         let redis_version = reference["redis_version"]

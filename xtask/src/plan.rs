@@ -6,7 +6,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-const GATES: [&str; 15] = [
+const GATES: [&str; 21] = [
     "native",
     "compatibility",
     "tcp_smoke",
@@ -22,6 +22,12 @@ const GATES: [&str; 15] = [
     "docker",
     "soak",
     "benchmarks",
+    "memory_lifecycle",
+    "memory_search",
+    "resp3",
+    "security",
+    "composed_transactions",
+    "docker_oci",
 ];
 type Version = (u64, u64, u64);
 const THRESHOLDS: &[(Version, &[&str])] = &[
@@ -346,6 +352,19 @@ pub fn validate(plan: &Value) -> Result<(), String> {
             return Err("Releases must be in ascending semantic version order".into());
         }
         previous_version = Some(numbers);
+        if numbers >= (1, 1, 0) {
+            let distribution = &release["distribution"];
+            if distribution
+                != &json!({
+                    "kind": "ghcr", "image": "ghcr.io/djairofilho/sider",
+                    "platform": "linux/amd64", "native_packages": false
+                })
+            {
+                return Err(format!("{id}: invalid Docker-only distribution"));
+            }
+        } else if release.get("distribution").is_some() {
+            return Err(format!("{id}: unexpected distribution override"));
+        }
         strings(&release["scope"], &format!("{id}.scope"), false)?;
         let required: BTreeSet<_> = strings(
             &release["required_gates"],
@@ -357,6 +376,11 @@ pub fn validate(plan: &Value) -> Result<(), String> {
         if required.iter().any(|gate| !GATES.contains(gate)) {
             return Err(format!("{id}: unknown evidence gate"));
         }
+        if numbers >= (1, 1, 0) && required.contains("docker") {
+            return Err(format!(
+                "{id}: legacy Docker archive gate is not a GHCR gate"
+            ));
+        }
         let publication = release["publication"] == true;
         let mut expected: BTreeSet<_> = GATES[..3].iter().copied().collect();
         for (threshold, gates) in THRESHOLDS {
@@ -366,6 +390,11 @@ pub fn validate(plan: &Value) -> Result<(), String> {
         }
         if publication {
             expected.extend(previous_gates.iter().copied());
+            if numbers >= (1, 1, 0) {
+                // GHCR digest verification replaces the legacy exported-archive gate.
+                expected.remove("docker");
+                expected.insert("docker_oci");
+            }
             if !expected.is_subset(&required) {
                 return Err(format!(
                     "{id}: publication requires the cumulative union of gates for all capabilities"
@@ -684,13 +713,13 @@ mod tests {
         let plan = real();
         validate(&plan).unwrap();
         let releases = plan["releases"].as_array().unwrap();
-        assert_eq!(releases.len(), 12);
+        assert_eq!(releases.len(), 13);
         assert_eq!(
             releases
                 .iter()
                 .map(|r| r["tasks"].as_array().unwrap().len())
                 .sum::<usize>(),
-            52
+            57
         );
         assert_eq!(plan["bootstrap"].as_array().unwrap().len(), 1);
         for release in releases {
@@ -710,7 +739,7 @@ mod tests {
         assert_eq!(rendered, render(&plan).unwrap());
         assert_eq!(plan, before);
         assert_eq!(rendered.matches("[x]").count(), 1);
-        assert_eq!(rendered.matches("### ").count(), 12);
+        assert_eq!(rendered.matches("### ").count(), 13);
         for text in [
             "cargo xtask validate",
             "cargo xtask roadmap --write",
@@ -813,14 +842,14 @@ mod tests {
     fn explicit_patch_entry_uses_new_ids_and_inherits_required_gates() {
         let mut plan = real();
         let mut patch = plan["releases"][11].clone();
-        patch["id"] = json!("R13");
+        patch["id"] = json!("R14");
         patch["version"] = json!("1.0.2");
-        patch["gate"]["id"] = json!("R13-GATE");
+        patch["gate"]["id"] = json!("R14-GATE");
         let mut task = patch["tasks"][0].clone();
-        task["id"] = json!("R13-01");
+        task["id"] = json!("R14-01");
         task["depends_on"] = json!(["R12-GATE"]);
         patch["tasks"] = json!([task]);
-        plan["releases"].as_array_mut().unwrap().push(patch);
+        plan["releases"].as_array_mut().unwrap().insert(12, patch);
         validate(&plan).unwrap();
         assert!(std::ptr::eq(
             release_for_version(&plan, "1.0.2-rc.2").unwrap(),
@@ -1006,6 +1035,32 @@ mod tests {
                     .push(json!("native"))
             },
             "duplicate",
+        );
+    }
+
+    #[test]
+    fn ghcr_release_replaces_the_legacy_archive_gate() {
+        let plan = real();
+        let required = plan["releases"][12]["required_gates"].as_array().unwrap();
+        assert!(required.contains(&json!("docker_oci")));
+        assert!(!required.contains(&json!("docker")));
+        invalid(
+            |p| {
+                p["releases"][12]["required_gates"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|value| value != "docker_oci")
+            },
+            "gate",
+        );
+        invalid(
+            |p| {
+                p["releases"][12]["required_gates"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!("docker"))
+            },
+            "legacy Docker archive gate",
         );
     }
 
