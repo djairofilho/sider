@@ -164,6 +164,10 @@ impl GateContext {
         &self.expected.target
     }
 
+    pub fn oci_digest(&self) -> Option<&str> {
+        self.expected.oci_digest.as_deref()
+    }
+
     /// The caller verifies the cases and measures the actual duration before calling this.
     ///
     /// Does not replace receipts. The hard link publishes only complete JSON; the

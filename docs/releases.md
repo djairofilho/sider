@@ -137,11 +137,12 @@ the v1.1.0 asset set.
 
 Complete the protected Docker deployment, record-2 memory and record-1
 composed profiles, #92, #93, and every R13 gate before approval. The
-`docker_oci` runner in `releases/gates.json` remains pending and blocks
-publication; the other new runners still require exact-candidate execution. The
+`docker_oci` runner in `releases/gates.json` requires the public digest and a
+clean candidate checkout; every new runner still requires exact-candidate execution. The
 3600-second soak and isolated benchmark remain required. Verify the actual
 image after pulling it by digest on a clean Linux Docker host. Record the
-source SHA, OCI digest, image platform, gate receipts, and anonymous pull.
+source SHA, OCI digest, image platform, gate receipts, anonymous pull, and the
+`docker-oci-commands.json` command log written beside the Docker gate receipt.
 The `docker_oci` gate replaces the v1.0.x `docker` archive gate for this
 distribution; the other applicable cumulative gates remain required.
 Every v1.1.0 gate receipt must name the same `oci_digest` as the immutable

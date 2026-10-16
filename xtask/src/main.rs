@@ -431,17 +431,13 @@ mod tests {
     }
 
     #[test]
-    fn docker_only_release_verification_blocks_pending_gate_runners() {
+    fn docker_only_release_has_all_gate_runners() {
         let plan = plan::load(&root().join("releases/plan.json")).unwrap();
         for version in ["1.0.0", "1.0.1"] {
             let release = plan::release_for_version(&plan, version).unwrap();
             require_release_runners(&root(), &plan, release).unwrap();
         }
         let release = plan::release_for_version(&plan, "1.1.0-rc.1").unwrap();
-        assert!(
-            require_release_runners(&root(), &plan, release)
-                .unwrap_err()
-                .contains("Pending release gate runner: docker_oci")
-        );
+        require_release_runners(&root(), &plan, release).unwrap();
     }
 }
