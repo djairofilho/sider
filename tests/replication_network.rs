@@ -1301,7 +1301,16 @@ async fn composed_replica_reconnects_after_partial_ack_without_reapplying_batch(
     };
     let mut socket = offer_composed(&listener, None, base).await;
     full_composed(&mut socket, base, b"old-left", b"old-right", true).await;
+    let mut prefix = [0_u8; 4];
+    tokio::time::timeout(DEADLINE, socket.read_exact(&mut prefix))
+        .await
+        .unwrap()
+        .unwrap();
+    drop(socket);
+    let mut socket = offer_composed(&listener, Some(base), base).await;
+    send_composed(&mut socket, Message::Continue(base)).await;
     assert_eq!(read_composed(&mut socket).await, Message::Ack(base));
+    assert_composed_pair(&replica, b"old-left", b"old-right");
 
     let first = Cursor {
         sequence: 8,
@@ -1318,7 +1327,6 @@ async fn composed_replica_reconnects_after_partial_ack_without_reapplying_batch(
     .await;
     // Read only the start of the ACK frame, then lose the connection. The
     // sender cannot know whether the follower durably committed the batch.
-    let mut prefix = [0_u8; 4];
     tokio::time::timeout(DEADLINE, socket.read_exact(&mut prefix))
         .await
         .unwrap()
