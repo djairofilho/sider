@@ -215,6 +215,26 @@ docker buildx imagetools inspect ghcr.io/djairofilho/sider:1.1.0-rc.1
 docker buildx imagetools inspect ghcr.io/djairofilho/sider:1.1.0
 ```
 
+The v1.1.0 soak and benchmark runners use the exact executable extracted from
+the digest-pulled image for native Linux load generation. They verify its bytes
+against the image again before publishing a receipt. Stage that executable in
+an isolated absolute directory after the anonymous pull; this directory is a
+gate input, not a native release asset:
+
+```sh
+umask 077
+SIDER_PACKAGE_DIR=$(mktemp -d)
+docker run --rm --network none --read-only --entrypoint /bin/cat \
+  "ghcr.io/djairofilho/sider@$APPROVED_DIGEST" /usr/local/bin/sider \
+  > "$SIDER_PACKAGE_DIR/sider"
+chmod 0700 "$SIDER_PACKAGE_DIR/sider"
+export SIDER_PACKAGE_DIR
+```
+
+For 1.0.x, these runners retain their original tar.gz manifest and extracted
+package verification. The v1.1.0 Docker gate separately exercises the running
+image with protected TLS and both durable profiles.
+
 The final tag must report the exact approved digest. A different digest fails
 the promotion check. Docker's [registry inspect](https://docs.docker.com/reference/cli/docker/buildx/imagetools/inspect/)
 and [single-source create](https://docs.docker.com/reference/cli/docker/buildx/imagetools/create/)

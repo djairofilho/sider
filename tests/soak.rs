@@ -418,7 +418,13 @@ fn observe(instance: &Instance) -> Value {
     json!({ "pid": instance.process.id(), "rss_bytes": memory, "info": fields })
 }
 
-fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -> Value {
+fn exercise(
+    binary: &Path,
+    output: &Path,
+    duration: Duration,
+    rehearsal: bool,
+    task: &str,
+) -> Value {
     if !cfg!(target_os = "linux") {
         panic!("soak requires a Linux process with /proc");
     }
@@ -594,7 +600,7 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
     primary.process.finish();
     samples.sync_all().unwrap();
     let report = json!({
-        "schema_version": 1, "task": "R11-03", "rehearsal": rehearsal,
+        "schema_version": 1, "task": task, "rehearsal": rehearsal,
         "duration_seconds": elapsed.as_secs_f64(), "required_seconds": duration.as_secs(),
         "seed": SEED, "slots": SLOTS, "shards": 4, "quota_bytes": QUOTA,
         "rss_envelope_bytes": RSS_ENVELOPE, "target_iterations_per_second": 20,
@@ -619,22 +625,32 @@ fn exercise(binary: &Path, output: &Path, duration: Duration, rehearsal: bool) -
 fn internal_soak_rehearsal() {
     let binary = PathBuf::from(std::env::var_os("SIDER_SOAK_BINARY").expect("explicit binary"));
     let output = PathBuf::from(std::env::var_os("SIDER_SOAK_OUTPUT_DIR").expect("new directory"));
-    let report = exercise(&binary, &output, Duration::from_secs(25), true);
+    let report = exercise(&binary, &output, Duration::from_secs(25), true, "R11-03");
     eprintln!("{report}");
 }
 
 #[test]
-#[ignore = "gate requires a candidate build, an extracted package, and actual load for at least 3600 seconds"]
+#[ignore = "gate requires a candidate binary verified against its package or OCI image and 3600 seconds of actual load"]
 fn release_soak_gate() {
     let context = gate_receipt::GateContext::from_env("soak").expect("exact candidate context");
-    let input =
-        release_input::ReleaseInput::from_env(&context).expect("verified extracted package");
+    let input = release_input::ReleaseInput::from_env(&context).expect("verified candidate binary");
     let output = context.release_dir().join("soak");
     let began = Instant::now();
-    let mut report = exercise(input.binary(), &output, Duration::from_secs(3600), false);
+    let task = if context.version() == "1.1.0" {
+        "R13-05"
+    } else {
+        "R11-03"
+    };
+    let mut report = exercise(
+        input.binary(),
+        &output,
+        Duration::from_secs(3600),
+        false,
+        task,
+    );
     input
         .verify_again(&context)
-        .expect("package and executable remained unchanged");
+        .expect("candidate source and executable remained unchanged");
     report["input"] = input.details();
     report["samples_sha256"] =
         json!(release_input::sha256(&output.join("soak-samples.jsonl")).unwrap());
