@@ -357,6 +357,7 @@ fn diagnose(binary: &Path, overrides: &[(&str, OsString)]) -> Result<String, Str
             command.env_remove(name);
         }
     }
+    command.env("SIDER_SECURITY_PROFILE", "legacy-loopback");
     for (name, value) in overrides {
         command.env(name, value);
     }
