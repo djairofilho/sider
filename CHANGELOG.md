@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+## [1.1.0] - Candidate preparation
+
+The only supported public runtime distribution for 1.1.0 is a Linux amd64 image
+at `ghcr.io/djairofilho/sider`. Publication remains pending until the exact
+candidate image and all required gates are approved.
+
+- Add binary-safe `MEM.*` collections, durable record-2 storage, exact search,
+  backup, migration, and replication in the memory profile.
+- Add the implemented RESP3 command and response subset with `HELLO 2` and
+  `HELLO 3` negotiation.
+- Add protected client TLS, named authentication, ACLs, credential rotation,
+  and protected internal backup and replication roles.
+- Add local mixed-owner `MULTI`/`EXEC` in the separate record-1 composed
+  profile, with one durable decision and complete-record recovery.
+- Provide a protected Docker deployment with separate memory and composed
+  volumes, restricted security provisioning, and fail-closed profile checks.
+- Define OCI digest verification and cumulative Linux candidate gates. The
+  final image tag must point to the approved candidate digest without a rebuild.
+
+The [1.1.0 release notes](releases/notes/v1.1.0.md) describe the supported
+profiles and limitations. No native Windows or Linux package assets are planned
+for this version.
+
 ## [1.0.1] - Candidate preparation
 
 - Translate runtime errors, diagnostics, tests, tooling output, release metadata,

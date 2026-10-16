@@ -131,7 +131,8 @@ R13 in [the release manifest](../releases/plan.json) defines a Linux amd64 GHCR
 distribution. It does not change the asset and platform rules of v1.0.0 or
 v1.0.1. The only public runtime artifact for v1.1.0 is the image at
 `ghcr.io/djairofilho/sider`, identified by its OCI digest. The GitHub release
-still carries notes, runtime requirements, checksums, a manifest, and candidate
+still carries [notes](../releases/notes/v1.1.0.md), runtime requirements,
+checksums, a manifest, and candidate
 evidence. No native Windows/Linux package or exported image archive belongs in
 the v1.1.0 asset set.
 
