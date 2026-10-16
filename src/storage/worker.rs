@@ -1539,7 +1539,7 @@ mod tests {
         // Expiry is wall-clock based. Leave room for a loaded test host so the
         // queue deadline cannot win the race this test is meant to exercise.
         let (_stop, shutdown) = watch::channel(false);
-        let (handle, mut worker) = channel(1, Duration::from_secs(30), shutdown).unwrap();
+        let (handle, mut worker) = channel(1, Duration::from_secs(120), shutdown).unwrap();
         let first = enqueue(&handle, Command::Ping(None));
         let authorized = handle.authorized(Some(lease));
         let (started, observed_start) = oneshot::channel();
