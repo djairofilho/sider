@@ -202,7 +202,7 @@ with manual execution and evidence on the required platforms.
 | `xtask/` and `.cargo/config.toml` | Local Rust tools, isolated from database dependencies |
 | `AGENTS.md` | Local instructions for coding agents |
 | [PLAN.md](PLAN.md) | Historical record of the initial 0.1 design and stages |
-| [ROADMAP.md](ROADMAP.md) | Release sequence and dependencies through 1.0.1 |
+| [ROADMAP.md](ROADMAP.md) | Release sequence and dependencies through 1.1.0 |
 | [releases/plan.json](releases/plan.json) | Versioned source for milestones, tasks, and criteria |
 | [docs/releases.md](docs/releases.md) | Backlog execution, candidates, publication, and recovery |
 | [docs/architecture.md](docs/architecture.md) | Current boundaries and planned architecture |
@@ -221,10 +221,10 @@ with manual execution and evidence on the required platforms.
 | [docs/resource-envelope.md](docs/resource-envelope.md) | Resource workload and measurement contract |
 | [docs/redis-benchmarks.md](docs/redis-benchmarks.md) | Comparative benchmark method and limits |
 | [docs/security-boundary.md](docs/security-boundary.md) | Network exposure and authentication contract |
-| [docs/agent-memory-v1.md](docs/agent-memory-v1.md) | Proposed AI memory contract and persistence reservations |
+| [docs/agent-memory-v1.md](docs/agent-memory-v1.md) | AI memory contract and the separate durable profile |
 | [examples/agent-memory/README.md](examples/agent-memory/README.md) | Deterministic external embedding fixture and memory lifecycle example |
 | [docs/lua-scripting.md](docs/lua-scripting.md) | Scripting contract and isolated containment spike |
-| [docs/cross-shard-transactions.md](docs/cross-shard-transactions.md) | Proposed mixed-owner transaction contract |
+| [docs/cross-shard-transactions.md](docs/cross-shard-transactions.md) | Mixed-owner transaction contract and remaining validation |
 | [docs/durable-format-registry.md](docs/durable-format-registry.md) | Proposed AOF, replication, and backup format composition |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Workflow and review criteria |
 
@@ -232,14 +232,18 @@ with manual execution and evidence on the required platforms.
 
 Strings, TTL, collections, [transactions](docs/transactions.md),
 Pub/Sub, AOF, shards, replication, backup, and administration are integrated.
-Stabilization brings together the internal R10 baseline, migration between
-executables, the compatibility audit, [soak testing](docs/soak.md), and
-[benchmarks](docs/benchmarks.md). Development results remain tied to their SHAs;
-the presence of runners does not mean gates have passed.
+The 1.1.0 candidate must validate the newer memory, RESP3, security, and
+mixed-owner transaction capabilities alongside the existing base. That includes
+the compatibility audit, [soak testing](docs/soak.md), and
+[benchmarks](docs/benchmarks.md) against one frozen SHA. Development results
+remain tied to their SHAs; the presence of runners does not mean gates passed.
 
-The preparation PR sets the package version to `1.0.1`.
-The exact merge SHA will be built, packaged, and validated on both platforms
-to publish the candidate. The final release will promote the same approved files.
+The [v1.1.0 preparation notes](releases/notes/v1.1.0.md) describe the next
+candidate. Its exact merge SHA must produce one Linux amd64 image, published
+manually to GHCR and validated by digest before a final tag can point to that
+same image. Open security and composed-transaction work and every required
+gate still block publication. No new native Windows or Linux release packages
+are planned.
 The [0.1 plan](PLAN.md) preserves the historical design; the
 [ROADMAP](ROADMAP.md) and issues record criteria and current progress.
 
