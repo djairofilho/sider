@@ -74,7 +74,9 @@ label, not a candidate or gate receipt. Issue #208 records the results.
 Subsequent local Docker rehearsals also passed manifest-last client credential
 rotation, internal mTLS backup and restore for both durable profiles, protected
 replica snapshot and reconnect, and composed backup-role revocation while monitor
-access remained available. These used the same dirty-checkout development image
+access remained available. They denied backup export to a replica-only identity
+without creating an archive, and scanned container logs for canary passwords,
+keys, and values. These used the same dirty-checkout development image
 and are not candidate receipts. The Linux Docker gate still needs public digest
 pull, exact source identity, broader network and crash boundaries, and complete
 administrative and denial matrices. Windows protected deployment is outside the

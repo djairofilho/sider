@@ -1115,6 +1115,23 @@ mod linux {
             Ok(())
         }
 
+        fn assert_logs_redact(&self, name: &str, canaries: &[&[u8]]) -> Result<(), String> {
+            let logs = docker(&["logs", name])?;
+            for canary in canaries {
+                if !canary.is_empty()
+                    && logs
+                        .as_bytes()
+                        .windows(canary.len())
+                        .any(|window| window == *canary)
+                {
+                    return Err(format!(
+                        "container {name} logged protected application material"
+                    ));
+                }
+            }
+            Ok(())
+        }
+
         fn kill(&self, name: &str) -> Result<(), String> {
             docker(&["kill", "--signal", "KILL", name])?;
             docker(&["rm", name])?;
@@ -1445,6 +1462,10 @@ mod linux {
         drop(reader);
         drop(denied);
         drop(client);
+        harness.assert_logs_redact(
+            &memory,
+            &[PASSWORD, READ_ONLY_PASSWORD, b"ordinary", b"forbidden"],
+        )?;
         harness.stop(&memory)?;
         Ok(())
     }
@@ -1531,6 +1552,7 @@ mod linux {
         drop(restored_client);
         harness.stop(&restored)?;
         drop(client);
+        harness.assert_logs_redact(&primary, &[PASSWORD, b"backup-key", b"backup-value"])?;
         harness.stop(&primary)?;
         Ok(())
     }
@@ -1663,6 +1685,7 @@ mod linux {
             return Err("role revocation changed the composed dataset".into());
         }
         drop(client);
+        harness.assert_logs_redact(&primary, &[PASSWORD, b"later-left", b"later-right"])?;
         harness.kill(&primary)?;
         let restarted = harness.run_primary("composed-primary-crash-restart", &data, "composed")?;
         let mut recovered = harness.connect(harness.address(&restarted)?)?;
