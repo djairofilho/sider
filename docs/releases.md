@@ -144,6 +144,8 @@ clean candidate checkout; every new runner still requires exact-candidate execut
 image after pulling it by digest on a clean Linux Docker host. Record the
 source SHA, OCI digest, image platform, gate receipts, anonymous pull, and the
 `docker-oci-commands.json` command log written beside the Docker gate receipt.
+The Docker gate also checks the four executable hashes inside the pulled image
+against its OCI labels.
 The `docker_oci` gate replaces the v1.0.x `docker` archive gate for this
 distribution; the other applicable cumulative gates remain required.
 Every v1.1.0 gate receipt must name the same `oci_digest` as the immutable

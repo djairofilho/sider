@@ -1784,14 +1784,109 @@ mod linux {
         {
             return Err("candidate platform, version, revision, or digest mismatch".into());
         }
+        let binary_hashes = docker(&[
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--read-only",
+            "--entrypoint",
+            "/usr/bin/sha256sum",
+            &image,
+            "/usr/local/bin/sider",
+            "/usr/local/bin/sider-aof-migrate",
+            "/usr/local/bin/sider-backup",
+            "/usr/local/bin/sider-replica",
+        ])?;
+        let verified_binaries =
+            verify_image_binaries(&properties["Config"]["Labels"], &binary_hashes)?;
         let pull = json!({
             "command": format!("docker --config <empty-private-directory> pull --platform linux/amd64 {image}"),
             "stdout": String::from_utf8_lossy(&output.stdout),
             "platform": "linux/amd64",
             "revision": context.sha(),
             "digest": digest,
+            "image_id": properties["Id"],
+            "verified_binaries": verified_binaries,
         });
         Ok((image, pull))
+    }
+
+    fn verify_image_binaries(labels: &Value, output: &str) -> Result<Value, String> {
+        let expected = [
+            ("io.sider.binary.sha256", "/usr/local/bin/sider"),
+            (
+                "io.sider.migrator.sha256",
+                "/usr/local/bin/sider-aof-migrate",
+            ),
+            ("io.sider.backup.sha256", "/usr/local/bin/sider-backup"),
+            ("io.sider.replica.sha256", "/usr/local/bin/sider-replica"),
+        ];
+        let lines: Vec<_> = output.lines().collect();
+        if lines.len() != expected.len() {
+            return Err("candidate image returned an incomplete binary hash list".into());
+        }
+        let mut verified = serde_json::Map::new();
+        for ((label, path), line) in expected.into_iter().zip(lines) {
+            let digest = labels[label]
+                .as_str()
+                .filter(|value| {
+                    value.len() == 64
+                        && value
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                })
+                .ok_or("candidate image binary label is missing or invalid")?;
+            if line != format!("{digest}  {path}") {
+                return Err(format!("candidate image binary hash differs: {path}"));
+            }
+            verified.insert(path.to_owned(), json!(digest));
+        }
+        Ok(Value::Object(verified))
+    }
+
+    #[test]
+    fn image_binary_hash_contract_rejects_mismatch_or_missing_binary() {
+        let labels = json!({
+            "io.sider.binary.sha256":"a".repeat(64),
+            "io.sider.migrator.sha256":"b".repeat(64),
+            "io.sider.backup.sha256":"c".repeat(64),
+            "io.sider.replica.sha256":"d".repeat(64),
+        });
+        let output = format!(
+            "{}  /usr/local/bin/sider\n{}  /usr/local/bin/sider-aof-migrate\n{}  /usr/local/bin/sider-backup\n{}  /usr/local/bin/sider-replica\n",
+            "a".repeat(64),
+            "b".repeat(64),
+            "c".repeat(64),
+            "d".repeat(64),
+        );
+        assert_eq!(
+            verify_image_binaries(&labels, &output)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .len(),
+            4
+        );
+        assert!(
+            verify_image_binaries(
+                &labels,
+                &output.replace("b".repeat(64).as_str(), &"e".repeat(64))
+            )
+            .is_err()
+        );
+        assert!(
+            verify_image_binaries(
+                &labels,
+                output
+                    .lines()
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .as_str()
+            )
+            .is_err()
+        );
     }
 
     #[test]
