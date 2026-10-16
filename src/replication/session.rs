@@ -372,6 +372,77 @@ async fn serve_connection(
     }
     let source = hello(&context, None);
     match request {
+        Message::ComposedExport {
+            sider_version,
+            record_version,
+            aof_header_version,
+            required_capabilities,
+            max_record_bytes,
+            max_snapshot_bytes,
+        } if composed(&context) => {
+            let Message::ComposedHello(profile) = hello_message(&context, None) else {
+                unreachable!()
+            };
+            if sider_version != profile.base.sider_version
+                || record_version != profile.base.record_version
+                || aof_header_version != profile.aof_header_version
+                || required_capabilities != profile.required_capabilities
+            {
+                return reject(
+                    &mut socket,
+                    Reject::IncompatibleVersion,
+                    &context,
+                    &config,
+                    authority,
+                )
+                .await;
+            }
+            if max_record_bytes < profile.base.max_record_bytes
+                || max_snapshot_bytes < profile.base.max_snapshot_bytes
+            {
+                return reject(
+                    &mut socket,
+                    Reject::ResourceLimit,
+                    &context,
+                    &config,
+                    authority,
+                )
+                .await;
+            }
+            let image = timeout(
+                config.sync_timeout,
+                database
+                    .authorized_internal(operation_lease(authority, config.frame_timeout).await?)
+                    .composed_snapshot(&context.aof),
+            )
+            .await
+            .map_err(|_| protocol::Error::Timeout)??;
+            let cursor = Cursor {
+                epoch: context.runtime.status().applied.epoch,
+                sequence: image.sequence.ok_or(Error::Sequence)?,
+            };
+            let snapshot = Snapshot {
+                cursor,
+                mutations: image.mutations,
+                subscription: None,
+            };
+            write_profile(
+                &mut socket,
+                &hello_message(&context, Some(cursor)),
+                &context,
+                config.frame_timeout,
+                authority,
+            )
+            .await?;
+            timeout(
+                config.sync_timeout,
+                send_snapshot(&mut socket, &snapshot, &context, &config, authority),
+            )
+            .await
+            .map_err(|_| protocol::Error::Timeout)??;
+            socket.shutdown().await?;
+            Ok(())
+        }
         Message::Export {
             sider_version,
             max_record_bytes,

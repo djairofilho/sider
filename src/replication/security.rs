@@ -215,7 +215,7 @@ pub(super) async fn read_composed(
 ) -> Result<(bytes::Bytes, Message, Option<InternalLease>), Error> {
     Ok(
         protocol::read_composed_admitted(socket, limits, deadline, |kind| async move {
-            if !matches!(kind, 1 | 11 | 12) {
+            if !matches!(kind, 1 | 10 | 11 | 12) {
                 return Err(protocol::Error::Invalid("permission denied"));
             }
             let Some(authority) = authority else {
