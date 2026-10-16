@@ -1,4 +1,22 @@
-# Local composed backup profile
+# Composed backup profile
+
+The protected Docker profile serves a one-shot composed export on its internal
+mTLS listener. Use `SIDER_AOF_RECORD_VERSION=1` and `SIDER_AOF_COMPOSED=1` on
+the source, provision a backup principal in `internal-policy.json`, and give
+`sider-backup` a restricted security generation containing its client
+certificate, key, trust anchor, and policy manifest. Connect the backup tool to
+the source's internal TLS address with `--profile composed`; `verify` and
+`restore` use the same archive format. The source checks the certificate role
+before accepting the export request. Revoking the backup role with a complete,
+manifest-last security generation prevents subsequent exports while a separate
+monitor role can continue to read status.
+
+The Docker rehearsal in `tests/docker_oci.rs` exercises protected export,
+verification, restore, a mixed-owner transaction, replica reconnect, and
+backup-role revocation with real containers. This is development evidence;
+the release requires a new receipt against the public image pulled by digest.
+
+## Legacy loopback development path
 
 The development checkout supports a schema-3 path for header-7, record-1
 mixed-owner snapshots. The server selects the local AOF profile only with
@@ -61,8 +79,9 @@ listener invokes this path for each admitted backup request.
 `persistence::backup::export_composed_stream` receives that stream and publishes a
 new archive only after validating the Hello profile, cursor, frame order, per-shard
 quota, digest, seal, and EOF. `export_composed` and `export_composed_secure` use an
-explicit transport-3 source address. The local executable serves plaintext
-loopback export; no protected mTLS composed source is active.
+explicit transport-3 source address. The local executable also serves plaintext
+loopback export only when `SIDER_SECURITY_PROFILE=legacy-loopback` is selected;
+the protected internal listener serves the same composed snapshot over mTLS.
 The manifest uses schema `3` with a mandatory `required_capabilities: 1` field.
 The sealed `snapshot.aof` has a role-0 header 7, record-1 images, and zero epoch.
 The archive also contains `backup-manifest.json` and `SHA256SUMS`.
@@ -83,5 +102,5 @@ archive creation, cleanup after a truncated stream, and semantic profile
 mismatches after recomputing checksums. `cargo test --locked --test composed_server
 composed_backup_cli_exports_verifies_restores_and_restarts` covers the executable
 source, CLI export/verify/restore, and restart from the restored directory.
-Production use still needs a protected source, replica path, and native release
-evidence.
+Publication still requires the candidate's complete Docker, network-failure,
+recovery, soak, benchmark, and external release evidence.

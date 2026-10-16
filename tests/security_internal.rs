@@ -550,10 +550,8 @@ async fn security_runtime_internal_idle_expiry_drops_socket_and_closes_retained_
     let certs = Certificates::new();
     let primary = certs.leaf(SERVER, 1, None);
     let remote = certs.leaf(PEER, 2, None);
-    let crl = certs.crl(
-        time::OffsetDateTime::now_utc() + time::Duration::seconds(4),
-        None,
-    );
+    let expiry = time::OffsetDateTime::now_utc() + time::Duration::seconds(4);
+    let crl = certs.crl(expiry, None);
     let runtime = sider::security::GenerationRuntime::new(runtime_generation(
         1,
         &certs,
@@ -578,7 +576,14 @@ async fn security_runtime_internal_idle_expiry_drops_socket_and_closes_retained_
     let mut outgoing = raw_connect(&raw_connector(&certs, Some(&remote)), address).await;
     let (retained_socket, peer) = timeout(DEADLINE, incoming).await.unwrap().unwrap();
     // No I/O is polled on the registered side; the registry timer still closes it.
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    timeout(Duration::from_secs(15), async {
+        while peer.current() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(time::OffsetDateTime::now_utc().unix_timestamp() >= expiry.unix_timestamp());
     assert!(!peer.current());
     physically_closed(&mut outgoing).await;
     assert_eq!(runtime.number().await, 1);

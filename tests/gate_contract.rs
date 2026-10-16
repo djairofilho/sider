@@ -22,6 +22,7 @@ const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 const TARGET: &str = "x86_64-unknown-linux-gnu";
 const IMAGE: &str =
     "redis:8.10.1@sha256:76961cd2a0f40ef6fdd334b6b1b3a76a2bad1848d89f3030ca30a7521d4a9493";
+const OCI_DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 #[test]
@@ -116,6 +117,46 @@ fn family_receipt_requires_its_gate_in_the_plan() {
         .unwrap();
         assert_eq!(receipt["gate"], gate);
     }
+}
+
+#[test]
+fn docker_release_receipts_require_a_matching_digest_identity() {
+    let mut fixture = Fixture::new();
+    fixture.env.insert("SIDER_RELEASE_VERSION", "1.1.0".into());
+    fixture.change(|state| {
+        state.compiled_version = "1.1.0".into();
+        state.cargo_metadata["packages"][0]["version"] = json!("1.1.0");
+        state.plan["releases"][0]["version"] = json!("1.1.0");
+        state.plan["releases"][0]["distribution"] = json!({
+            "kind": "ghcr", "image": "ghcr.io/djairofilho/sider", "platform": "linux/amd64",
+            "native_packages": false
+        });
+        state.plan["releases"][0]["required_gates"] = json!(["memory_lifecycle"]);
+    });
+    assert!(fixture.context("memory_lifecycle").is_err());
+    fixture
+        .env
+        .insert("SIDER_RELEASE_OCI_DIGEST", "sha256:bad".into());
+    assert!(fixture.context("memory_lifecycle").is_err());
+    fixture
+        .env
+        .insert("SIDER_RELEASE_OCI_DIGEST", OCI_DIGEST.into());
+    fixture
+        .context("memory_lifecycle")
+        .unwrap()
+        .publish(1, Duration::from_secs(1), json!({"case":"docker-memory"}))
+        .unwrap();
+    let receipt: Value = serde_json::from_slice(
+        &fs::read(fixture.out.join("receipt-memory_lifecycle.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(receipt["oci_digest"], OCI_DIGEST);
+
+    let mut historical = Fixture::new();
+    historical
+        .env
+        .insert("SIDER_RELEASE_OCI_DIGEST", OCI_DIGEST.into());
+    assert!(historical.context("compatibility").is_err());
 }
 
 struct Fixture {

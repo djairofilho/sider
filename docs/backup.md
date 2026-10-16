@@ -10,11 +10,16 @@ record-1 mixed-owner archives in the development checkout. Its separate loopback
 listener and `sider-backup --profile composed` are absent from the published 1.0.1
 package. The default AOF reader still rejects that profile.
 
-This procedure describes the published 1.0.1 package. The current checkout's
-protected executable with an internal listener is unavailable until the
-[security implementation](security-implementation.md) completes internal
-revocation. Use its explicit `legacy-loopback` profile only in a controlled
-development environment.
+The [v1.1.0 Docker guide](docker-first-launch.md) describes protected internal
+mTLS provisioning and a record-2 export. The
+[composed profile guide](composed-backup.md) describes its separate record-1
+archive. These paths have local Docker rehearsal evidence but no published
+v1.1.0 candidate receipt yet.
+
+The procedure below describes the published 1.0.1 package. Its internal
+listener is plaintext and belongs on a controlled network. The explicit
+`legacy-loopback` profile remains a development-only option for the current
+checkout.
 
 `sider-backup` captures a consistent point from the primary over TCP and produces
 a sealed AOF snapshot, a manifest, and checksums. Restoration verifies the set

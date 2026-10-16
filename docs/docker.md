@@ -1,14 +1,22 @@
 # Distribution image
 
+This page describes the exported image archive used for v1.0.0 and v1.0.1.
+The planned v1.1.0 distribution is a public Linux amd64 GHCR image with two
+separate durable profiles; see the [Docker-only launch plan](docker-first-launch.md).
+It has not passed its candidate gates or been published.
+
 The Linux amd64 image contains `sider`, `sider-aof-migrate`, `sider-backup`,
 and `sider-replica` from the validated Linux package.
 The [Dockerfile](../deploy/Dockerfile) copies the binaries; it does not run Cargo
 or install packages. The Ubuntu 24.04 base is pinned by digest and compatible
 with the environment used to build the GNU package.
+The current Dockerfile defaults to protected security for the planned v1.1.0
+image. To reproduce the historical archive gate, use the source at its
+v1.0.0 or v1.0.1 preparation SHA.
 
 The process runs as UID/GID `10001:10001`, is PID 1, and receives `SIGTERM` directly.
 The `/var/lib/sider` directory belongs to that user and is the AOF volume.
-The image defaults to address `0.0.0.0:6379`, one shard, and `always` synchronization.
+The historical image defaults to address `0.0.0.0:6379`, one shard, and `always` synchronization.
 The persisted shard count must match on subsequent starts.
 
 ## Input and identity

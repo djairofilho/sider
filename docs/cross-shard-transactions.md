@@ -345,8 +345,11 @@ loopback process follower with source restart. The controlled TCP source checks
 every truncated byte prefix of an incremental mixed-owner frame and a corrupt
 frame checksum: neither yields an ACK or changes either old owner. It also proves
 that ACK survives an immediate process kill. Tests do not cover every network
-commit boundary, power loss, protected process deployment, or a native release
-candidate. An in-process live session additionally verifies mutual TLS and
+commit boundary, power loss, or a release candidate. A local Linux Docker
+rehearsal now covers protected composed backup and restore, a protected follower
+with reconnect, backup-role revocation, and primary `SIGKILL` recovery after a
+committed mixed-owner transaction. It does not cover every network or crash
+boundary. An in-process live session additionally verifies mutual TLS and
 replica-role authorization for composed full sync and mixed-owner batches,
 followed by role revocation.
 
@@ -363,8 +366,12 @@ tests do not simulate power loss. A separate controlled TCP session replays the
 same batch after its ACK and receives the same cursor without a second AOF
 record; a changed replay at that sequence closes the session. The reconnect
 advertises cursor 1, accepts sequence 2, and recovers the complete replacement
-for both owners. This covers those ACK/retransmission cases, not every ACK-loss
-or network boundary.
+for both owners. A separate process test drops partially read ACKs after both
+a full snapshot and a mixed batch, then reconnects at each durable cursor. It
+verifies that the complete batch survives, a duplicate on the new session is
+rejected without another apply, and the following batch commits and survives
+restart. This covers those ACK/retransmission cases, not every ACK-loss or
+network boundary.
 
 ## Required deterministic tests
 

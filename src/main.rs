@@ -12,8 +12,9 @@ fn main() -> ExitCode {
         [flag] if flag == "--help" || flag == "-h" => {
             println!(
                 "Sider: in-memory database server under development.\n\n\
-                 Usage: sider [--help | --version | --diagnose]\n\n\
+                 Usage: sider [--help | --version | --diagnose | --hash-password]\n\n\
                  --diagnose: validate configuration without starting the server or accessing the AOF.\n\
+                 --hash-password: read 16-1024 raw password bytes from standard input and write an Argon2id policy verifier.\n\
                  SIDER_ADDR: IP address and port (default: 127.0.0.1:6379).\n\
                  SIDER_READY_FILE: optional readiness JSON file.\n\
                  SIDER_COMPOSED_EXPORT_ADDR: optional loopback-only transport-3 backup listener with SIDER_AOF_COMPOSED=1.\n\
@@ -36,6 +37,7 @@ fn main() -> ExitCode {
             println!("sider {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
+        [flag] if flag == "--hash-password" => hash_password(),
         [flag] if flag == "--diagnose" => match ServerConfig::from_env() {
             Ok(config) => match sider::security::StartupSecurity::from_env() {
                 Ok(security) => {
@@ -69,7 +71,51 @@ fn main() -> ExitCode {
             }
         },
         _ => {
-            eprintln!("invalid arguments; usage: sider [--help | --version | --diagnose]");
+            eprintln!(
+                "invalid arguments; usage: sider [--help | --version | --diagnose | --hash-password]"
+            );
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn hash_password() -> ExitCode {
+    use argon2::{Algorithm, Argon2, Params, PasswordHasher, Version, password_hash::SaltString};
+    use std::io::Read;
+
+    let mut password = Vec::new();
+    if std::io::stdin()
+        .take(1025)
+        .read_to_end(&mut password)
+        .is_err()
+        || !(16..=1024).contains(&password.len())
+    {
+        eprintln!("password input must contain 16 to 1024 bytes");
+        return ExitCode::FAILURE;
+    }
+    let mut salt = [0u8; 16];
+    if getrandom::fill(&mut salt).is_err() {
+        eprintln!("could not generate a password verifier");
+        return ExitCode::FAILURE;
+    }
+    let result = Params::new(65536, 3, 1, Some(32))
+        .ok()
+        .map(|params| Argon2::new(Algorithm::Argon2id, Version::V0x13, params))
+        .and_then(|argon2| {
+            let salt = SaltString::encode_b64(&salt).ok()?;
+            argon2
+                .hash_password(&password, &salt)
+                .ok()
+                .map(|hash| hash.to_string())
+        });
+    password.fill(0);
+    match result {
+        Some(verifier) => {
+            println!("{verifier}");
+            ExitCode::SUCCESS
+        }
+        None => {
+            eprintln!("could not generate a password verifier");
             ExitCode::FAILURE
         }
     }

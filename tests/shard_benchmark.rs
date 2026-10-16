@@ -1,4 +1,4 @@
-//! Linux package performance gate: explicit execution on a machine with no other workloads.
+//! Linux candidate performance gate: explicit execution on an idle machine.
 #![forbid(unsafe_code)]
 
 #[path = "common/gate_receipt.rs"]
@@ -557,7 +557,7 @@ impl RawSamples {
 }
 
 #[test]
-#[ignore = "Linux package gate: requires SIDER_BENCH_IDLE_MACHINE=1 and a machine without builds or other workloads"]
+#[ignore = "Linux candidate gate: requires SIDER_BENCH_IDLE_MACHINE=1 and a machine without builds or other workloads"]
 fn release_benchmarks_gate() {
     assert_eq!(
         std::env::var("SIDER_BENCH_IDLE_MACHINE").as_deref(),
@@ -582,7 +582,12 @@ fn release_benchmarks_gate() {
             "RSS observed during measurement, not a guaranteed peak",
             "fixed scenario order; three descriptive repetitions, without a confidence interval",
             "no threshold for outperforming Redis or performance guarantee"]});
-    let raw = json!({"schema_version":1,"task":"R11-05","sha":context.sha(),"version":context.version(),
+    let task = if context.version() == "1.1.0" {
+        "R13-05"
+    } else {
+        "R11-05"
+    };
+    let raw = json!({"schema_version":1,"task":task,"sha":context.sha(),"version":context.version(),
         "target":context.target(),"input":package.details(),"hardware":hardware,"methodology":methodology,
         "loadavg_after":null,"scenarios":matrix().into_iter().map(|scenario|json!({
             "scenario":scenario.details(),"repetitions":[]

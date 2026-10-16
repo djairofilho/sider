@@ -6,7 +6,7 @@ This roadmap organizes internal milestones through 1.0 and explicit post-1.0 rel
 R01 through R10 are internal milestones; R11 publishes 1.0 and later entries publish patches.
 Operational task status lives in GitHub issues and is not duplicated in this file.
 
-There are 12 milestones and 65 issues: one bootstrap, functional tasks, and one gate per milestone.
+There are 13 milestones and 71 issues: one bootstrap, functional tasks, and one gate per milestone.
 The repository and release artifacts are public; the crate uses `publish = false`.
 
 CI and automatic publication remain disabled.
@@ -37,6 +37,7 @@ Run and record checks and publication manually; quality criteria remain in effec
 | `0.10.0` | Operations and distribution | 5 + gate | Internal validation, without publication |
 | `1.0.0` | Stabilization | 5 + gate | Candidate and final with the same SHA and assets |
 | `1.0.1` | English and public distribution patch | 2 + gate | Candidate and final with the same SHA and assets |
+| `1.1.0` | Current capabilities in Linux Docker | 5 + gate | Candidate and final with the same SHA and assets |
 
 ## Verified bootstrap
 
@@ -329,6 +330,28 @@ Milestone completion criteria:
 - English text and public distribution contracts are complete, with no command, storage, or wire-format change.
 - All cumulative gates pass for the exact 1.0.1 candidate SHA and immutable bundle, including Linux, Windows, Docker, and the 3600-second soak.
 - The final release promotes the approved candidate files and SHA without rebuilding, and the published downloads match the candidate hashes.
+
+### 1.1.0: Current capabilities in Linux Docker
+
+- Publish one Linux amd64 Docker image containing the existing RESP2 database, MEM.*, RESP3, protected TLS/authentication/ACL, and explicit composed cross-shard transactions.
+- Record-2 memory and record-1 composed transactions are separate durable profiles with different volumes; no combined profile is claimed.
+
+| ID | Deliverable | Dependencies |
+| --- | --- | --- |
+| `R13-01` | Docker-only release contract | R12-GATE |
+| `R13-02` | Protected Docker deployment | R13-01 |
+| `R13-03` | Protected security completion | R12-GATE |
+| `R13-04` | Composed transaction completion | R12-GATE |
+| `R13-05` | Candidate feature and distribution validation | R13-01, R13-02, R13-03, R13-04 |
+| `R13-GATE` | Publish Docker-only 1.1.0 | R13-01, R13-02, R13-03, R13-04, R13-05, R01-GATE, R02-GATE, R03-GATE, R04-GATE, R05-GATE, R06-GATE, R07-GATE, R08-GATE, R09-GATE, R10-GATE |
+
+Required evidence: `native`, `compatibility`, `tcp_smoke`, `crash`, `recovery`, `migration`, `sharding`, `types`, `sorted_sets`, `transactions`, `pubsub`, `replication`, `soak`, `benchmarks`, `memory_lifecycle`, `memory_search`, `resp3`, `security`, `composed_transactions`, `docker_oci`.
+
+Milestone completion criteria:
+
+- All R13 tasks and cumulative Linux Docker gates pass for the exact candidate SHA and OCI digest.
+- The public GHCR candidate is pulled anonymously by digest on a clean host; final 1.1.0 tag resolves to the same digest without rebuild.
+- GitHub final release promotes the approved SHA and immutable evidence; close the gate only after verifying publication.
 
 ## Execution and publication
 

@@ -9,13 +9,16 @@ Distribute this complete directory together with Sider's own `LICENSE`.
 
 ## Contents
 
-- 40 packages from Cargo's `normal` graph, including proc-macro dependencies.
-  The union of Windows MSVC and GNU Linux targets contains 32 packages without
-  those edges.
+- 82 packages from Cargo's `normal` graph, including proc-macro dependencies.
+  The historical Windows MSVC and current GNU Linux target union contains 69
+  packages without those edges.
 - Full `LICENSE`, `LICENSE-*`, and equivalent texts for every package in `crates/`.
   MIT/Apache alternatives and the Unicode text from `unicode-ident` are preserved.
 - Nested notice `tracing-core-0.1.36/src/spin/LICENSE`, retained as a precaution,
   without asserting that this `no_std`-conditional module is in the binary.
+- The published `asn1-rs-impl-0.2.0` Cargo package has no bundled notice file.
+  The MIT and Apache-2.0 texts from the same upstream repository are preserved
+  under `asn1-rs-0.7.2`.
 - [Rust 1.97.1 standard-library inventory](rust-1.97.1/COPYRIGHT-library.html)
   and the MIT, Apache-2.0, BSD-2-Clause, Unicode-3.0, and LLVM-exception texts.
 - [fpconv Boost 1.0 license](fpconv-redis-8.10.1/LICENSE.txt), adapted to safe
@@ -37,7 +40,7 @@ All rights reserved.
 
 ## Integrity and updates
 
-The 79 files total 633,554 bytes. In 78 of them, source and copy are identical.
+The 165 files total 1,098,046 bytes. In 164 of them, source and copy are identical.
 Only `COPYRIGHT-library.html` received a trailing LF: the copy is exactly the
 source plus that byte. `source_sha256`/`source_bytes` record the source;
 `sha256`/`bytes` record the copy. The six Rust files had identical source hashes

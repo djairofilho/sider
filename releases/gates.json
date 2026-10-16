@@ -14,6 +14,12 @@
     "replication": {"command": ["cargo", "test", "--locked", "--test", "replication_network", "--", "--ignored", "--exact", "release_replication_gate", "--nocapture"], "timeout_seconds": 1200},
     "docker": {"command": ["cargo", "test", "--locked", "--test", "docker_distribution", "--", "--ignored", "--exact", "release_docker_gate", "--nocapture"], "timeout_seconds": 1200},
     "soak": {"command": ["cargo", "test", "--locked", "--release", "--test", "soak", "--", "--ignored", "--exact", "release_soak_gate", "--nocapture"], "timeout_seconds": 3900, "minimum_seconds": 3600},
-    "benchmarks": {"command": ["cargo", "test", "--locked", "--release", "--test", "shard_benchmark", "--", "--ignored", "--exact", "release_benchmarks_gate", "--nocapture"], "timeout_seconds": 1800}
+    "benchmarks": {"command": ["cargo", "test", "--locked", "--release", "--test", "shard_benchmark", "--", "--ignored", "--exact", "release_benchmarks_gate", "--nocapture"], "timeout_seconds": 1800},
+    "memory_lifecycle": {"command": ["cargo", "test", "--locked", "--test", "release_feature_gates", "--", "--ignored", "--exact", "release_memory_lifecycle_gate", "--nocapture"], "timeout_seconds": 1800},
+    "memory_search": {"command": ["cargo", "test", "--locked", "--test", "release_feature_gates", "--", "--ignored", "--exact", "release_memory_search_gate", "--nocapture"], "timeout_seconds": 1200},
+    "resp3": {"command": ["cargo", "test", "--locked", "--test", "release_feature_gates", "--", "--ignored", "--exact", "release_resp3_gate", "--nocapture"], "timeout_seconds": 1200},
+    "security": {"command": ["cargo", "test", "--locked", "--test", "release_feature_gates", "--", "--ignored", "--exact", "release_security_gate", "--nocapture"], "timeout_seconds": 1800},
+    "composed_transactions": {"command": ["cargo", "test", "--locked", "--test", "release_feature_gates", "--", "--ignored", "--exact", "release_composed_transactions_gate", "--nocapture"], "timeout_seconds": 1800},
+    "docker_oci": {"command": ["cargo", "test", "--locked", "--test", "docker_oci", "--", "--ignored", "--exact", "linux::release_docker_oci_gate", "--nocapture"], "timeout_seconds": 1200}
   }
 }

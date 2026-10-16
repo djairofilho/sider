@@ -1287,6 +1287,97 @@ async fn composed_replica_refuses_partial_frames_bad_full_and_sequence_errors() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn composed_replica_reconnects_after_partial_ack_without_reapplying_batch() {
+    use tokio::io::AsyncReadExt;
+
+    let directory = Directory::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream = listener.local_addr().unwrap();
+    let path = directory.0.join("composed-lost-ack");
+    let mut replica = Node::start_composed(&path, Some(upstream)).await;
+    let base = Cursor {
+        epoch: [9; 16],
+        sequence: 7,
+    };
+    let mut socket = offer_composed(&listener, None, base).await;
+    full_composed(&mut socket, base, b"old-left", b"old-right", true).await;
+    let mut prefix = [0_u8; 4];
+    tokio::time::timeout(DEADLINE, socket.read_exact(&mut prefix))
+        .await
+        .unwrap()
+        .unwrap();
+    drop(socket);
+    let mut socket = offer_composed(&listener, Some(base), base).await;
+    send_composed(&mut socket, Message::Continue(base)).await;
+    assert_eq!(read_composed(&mut socket).await, Message::Ack(base));
+    assert_composed_pair(&replica, b"old-left", b"old-right");
+
+    let first = Cursor {
+        sequence: 8,
+        ..base
+    };
+    let batch = composed_batch(b"first-left", b"first-right");
+    send_composed(
+        &mut socket,
+        Message::Batch {
+            sequence: first.sequence,
+            batch: batch.clone(),
+        },
+    )
+    .await;
+    // Read only the start of the ACK frame, then lose the connection. The
+    // sender cannot know whether the follower durably committed the batch.
+    tokio::time::timeout(DEADLINE, socket.read_exact(&mut prefix))
+        .await
+        .unwrap()
+        .unwrap();
+    drop(socket);
+
+    let mut socket = offer_composed(&listener, Some(first), first).await;
+    send_composed(&mut socket, Message::Continue(first)).await;
+    assert_eq!(read_composed(&mut socket).await, Message::Ack(first));
+    assert_composed_pair(&replica, b"first-left", b"first-right");
+    send_composed(
+        &mut socket,
+        Message::Batch {
+            sequence: first.sequence,
+            batch,
+        },
+    )
+    .await;
+    // A new session has no previous frame to compare. It rejects the duplicate
+    // instead of applying it again or acknowledging an unverifiable replay.
+    composed_connection_closes(&mut socket).await;
+    assert_eq!(composed_admin(&replica, "--status")["sequence"], 8);
+
+    let mut socket = offer_composed(&listener, Some(first), first).await;
+    send_composed(&mut socket, Message::Continue(first)).await;
+    assert_eq!(read_composed(&mut socket).await, Message::Ack(first));
+
+    let second = Cursor {
+        sequence: 9,
+        ..base
+    };
+    send_composed(
+        &mut socket,
+        Message::Batch {
+            sequence: second.sequence,
+            batch: composed_batch(b"second-left", b"second-right"),
+        },
+    )
+    .await;
+    assert_eq!(read_composed(&mut socket).await, Message::Ack(second));
+    assert_composed_pair(&replica, b"second-left", b"second-right");
+    replica.stop();
+
+    let replica = Node::start_composed(&path, Some(upstream)).await;
+    let mut socket = offer_composed(&listener, Some(second), second).await;
+    send_composed(&mut socket, Message::Continue(second)).await;
+    assert_eq!(read_composed(&mut socket).await, Message::Ack(second));
+    assert_composed_pair(&replica, b"second-left", b"second-right");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn replication_slow_peer_does_not_block_healthy_replica_and_lost_history_forces_full() {
     let directory = Directory::new();
     let primary = Node::start(&directory.0.join("primary"), None).await;

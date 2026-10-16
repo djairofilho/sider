@@ -147,17 +147,14 @@ memory implementation.
 
 ## Promotion into the release manifest
 
-The operational-base epic and the AI-memory epic will have **separate publishable
-gates**. The base gate must first establish its deployment profile, security
-boundary, recovery and resource evidence, and cumulative release validation.
-The memory gate then adds the record lifecycle, exact search, corpus, and
-reference integration on top of an approved base. This prevents unfinished
-memory work from weakening base claims and prevents base evidence from being
-mistaken for memory evidence. Neither gate is approved by this sequencing
-decision. Version numbers remain unassigned until their entries are accepted
-in the manifest. RESP3, Lua, cross-shard transactions, and cluster work require
-their own explicit release-scope decision before they enter a candidate; code
-in a development checkout alone does not expand a published profile.
+The [v1.1.0 Docker release epic](https://github.com/djairofilho/sider/issues/206)
+supersedes the earlier proposal for separate base and memory publications.
+Its single candidate includes implemented memory, RESP3, security, and the
+explicit composed transaction profile. Record-2 memory and record-1 composed
+transactions use separate durable volumes; the candidate does not combine
+them in one instance. The [release manifest](../releases/plan.json) registers
+R13 and its pending gates. Neither closed implementation issues nor earlier
+SHAs approve that candidate. Lua and cluster work remain outside its scope.
 
 1. Execute the issue graph from #105. Keep each issue's native parent and
    dependency links; use its acceptance evidence to decide when its work is

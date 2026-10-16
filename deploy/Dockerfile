@@ -1,4 +1,4 @@
-# Distribution image: the context contains only the validated Linux package.
+# Distribution image: the context contains validated Linux binaries and notices.
 # It does not rebuild the product or query package repositories during the build.
 FROM ubuntu:24.04@sha256:1e0a86e57d247923571b75e0aaf48a1449cf8c543d51fb3e07a4a7d7bfa79316
 
@@ -26,6 +26,7 @@ RUN chmod 0755 /usr/local/bin/sider /usr/local/bin/sider-aof-migrate /usr/local/
     && install -d -m 0700 -o 10001 -g 10001 /var/lib/sider
 
 LABEL org.opencontainers.image.title="Sider" \
+      org.opencontainers.image.source="https://github.com/djairofilho/sider" \
       org.opencontainers.image.version="$SIDER_VERSION" \
       org.opencontainers.image.revision="$SIDER_SOURCE_SHA" \
       org.opencontainers.image.licenses="MIT" \
@@ -36,7 +37,9 @@ LABEL org.opencontainers.image.title="Sider" \
 
 ENV SIDER_ADDR=0.0.0.0:6379 \
     SIDER_AOF_DIR=/var/lib/sider \
-    SIDER_AOF_SYNC=always
+    SIDER_AOF_SYNC=always \
+    SIDER_SECURITY_PROFILE=protected \
+    SIDER_SECURITY_DIR=/run/sider/security
 VOLUME ["/var/lib/sider"]
 EXPOSE 6379
 STOPSIGNAL SIGTERM

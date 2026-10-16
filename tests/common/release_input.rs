@@ -1,4 +1,4 @@
-//! Verifiable link between checkout, preliminary manifest, tar.gz, and extracted executable.
+//! Verifiable link between checkout, manifest, and candidate executable bytes.
 #![allow(dead_code)]
 
 use super::{gate_receipt::GateContext, process};
@@ -23,11 +23,20 @@ struct PackageProof {
     sha256: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ImageProof {
+    reference: String,
+    digest: String,
+    image_id: String,
+    binary_sha256: String,
+}
+
 /// The directory must remain controlled and unchanged; verification does not authenticate its author.
 pub struct ReleaseInput {
     directory: PathBuf,
     binary: PathBuf,
-    package: PackageProof,
+    package: Option<PackageProof>,
+    image: Option<ImageProof>,
     binary_size: u64,
     binary_sha256: String,
 }
@@ -63,6 +72,9 @@ impl ReleaseInput {
             16 * 1024 * 1024,
         )?)
         .map_err(|e| e.to_string())?;
+        if context.version() == "1.1.0" {
+            return Self::load_image(context, directory, &manifest);
+        }
         let package = manifest_package(
             &manifest,
             context.version(),
@@ -124,7 +136,68 @@ impl ReleaseInput {
         Ok(Self {
             directory,
             binary,
-            package,
+            package: Some(package),
+            image: None,
+            binary_size,
+            binary_sha256,
+        })
+    }
+
+    fn load_image(
+        context: &GateContext,
+        directory: PathBuf,
+        manifest: &Value,
+    ) -> Result<Self, String> {
+        let (reference, digest) = manifest_image(
+            manifest,
+            context.version(),
+            context.sha(),
+            context.oci_digest(),
+        )?;
+        let binary = directory.join("sider");
+        let binary_size = regular_size(&binary, MAX_BINARY)?;
+        if binary_size == 0 {
+            return Err("empty staged image executable".into());
+        }
+        let binary_sha256 = sha256(&binary)?;
+        let inspection = checked(Command::new("docker").args(["image", "inspect", &reference]))?;
+        let images: Value =
+            serde_json::from_slice(&inspection).map_err(|error| error.to_string())?;
+        let image_id = inspect_image(
+            &images,
+            context.version(),
+            context.sha(),
+            &reference,
+            &binary_sha256,
+        )?;
+        let extracted = process::run_with_stdout_limit(
+            Command::new("docker")
+                .args(["run", "--rm", "--network", "none", "--read-only"])
+                .args([
+                    "--entrypoint",
+                    "/bin/cat",
+                    &reference,
+                    "/usr/local/bin/sider",
+                ]),
+            TIMEOUT,
+            MAX_BINARY as usize,
+        )?;
+        if !extracted.status.success()
+            || extracted.stdout.len() as u64 != binary_size
+            || extracted.stdout != read_bounded(&binary, binary_size)?
+        {
+            return Err("staged executable differs from the OCI image binary".into());
+        }
+        Ok(Self {
+            directory,
+            binary,
+            package: None,
+            image: Some(ImageProof {
+                reference,
+                digest,
+                image_id,
+                binary_sha256: binary_sha256.clone(),
+            }),
             binary_size,
             binary_sha256,
         })
@@ -135,7 +208,13 @@ impl ReleaseInput {
     }
 
     pub fn details(&self) -> Value {
-        json!({"package":self.package.name,"package_bytes":self.package.size,"package_sha256":self.package.sha256,
+        if let Some(image) = &self.image {
+            return json!({"oci_image":image.reference,"oci_digest":image.digest,"image_id":image.image_id,
+                "binary":"sider","binary_bytes":self.binary_size,"binary_sha256":self.binary_sha256,
+                "binary_matches_image":true});
+        }
+        let package = self.package.as_ref().expect("historical package proof");
+        json!({"package":package.name,"package_bytes":package.size,"package_sha256":package.sha256,
             "binary":"sider","binary_bytes":self.binary_size,"binary_sha256":self.binary_sha256,
             "binary_matches_archive_member":true,"readme_matches_checkout":true,"license_matches_checkout":true})
     }
@@ -143,10 +222,11 @@ impl ReleaseInput {
     pub fn verify_again(&self, context: &GateContext) -> Result<(), String> {
         let current = Self::load(context, &self.directory)?;
         if current.package != self.package
+            || current.image != self.image
             || current.binary_size != self.binary_size
             || current.binary_sha256 != self.binary_sha256
         {
-            return Err("package or executable changed during validation".into());
+            return Err("candidate source or executable changed during validation".into());
         }
         Ok(())
     }
@@ -196,6 +276,73 @@ fn manifest_package(
         size,
         sha256: digest.to_owned(),
     })
+}
+
+fn manifest_image(
+    manifest: &Value,
+    version: &str,
+    sha: &str,
+    oci_digest: Option<&str>,
+) -> Result<(String, String), String> {
+    let digest = oci_digest.ok_or("missing candidate OCI digest")?;
+    let reference = format!("ghcr.io/djairofilho/sider@{digest}");
+    let artifacts = manifest["artifacts"]
+        .as_array()
+        .ok_or("missing OCI release artifact inventory")?;
+    if !digest
+        .strip_prefix("sha256:")
+        .is_some_and(|value| hex(value, 64))
+        || manifest["schema_version"] != 2
+        || manifest["artifact_version"] != version
+        || manifest["sha"] != sha
+        || manifest["private"] != false
+        || manifest["crate_publication"] != false
+        || manifest["provenance"]["frozen_checkout"] != sha
+        || manifest["targets"] != json!([TARGET])
+        || manifest["oci_image"]["repository"] != "ghcr.io/djairofilho/sider"
+        || manifest["oci_image"]["platform"] != "linux/amd64"
+        || manifest["oci_image"]["digest"] != digest
+        || artifacts.iter().any(|item| {
+            item["name"]
+                .as_str()
+                .is_some_and(|name| name.ends_with(".tar.gz") || name.ends_with(".zip"))
+        })
+    {
+        return Err("OCI manifest identity differs from gate context".into());
+    }
+    Ok((reference, digest.to_owned()))
+}
+
+fn inspect_image(
+    images: &Value,
+    version: &str,
+    sha: &str,
+    reference: &str,
+    binary_sha256: &str,
+) -> Result<String, String> {
+    let [image] = images.as_array().map(Vec::as_slice).unwrap_or(&[]) else {
+        return Err("Docker inspection returned no unique image".into());
+    };
+    if image["Os"] != "linux"
+        || image["Architecture"] != "amd64"
+        || image["Config"]["Labels"]["org.opencontainers.image.version"] != version
+        || image["Config"]["Labels"]["org.opencontainers.image.revision"] != sha
+        || image["Config"]["Labels"]["io.sider.binary.sha256"] != binary_sha256
+        || !image["RepoDigests"]
+            .as_array()
+            .is_some_and(|values| values.contains(&json!(reference)))
+    {
+        return Err("staged binary or OCI image differs from the release identity".into());
+    }
+    image["Id"]
+        .as_str()
+        .filter(|value| {
+            value
+                .strip_prefix("sha256:")
+                .is_some_and(|hash| hex(hash, 64))
+        })
+        .map(str::to_owned)
+        .ok_or_else(|| "invalid Docker image ID".into())
 }
 
 fn unique_member(listing: &[u8], member: &str) -> Result<(), String> {
@@ -335,5 +482,60 @@ mod tests {
             parse_digest(format!("{}  x\n{}  y\n", "a".repeat(64), "a".repeat(64)).as_bytes())
                 .is_err()
         );
+    }
+
+    #[test]
+    fn release_input_oci_manifest_rejects_native_assets_and_wrong_digest() {
+        let digest = format!("sha256:{}", "a".repeat(64));
+        let manifest = json!({
+            "schema_version":2,"artifact_version":"1.1.0","sha":SHA,
+            "private":false,"crate_publication":false,
+            "provenance":{"frozen_checkout":SHA},"targets":[TARGET],
+            "oci_image":{"repository":"ghcr.io/djairofilho/sider","platform":"linux/amd64","digest":digest},
+            "artifacts":[{"name":"release-notes.md"}]
+        });
+        assert_eq!(
+            manifest_image(&manifest, "1.1.0", SHA, Some(&digest)).unwrap(),
+            (
+                format!("ghcr.io/djairofilho/sider@{digest}"),
+                digest.clone()
+            )
+        );
+        assert!(manifest_image(&manifest, "1.1.0", SHA, None).is_err());
+        assert!(manifest_image(&manifest, "1.1.0", SHA, Some("sha256:wrong")).is_err());
+        let mut changed = manifest.clone();
+        changed["artifacts"] = json!([{"name":"sider-v1.1.0-linux.tar.gz"}]);
+        assert!(manifest_image(&changed, "1.1.0", SHA, Some(&digest)).is_err());
+        changed = manifest;
+        changed["oci_image"]["platform"] = json!("linux/arm64");
+        assert!(manifest_image(&changed, "1.1.0", SHA, Some(&digest)).is_err());
+    }
+
+    #[test]
+    fn release_input_oci_inspection_binds_platform_revision_and_binary() {
+        let reference = format!("ghcr.io/djairofilho/sider@sha256:{}", "a".repeat(64));
+        let binary = "b".repeat(64);
+        let image = json!([{
+            "Os":"linux","Architecture":"amd64","Id":format!("sha256:{}", "c".repeat(64)),
+            "RepoDigests":[reference],
+            "Config":{"Labels":{
+                "org.opencontainers.image.version":"1.1.0",
+                "org.opencontainers.image.revision":SHA,
+                "io.sider.binary.sha256":binary
+            }}
+        }]);
+        assert_eq!(
+            inspect_image(&image, "1.1.0", SHA, &reference, &binary).unwrap(),
+            format!("sha256:{}", "c".repeat(64))
+        );
+        let mut changed = image.clone();
+        changed[0]["Architecture"] = json!("arm64");
+        assert!(inspect_image(&changed, "1.1.0", SHA, &reference, &binary).is_err());
+        changed = image.clone();
+        changed[0]["Config"]["Labels"]["io.sider.binary.sha256"] = json!("d".repeat(64));
+        assert!(inspect_image(&changed, "1.1.0", SHA, &reference, &binary).is_err());
+        changed = image;
+        changed[0]["RepoDigests"] = json!([]);
+        assert!(inspect_image(&changed, "1.1.0", SHA, &reference, &binary).is_err());
     }
 }

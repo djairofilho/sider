@@ -42,7 +42,7 @@ pub fn verify(
     let (base, candidate) = parse_version(release_identifier)?;
     let artifact_version = format!("{}.{}.{}", base[0], base[1], base[2]);
     require_hex(sha, 40, "release SHA")?;
-    let (required, docker) = required_gates(plan, base)?;
+    let (required, docker, ghcr) = required_gates(plan, base)?;
     let mut expected: BTreeSet<String> = [
         "release-manifest.json",
         "release-notes.md",
@@ -54,12 +54,14 @@ pub fn verify(
     .map(str::to_owned)
     .collect();
     let evidence_name = format!("sider-v{artifact_version}-validation.zip");
-    expected.extend([
-        evidence_name.clone(),
-        format!("sider-v{artifact_version}-{WINDOWS}.zip"),
-        format!("sider-v{artifact_version}-{LINUX}.tar.gz"),
-    ]);
-    if docker {
+    expected.insert(evidence_name.clone());
+    if !ghcr {
+        expected.extend([
+            format!("sider-v{artifact_version}-{WINDOWS}.zip"),
+            format!("sider-v{artifact_version}-{LINUX}.tar.gz"),
+        ]);
+    }
+    if docker && !ghcr {
         expected.insert(format!(
             "sider-v{artifact_version}-linux-amd64-image.tar.gz"
         ));
@@ -67,7 +69,7 @@ pub fn verify(
     let proofs = directory_proofs(directory, &expected)?;
     verify_checksums(directory, &proofs)?;
     let manifest = read_json(&directory.join("release-manifest.json"))?;
-    verify_identity(plan, &manifest, &artifact_version, sha)?;
+    verify_identity(plan, &manifest, &artifact_version, sha, ghcr)?;
     if text(&manifest, "evidence_archive")? != evidence_name
         || text(&manifest, "notes")? != "release-notes.md"
         || text(&manifest, "runtime_requirements")? != "runtime-requirements.md"
@@ -89,7 +91,17 @@ pub fn verify(
             return Err(format!("Asset differs from manifest: {name}"));
         }
     }
-    let gates = gate_records(plan, &manifest, &required, &artifact_version, sha)?;
+    let oci_digest = ghcr
+        .then(|| manifest["oci_image"]["digest"].as_str())
+        .flatten();
+    let gates = gate_records(
+        plan,
+        &manifest,
+        &required,
+        &artifact_version,
+        sha,
+        oci_digest,
+    )?;
     let evidence = inventory(&manifest["evidence_files"], MAX_ENTRY_BYTES, true)?;
     if evidence.is_empty() || evidence.len() > MAX_ENTRIES {
         return Err("Invalid evidence count".into());
@@ -131,7 +143,7 @@ pub fn verify(
         "prerelease": candidate, "assets": proofs.len(), "checksums": proofs.len() - 1,
         "gate_records": gates.len(), "evidence_files": evidence.len(),
         "evidence_expanded_bytes": expanded_bytes, "publication_authorized": false,
-        "scope": "Offline integrity and consistency; does not establish execution, authenticity, RC approval, promotion of the same assets, or current GitHub state.",
+        "scope": "Offline integrity and consistency; does not establish execution, authenticity, RC approval, promotion of the same assets, current GitHub state, or GHCR digest existence.",
         "limits": {"asset_bytes": MAX_ASSET_BYTES, "json_bytes": MAX_JSON_BYTES,
             "evidence_zip_bytes": MAX_EVIDENCE_ZIP_BYTES, "entry_bytes": MAX_ENTRY_BYTES,
             "expanded_bytes": MAX_EXPANDED_BYTES, "entries": MAX_ENTRIES, "zip64": false}
@@ -187,7 +199,7 @@ fn number(value: &str) -> Result<u64, String> {
     value.parse().map_err(|_| "Version overflow".into())
 }
 
-fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bool), String> {
+fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bool, bool), String> {
     let policy = &plan["release_policy"];
     if plan["schema_version"] != 2
         || policy["private"] != false
@@ -208,6 +220,7 @@ fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bo
         .as_array()
         .ok_or("Missing releases in plan")?;
     let mut versions = BTreeSet::new();
+    let mut ghcr = false;
     let mut names: BTreeSet<&str> = ["native", "tcp_smoke", "compatibility"].into();
     for release in releases {
         let (release_version, candidate) = parse_version(text(release, "version")?)?;
@@ -216,6 +229,15 @@ fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bo
         }
         if release_version == base && release["publication"] != true {
             return Err("Internal milestone does not allow publication verification".into());
+        }
+        if release_version == base && release["distribution"]["kind"] == "ghcr" {
+            let image = format!("ghcr.io/{}", text(plan, "repository")?);
+            if release["distribution"]
+                != json!({"kind":"ghcr", "image":image, "platform":"linux/amd64", "native_packages":false})
+            {
+                return Err("Invalid GHCR distribution contract".into());
+            }
+            ghcr = true;
         }
         if release_version <= base {
             for gate in release["required_gates"]
@@ -229,17 +251,43 @@ fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bo
     if !versions.contains(&base) {
         return Err("Base version not registered in plan".into());
     }
+    if base >= [1, 1, 0] && !ghcr {
+        return Err("Docker-only release requires GHCR distribution".into());
+    }
     let (docker_since, _) = parse_version(text(&plan["release_policy"], "docker_since")?)?;
-    if base >= docker_since {
+    if base >= docker_since && !ghcr {
         names.insert("docker");
+    }
+    if ghcr {
+        // The immutable GHCR image is exercised by docker_oci, not the old
+        // docker-save/archive runner inherited from v1.0.x.
+        names.remove("docker");
+        names.insert("docker_oci");
     }
     let docker = names.contains("docker");
     let mut required = BTreeSet::new();
     for name in names {
         let platforms: &[&str] = match name {
-            "native" | "tcp_smoke" | "crash" | "recovery" | "migration" => &[LINUX, WINDOWS],
-            "compatibility" | "sharding" | "types" | "sorted_sets" | "transactions" | "pubsub"
-            | "replication" | "docker" | "soak" | "benchmarks" => &[LINUX],
+            "native" | "tcp_smoke" | "crash" | "recovery" | "migration" if !ghcr => {
+                &[LINUX, WINDOWS]
+            }
+            "native" | "tcp_smoke" | "crash" | "recovery" | "migration" => &[LINUX],
+            "compatibility"
+            | "sharding"
+            | "types"
+            | "sorted_sets"
+            | "transactions"
+            | "pubsub"
+            | "replication"
+            | "docker"
+            | "soak"
+            | "benchmarks"
+            | "memory_lifecycle"
+            | "memory_search"
+            | "resp3"
+            | "security"
+            | "composed_transactions"
+            | "docker_oci" => &[LINUX],
             _ => return Err(format!("Unknown gate: {name}")),
         };
         required.extend(
@@ -248,7 +296,7 @@ fn required_gates(plan: &Value, base: [u64; 3]) -> Result<(BTreeSet<GateKey>, bo
                 .map(|target| (name.to_owned(), (*target).to_owned())),
         );
     }
-    Ok((required, docker))
+    Ok((required, docker, ghcr))
 }
 
 fn verify_identity(
@@ -256,6 +304,7 @@ fn verify_identity(
     manifest: &Value,
     artifact_version: &str,
     sha: &str,
+    ghcr: bool,
 ) -> Result<(), String> {
     if manifest["schema_version"] != 2
         || manifest["artifact_version"] != artifact_version
@@ -289,9 +338,26 @@ fn verify_identity(
     let targets = manifest["targets"]
         .as_array()
         .ok_or("Missing manifest targets")?;
-    if targets.len() != 2 || !targets.contains(&json!(LINUX)) || !targets.contains(&json!(WINDOWS))
+    if (ghcr && targets != &[json!(LINUX)])
+        || (!ghcr
+            && (targets.len() != 2
+                || !targets.contains(&json!(LINUX))
+                || !targets.contains(&json!(WINDOWS))))
     {
         return Err("Manifest target mismatch".into());
+    }
+    if ghcr {
+        let image = format!("ghcr.io/{}", text(plan, "repository")?);
+        let oci = &manifest["oci_image"];
+        if oci["repository"] != image || oci["platform"] != "linux/amd64" {
+            return Err("OCI image identity mismatch".into());
+        }
+        let digest = text(oci, "digest")?
+            .strip_prefix("sha256:")
+            .ok_or("OCI digest must use sha256")?;
+        require_hex(digest, 64, "OCI digest")?;
+    } else if manifest.get("oci_image").is_some() {
+        return Err("Historical release cannot declare an OCI image".into());
     }
     Ok(())
 }
@@ -302,6 +368,7 @@ fn gate_records<'a>(
     required: &BTreeSet<GateKey>,
     version: &str,
     sha: &str,
+    oci_digest: Option<&str>,
 ) -> Result<BTreeMap<GateKey, &'a Value>, String> {
     let mut records = BTreeMap::new();
     for gate in manifest["gates"]
@@ -315,6 +382,7 @@ fn gate_records<'a>(
             || gate["version"] != version
             || gate["status"] != "success"
             || !gate["cases"].as_u64().is_some_and(|n| n > 0)
+            || oci_digest.is_some_and(|digest| gate["oci_digest"] != digest)
         {
             return Err(format!("Invalid gate record: {name}/{target}"));
         }
@@ -775,7 +843,7 @@ mod tests {
                     Err(e) => panic!("Temp fixture: {e}"),
                 }
             };
-            let plan = json!({"schema_version":2,"repository":"example/sider", "reference":{"image":"redis:fixed"},
+            let mut plan = json!({"schema_version":2,"repository":"example/sider", "reference":{"image":"redis:fixed"},
             "release_policy":{"targets":[LINUX,WINDOWS], "docker_since":"0.10.0",
                 "private":false,"publish_crate":false,"final_promotion":"same_sha_same_assets",
                 "bundle_change_requires_new_candidate":true,"stable_soak_seconds":3600},
@@ -786,7 +854,14 @@ mod tests {
                 {"version":"1.0.0","publication":true,"required_gates":["sharding","types","sorted_sets",
                     "transactions","pubsub","replication","soak","benchmarks"]}
             ]});
-            let (required, docker) = required_gates(&plan, base).unwrap();
+            if base >= [1, 1, 0] {
+                plan["releases"].as_array_mut().unwrap().push(json!({
+                    "version":"1.1.0","publication":true,
+                    "distribution":{"kind":"ghcr","image":"ghcr.io/example/sider","platform":"linux/amd64","native_packages":false},
+                    "required_gates":["memory_lifecycle","memory_search","resp3","security","composed_transactions","docker_oci"]
+                }));
+            }
+            let (required, docker, ghcr) = required_gates(&plan, base).unwrap();
             let gates: Vec<Value> = required
                 .into_iter()
                 .map(|(gate, target)| {
@@ -797,6 +872,9 @@ mod tests {
                     }
                     if record["gate"] == "soak" {
                         record["duration_seconds"] = json!(3600.25);
+                    }
+                    if ghcr {
+                        record["oci_digest"] = json!(format!("sha256:{}", "a".repeat(64)));
                     }
                     record
                 })
@@ -819,7 +897,7 @@ mod tests {
                     ("nested/binary.log".into(), vec![0, 255, 13, 10]),
                 ])
                 .collect();
-            let manifest = json!({"schema_version":2,"repository":"example/sider","private":false,
+            let mut manifest = json!({"schema_version":2,"repository":"example/sider","private":false,
                 "artifact_version":version,"sha":SHA,
                 "provenance":{"kind":"manual-local","ci_enabled":false,"github_actions_run":null,"frozen_checkout":SHA},
                 "reference":plan["reference"],"targets":[LINUX,WINDOWS],
@@ -827,17 +905,25 @@ mod tests {
                 "evidence_files":[],"artifacts":[],"notes":"release-notes.md",
                 "runtime_requirements":"runtime-requirements.md","checksums":"SHA256SUMS",
                 "license":"MIT","crate_publication":false});
-            for name in [
-                format!("sider-v{version}-{WINDOWS}.zip"),
-                format!("sider-v{version}-{LINUX}.tar.gz"),
-            ] {
-                fs::write(
-                    root.join(name),
-                    b"opaque package bytes: offline check does not execute binaries",
-                )
-                .unwrap();
+            if ghcr {
+                manifest["targets"] = json!([LINUX]);
+                manifest["oci_image"] = json!({
+                    "repository":"ghcr.io/example/sider", "platform":"linux/amd64",
+                    "digest":format!("sha256:{}", "a".repeat(64))
+                });
+            } else {
+                for name in [
+                    format!("sider-v{version}-{WINDOWS}.zip"),
+                    format!("sider-v{version}-{LINUX}.tar.gz"),
+                ] {
+                    fs::write(
+                        root.join(name),
+                        b"opaque package bytes: offline check does not execute binaries",
+                    )
+                    .unwrap();
+                }
             }
-            if docker {
+            if docker && !ghcr {
                 fs::write(
                     root.join(format!("sider-v{version}-linux-amd64-image.tar.gz")),
                     b"opaque image bytes",
@@ -981,6 +1067,72 @@ mod tests {
             assert_eq!(fixture.bytes(), original);
         }
         assert!(original.keys().all(|name| !name.contains("-rc.")));
+    }
+
+    #[test]
+    fn docker_only_candidate_and_final_require_the_same_oci_identity() {
+        let mut fixture = Fixture::new("1.1.0-rc.1");
+        let original = fixture.bytes();
+        for identifier in ["1.1.0-rc.1", "1.1.0"] {
+            let result = fixture.check_as(identifier).unwrap();
+            assert_eq!(result["assets"], 6);
+            assert_eq!(result["gate_records"], 20);
+            assert_eq!(fixture.bytes(), original);
+        }
+        fixture.manifest["oci_image"]["digest"] = json!("sha256:invalid");
+        fixture.write_manifest_and_checksums();
+        assert!(
+            fixture
+                .check_as("1.1.0")
+                .unwrap_err()
+                .contains("OCI digest")
+        );
+        fixture.manifest["oci_image"]["digest"] = json!(format!("sha256:{}", "a".repeat(64)));
+        fixture.manifest["oci_image"]["repository"] = json!("ghcr.io/other/sider");
+        fixture.write_manifest_and_checksums();
+        assert!(
+            fixture
+                .check_as("1.1.0")
+                .unwrap_err()
+                .contains("OCI image identity")
+        );
+    }
+
+    #[test]
+    fn docker_only_bundle_rejects_native_assets_wrong_target_and_missing_security_gate() {
+        let fixture = Fixture::new("1.1.0-rc.1");
+        fs::write(
+            fixture.root.join("sider-v1.1.0-x86_64-pc-windows-msvc.zip"),
+            b"extra",
+        )
+        .unwrap();
+        assert!(fixture.check_as("1.1.0-rc.1").is_err());
+
+        let mut fixture = Fixture::new("1.1.0-rc.1");
+        fixture.manifest["targets"] = json!([LINUX, WINDOWS]);
+        fixture.write_manifest_and_checksums();
+        assert!(fixture.check_as("1.1.0-rc.1").is_err());
+
+        let mut fixture = Fixture::new("1.1.0-rc.1");
+        fixture.manifest["gates"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|record| record["gate"] != "security");
+        fixture.write_manifest_and_checksums();
+        assert!(fixture.check_as("1.1.0-rc.1").is_err());
+
+        let mut fixture = Fixture::new("1.1.0-rc.1");
+        fixture.manifest["gates"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("oci_digest");
+        fixture.write_manifest_and_checksums();
+        assert!(
+            fixture
+                .check_as("1.1.0-rc.1")
+                .unwrap_err()
+                .contains("Invalid gate record")
+        );
     }
 
     #[test]

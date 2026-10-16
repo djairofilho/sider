@@ -617,6 +617,27 @@ mod tests {
                 tokio::time::advance(std::time::Duration::from_secs(1)).await;
             }
             observed(&runtime, &calls, index, if index < 5 { 1 } else { 2 }).await;
+            let expected_warnings = match index {
+                1 | 2 => 1,
+                3..=5 => 2,
+                _ => 3,
+            };
+            let expected_activations = usize::from(index >= 5);
+            let mut completed = false;
+            for _ in 0..100 {
+                let captured = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+                if captured.matches("security replacement rejected").count() == expected_warnings
+                    && captured
+                        .matches("security generation activated after revocation cleanup")
+                        .count()
+                        == expected_activations
+                {
+                    completed = true;
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            assert!(completed, "poll {index} did not finish logging");
         }
         stop.send_replace(true);
         task.await.unwrap();

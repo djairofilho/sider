@@ -38,7 +38,8 @@
       "0.5.0": ["HSET", "HGET", "HDEL", "HEXISTS", "HLEN", "HGETALL", "LPUSH", "RPUSH", "LPOP without count", "RPOP without count", "LLEN", "LRANGE", "SADD", "SREM", "SISMEMBER", "SCARD", "SMEMBERS"],
       "0.6.0": ["basic ZADD", "ZREM", "ZCARD", "ZSCORE", "ZRANGE start stop [WITHSCORES]"],
       "0.7.0": ["MULTI", "EXEC", "DISCARD", "WATCH", "UNWATCH"],
-      "0.8.0": ["SUBSCRIBE", "UNSUBSCRIBE", "PUBLISH", "PING in subscriber mode"]
+      "0.8.0": ["SUBSCRIBE", "UNSUBSCRIBE", "PUBLISH", "PING in subscriber mode"],
+      "1.1.0": ["HELLO 2 and HELLO 3", "AUTH", "MEM.*", "MULTI/EXEC across local shards in the explicit composed profile"]
     },
     "after_1_0": ["Redis Cluster", "Sentinel", "automatic failover", "online resharding", "RESP3", "Lua", "blocking operations", "cross-shard transactions", "TLS", "ACL"],
     "sources": ["https://redis.io/docs/latest/develop/using-commands/transactions/", "https://redis.io/docs/latest/develop/reference/protocol-spec/"]
@@ -521,6 +522,50 @@
         }
       ],
       "gate": {"id":"R12-GATE","title":"Validate and publish 1.0.1","acceptance":["English text and public distribution contracts are complete, with no command, storage, or wire-format change.","All cumulative gates pass for the exact 1.0.1 candidate SHA and immutable bundle, including Linux, Windows, Docker, and the 3600-second soak.","The final release promotes the approved candidate files and SHA without rebuilding, and the published downloads match the candidate hashes."]}
+    },
+    {
+      "id": "R13", "version": "1.1.0", "title": "Current capabilities in Linux Docker", "publication": true,
+      "distribution": {"kind": "ghcr", "image": "ghcr.io/djairofilho/sider", "platform": "linux/amd64", "native_packages": false},
+      "scope": ["Publish one Linux amd64 Docker image containing the existing RESP2 database, MEM.*, RESP3, protected TLS/authentication/ACL, and explicit composed cross-shard transactions.", "Record-2 memory and record-1 composed transactions are separate durable profiles with different volumes; no combined profile is claimed."],
+      "required_gates": ["native", "compatibility", "tcp_smoke", "crash", "recovery", "migration", "sharding", "types", "sorted_sets", "transactions", "pubsub", "replication", "soak", "benchmarks", "memory_lifecycle", "memory_search", "resp3", "security", "composed_transactions", "docker_oci"],
+      "tasks": [
+        {
+          "id": "R13-01", "title": "Docker-only release contract", "area": "distribution", "depends_on": ["R12-GATE"],
+          "objective": "Define and verify the v1.1.0 GHCR artifact and Linux Docker gate matrix without changing historical release rules.",
+          "deliverables": ["Versioned Docker-only release manifest, verifier, gate definitions, roadmap, and license inventory.", "Historical v1.0.0/v1.0.1 packages and verification remain intact."],
+          "tests": ["Tool checks and historical fixtures; reject wrong image digest, platform, incomplete gates, and candidate/final mismatch."],
+          "acceptance": ["No native package asset is required for v1.1.0; the exact OCI digest and SHA are verified without accepting old receipts."]
+        },
+        {
+          "id": "R13-02", "title": "Protected Docker deployment", "area": "distribution", "depends_on": ["R13-01"],
+          "objective": "Start all advertised capabilities from the one image in separate protected durable profiles.",
+          "deliverables": ["Linux amd64 image from four validated binaries, restricted security-material mount, and distinct Compose profiles and volumes.", "Reproducible provisioning and operation guide without automatic plaintext fallback."],
+          "tests": ["Container startup, client/internal TLS, RESP2/RESP3, memory and composed profiles, backup, replication, restart, and shutdown.", "Wrong volume/profile and invalid security material fail before readiness."],
+          "acceptance": ["Both profiles work from the candidate image digest on a clean Linux Docker host without sharing a durable directory."]
+        },
+        {
+          "id": "R13-03", "title": "Protected security completion", "area": "security", "depends_on": ["R12-GATE"],
+          "objective": "Complete issue #93 for the protected Linux Docker profile.",
+          "deliverables": ["Client/internal TLS identity, ACL, rotation, restricted-material, backup, replica, and administrative controls."],
+          "tests": ["Real container positive and negative access, revocation, rotation, reconnect, and failure cases with no unauthorized state change."],
+          "acceptance": ["Protected startup and operation satisfy the network security contract for the supported Docker target."]
+        },
+        {
+          "id": "R13-04", "title": "Composed transaction completion", "area": "storage", "depends_on": ["R12-GATE"],
+          "objective": "Complete issue #92 for record-1 mixed-owner transactions and their protected replication and backup paths.",
+          "deliverables": ["Remaining network and ACK failure handling, process deployment, recovery, and release-gate evidence."],
+          "tests": ["Crash and disconnect at commit boundaries; no partial visible or replayed transaction, with protected backup and replica cases."],
+          "acceptance": ["The composed profile meets its documented atomicity and durability contract independently of record-2 memory."]
+        },
+        {
+          "id": "R13-05", "title": "Candidate feature and distribution validation", "area": "testing", "depends_on": ["R13-01", "R13-02", "R13-03", "R13-04"],
+          "objective": "Execute the full v1.1.0 gate matrix against the exact source SHA and pulled OCI digest.",
+          "deliverables": ["Linux Docker receipts for cumulative behavior, memory lifecycle/search, RESP3, security, composed transactions, backup/replication, and distribution.", "A 3600-second soak and isolated benchmark with actual results and resource context."],
+          "tests": ["No missing, ignored, canceled, zero-case, or old-SHA gate; verify anonymous pull, volume restart, profile mismatch, and shutdown."],
+          "acceptance": ["Every required gate succeeds on the approved candidate build with reproducible evidence before publication."]
+        }
+      ],
+      "gate": {"id":"R13-GATE","title":"Publish Docker-only 1.1.0","acceptance":["All R13 tasks and cumulative Linux Docker gates pass for the exact candidate SHA and OCI digest.","The public GHCR candidate is pulled anonymously by digest on a clean host; final 1.1.0 tag resolves to the same digest without rebuild.","GitHub final release promotes the approved SHA and immutable evidence; close the gate only after verifying publication."]}
     }
   ]
 }
