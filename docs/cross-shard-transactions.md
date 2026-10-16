@@ -366,8 +366,11 @@ tests do not simulate power loss. A separate controlled TCP session replays the
 same batch after its ACK and receives the same cursor without a second AOF
 record; a changed replay at that sequence closes the session. The reconnect
 advertises cursor 1, accepts sequence 2, and recovers the complete replacement
-for both owners. This covers those ACK/retransmission cases, not every ACK-loss
-or network boundary.
+for both owners. A separate process test drops a partially read ACK and
+reconnects at the durable cursor. It verifies that the complete mixed batch
+survives, a duplicate on the new session is rejected without another apply,
+and the following batch commits and survives restart. This covers those
+ACK/retransmission cases, not every ACK-loss or network boundary.
 
 ## Required deterministic tests
 
