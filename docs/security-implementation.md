@@ -66,7 +66,8 @@ Issue #93 still requires broader executable deployment evidence for generation a
 
 For the planned Docker-only v1.1.0 target, a development image on Ubuntu 22.04
 under WSL2 started with restricted client material, a read-only root filesystem,
-and a read-only security bind mount. Loopback TLS, pre-auth denial, named AUTH,
+and a read-only security bind mount. Loopback TLS, rejection of untrusted CA
+and wrong IP SAN, pre-auth denial, named AUTH,
 RESP2/RESP3, and basic memory and composed operations succeeded. Both durable
 profiles survived restarts on separate volumes; each refused the other's
 volume. This was a dirty-checkout rehearsal with an all-zero source-SHA image

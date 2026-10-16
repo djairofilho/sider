@@ -1177,10 +1177,21 @@ mod linux {
             &self,
             address: SocketAddrV4,
         ) -> Result<rustls::StreamOwned<rustls::ClientConnection, TcpStream>, String> {
+            self.connect_with_identity(address, true, Ipv4Addr::LOCALHOST)
+        }
+
+        fn connect_with_identity(
+            &self,
+            address: SocketAddrV4,
+            trust_server: bool,
+            server_ip: Ipv4Addr,
+        ) -> Result<rustls::StreamOwned<rustls::ClientConnection, TcpStream>, String> {
             let mut roots = rustls::RootCertStore::empty();
-            roots
-                .add(self.cert.clone())
-                .map_err(|error| error.to_string())?;
+            if trust_server {
+                roots
+                    .add(self.cert.clone())
+                    .map_err(|error| error.to_string())?;
+            }
             let config = rustls::ClientConfig::builder_with_provider(Arc::new(
                 rustls::crypto::ring::default_provider(),
             ))
@@ -1188,7 +1199,7 @@ mod linux {
             .map_err(|error| error.to_string())?
             .with_root_certificates(roots)
             .with_no_client_auth();
-            let server_name = rustls::pki_types::ServerName::IpAddress(Ipv4Addr::LOCALHOST.into());
+            let server_name = rustls::pki_types::ServerName::IpAddress(server_ip.into());
             let connection = rustls::ClientConnection::new(Arc::new(config), server_name)
                 .map_err(|error| error.to_string())?;
             let socket = TcpStream::connect_timeout(&address.into(), Duration::from_secs(2))
@@ -1269,6 +1280,17 @@ mod linux {
         let mut bytes = [0; 16];
         if matches!(plain.read(&mut bytes), Ok(count) if bytes[..count].starts_with(b"+PONG")) {
             return Err("plaintext client received PONG".into());
+        }
+        for (trusted, server_ip) in [
+            (false, Ipv4Addr::LOCALHOST),
+            (true, Ipv4Addr::new(127, 0, 0, 2)),
+        ] {
+            if harness
+                .connect_with_identity(memory_address, trusted, server_ip)
+                .is_ok_and(|mut stream| send(&mut stream, &[b"PING"]).is_ok())
+            {
+                return Err("invalid client trust or server IP was admitted".into());
+            }
         }
         let mut client = harness.connect(memory_address)?;
         if send(&mut client, &[b"PING"])?
