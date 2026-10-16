@@ -130,6 +130,61 @@ redis-cli --tls --cacert /srv/sider/client-cert.pem \
   -h 127.0.0.1 -p 6379 --user admin --askpass PING
 ```
 
+## Provision internal TLS for backup and replication
+
+For a deployment that needs the internal listener, use the Linux provisioning
+script to create a **fresh** primary, replica, and backup/monitor generation.
+It prompts for the administrator password, creates an internal CA and CRL,
+issues URI SAN identities, and writes restricted manifests. Run it as root on
+the Docker host; keep the generated `ca/ca-key.pem` off the containers and
+renew the 30-day CRL before it expires. The resulting client policy grants a
+single administrator broad access as a starting point; narrow it for shared
+deployments. Use a separate output directory for each primary instance.
+
+```bash
+sudo env SIDER_IMAGE="$SIDER_IMAGE" bash deploy/provision-v1.1-security.sh \
+  /srv/sider/memory-security
+export SIDER_SECURITY_DIR_HOST=/srv/sider/memory-security/primary
+docker compose -f deploy/compose.v1.1.yaml \
+  -f deploy/compose.v1.1.internal.yaml --profile memory up -d
+```
+
+The second Compose file enables the internal mTLS listener and binds its host
+port to loopback (`6381` for memory or `6382` for composed). For the composed
+profile, provision another fresh directory, set its `/primary` directory as
+`SIDER_SECURITY_DIR_HOST`, and use `--profile composed`. The security directory
+must include all eight protected material files and its manifest. A client-only
+generation from the previous section cannot start this listener.
+
+Keep backups in a separate volume. For example, after starting the memory
+profile, export a record-2 cut using the generated backup identity:
+
+```bash
+docker volume create sider-memory-backups
+docker run --rm --network none --user 0:0 \
+  --mount type=volume,source=sider-memory-backups,target=/backups \
+  --entrypoint /usr/bin/chown "$SIDER_IMAGE" 10001:10001 /backups
+source_sha=$(docker image inspect --format \
+  '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$SIDER_IMAGE")
+docker run --rm --network host --user 10001:10001 --read-only \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --mount type=bind,source=/srv/sider/memory-security/backup,target=/run/sider/security,readonly \
+  --mount type=volume,source=sider-memory-backups,target=/backups \
+  --env SIDER_SECURITY_PROFILE=protected \
+  --env SIDER_SECURITY_DIR=/run/sider/security \
+  --entrypoint /usr/local/bin/sider-backup "$SIDER_IMAGE" \
+  export --record-version 2 --source 127.0.0.1:6381 \
+  --destination /backups/memory-001 --source-sha "$source_sha"
+```
+
+For composed, select `--profile composed`, connect to `127.0.0.1:6382`, and
+use its own backup volume and identity. The [backup guide](backup.md) covers
+verification and restore. The generated `/replica` directory supplies a
+separate identity for an explicitly configured follower; the follower needs
+its own data volume. Do not copy one primary's internal certificate to another
+instance. Rotate complete generations as described in the
+[security contract](security-boundary.md).
+
 The composed profile uses its own data volume and host port 6380:
 
 ```sh
@@ -147,11 +202,12 @@ Keep the named data volume when stopping; do not pass `--volumes` unless
 intentionally discarding its data.
 
 Do not start both profiles against the same external client port or reuse their
-security identity for separate replicas. Internal TLS provisioning, real
-container gate coverage, and clean-host pull remain work in
-[issue #208](https://github.com/djairofilho/sider/issues/208). A local
-development image has passed protected Compose startup and restart smoke
-tests; it is not a release candidate.
+security identity for separate replicas. Local Docker rehearsals have exercised
+restricted internal TLS material, backup and restore, replica reconnect, and
+role revocation in both applicable durable profiles. The public image gate and
+clean-host pull remain work in
+[issue #208](https://github.com/djairofilho/sider/issues/208). The local image
+is not a release candidate.
 
 ## Release boundary
 

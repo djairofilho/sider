@@ -345,8 +345,11 @@ loopback process follower with source restart. The controlled TCP source checks
 every truncated byte prefix of an incremental mixed-owner frame and a corrupt
 frame checksum: neither yields an ACK or changes either old owner. It also proves
 that ACK survives an immediate process kill. Tests do not cover every network
-commit boundary, power loss, protected process deployment, or a native release
-candidate. An in-process live session additionally verifies mutual TLS and
+commit boundary, power loss, or a release candidate. A local Linux Docker
+rehearsal now covers protected composed backup and restore, a protected follower
+with reconnect, backup-role revocation, and primary `SIGKILL` recovery after a
+committed mixed-owner transaction. It does not cover every network or crash
+boundary. An in-process live session additionally verifies mutual TLS and
 replica-role authorization for composed full sync and mixed-owner batches,
 followed by role revocation.
 
