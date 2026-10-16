@@ -619,7 +619,7 @@ mod tests {
             observed(&runtime, &calls, index, if index < 5 { 1 } else { 2 }).await;
             let expected_warnings = match index {
                 1 | 2 => 1,
-                3 | 4 | 5 => 2,
+                3..=5 => 2,
                 _ => 3,
             };
             let expected_activations = usize::from(index >= 5);
